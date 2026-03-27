@@ -178,12 +178,41 @@ def watch(interface: str, queue_dir: Path):
             print(f"[{now}] New PXE client: MAC {mac} → NO SLOTS REMAINING (ignored)")
 
 
+def detect_interface() -> str:
+    """Find the default route interface."""
+    import platform
+
+    try:
+        if platform.system() == "Darwin":
+            result = subprocess.run(
+                ["route", "-n", "get", "default"],
+                capture_output=True, text=True,
+            )
+            for line in result.stdout.splitlines():
+                if "interface:" in line:
+                    return line.split()[-1]
+        else:
+            result = subprocess.run(
+                ["ip", "-o", "route", "show", "default"],
+                capture_output=True, text=True,
+            )
+            parts = result.stdout.split()
+            if "dev" in parts:
+                return parts[parts.index("dev") + 1]
+    except Exception:
+        pass
+
+    print("ERROR: Could not detect default network interface.", file=sys.stderr)
+    print("  Specify one with --interface", file=sys.stderr)
+    sys.exit(1)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Watch for PXE boot clients and assign machine names")
     parser.add_argument(
         "--interface", "-i",
-        required=True,
-        help="Network interface to listen on (e.g., eth0)",
+        default=None,
+        help="Network interface to listen on (default: auto-detect from default route)",
     )
     parser.add_argument(
         "--queue-dir", "-q",
@@ -198,7 +227,8 @@ def main():
         print(f"  Try: sudo {' '.join(sys.argv)}", file=sys.stderr)
         sys.exit(1)
 
-    watch(args.interface, args.queue_dir)
+    interface = args.interface or detect_interface()
+    watch(interface, args.queue_dir)
 
 
 if __name__ == "__main__":
