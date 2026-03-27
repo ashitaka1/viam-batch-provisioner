@@ -11,6 +11,16 @@ services:
     environment:
       - MENU_VERSION=2.0.82
 
+  dhcp-proxy:
+    image: drpsychick/dnsmasq:latest
+    container_name: dhcp-proxy
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./netboot/dnsmasq.conf:/etc/dnsmasq.conf:ro
+
   http-server:
     build: ./http-server
     container_name: pxe-http
