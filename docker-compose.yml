@@ -1,0 +1,25 @@
+services:
+  netboot-xyz:
+    image: ghcr.io/netbootxyz/netbootxyz:latest
+    container_name: netboot-xyz
+    restart: unless-stopped
+    ports:
+      - "69:69/udp"     # TFTP
+      - "3000:3000"     # Web UI
+    volumes:
+      - ./netboot/custom-ipxe:/config/menus/custom
+    environment:
+      - MENU_VERSION=2.0.82
+
+  http-server:
+    build: ./http-server
+    container_name: pxe-http
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./http-server/ubuntu:/srv/ubuntu:ro
+      - ./http-server/autoinstall:/srv/autoinstall:ro
+      - ./http-server/machines:/srv/machines:ro
+      - ./http-server/scripts:/srv/scripts:ro
+      - ./http-server/config:/srv/config:ro

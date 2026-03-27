@@ -1,0 +1,7 @@
+#!ipxe
+
+set base-url http://${next-server}:8080
+
+kernel ${base-url}/ubuntu/vmlinuz initrd=initrd autoinstall ds=nocloud-net;s=${base-url}/autoinstall/ ip=dhcp quiet ---
+initrd ${base-url}/ubuntu/initrd
+boot
