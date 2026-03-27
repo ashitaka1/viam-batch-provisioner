@@ -15,18 +15,29 @@ COUNT=""
 PREFIX=""
 LOCATION=""
 ORG=""
+BATCH_CONFIG=""
 
 usage() {
     cat <<EOF
-Usage: $0 --count N --prefix PREFIX --location-id ID --org-id ID
+Usage: $0 --config FILE [--count N] [--prefix PREFIX] [--location-id ID] [--org-id ID]
+       $0 --count N --prefix PREFIX --location-id ID --org-id ID
 
-  --count N          Number of machines to provision (required)
-  --prefix PREFIX    Name prefix, e.g. lab-meerkat, lab-nuc (required)
-  --location-id ID   Viam location ID (required, or set in config/viam-credentials.env)
-  --org-id ID        Viam organization ID (required, or set in config/viam-credentials.env)
+  --config FILE      Batch config file (sources all values; CLI flags override)
+  --count N          Number of machines to provision
+  --prefix PREFIX    Name prefix, e.g. lab-meerkat, lab-nuc
+  --location-id ID   Viam location ID
+  --org-id ID        Viam organization ID
+
+Config file format (shell variables):
+  COUNT=6
+  PREFIX=lab-meerkat
+  VIAM_ORG_ID=...
+  VIAM_LOCATION_ID=...
+  VIAM_API_KEY_ID=...
+  VIAM_API_KEY=...
 
 Requires:
-  - viam CLI (authenticated, or credentials in config/viam-credentials.env)
+  - viam CLI (authenticated, or credentials in config file)
   - Python 3 with viam-sdk: pip install viam-sdk
 EOF
     exit 1
@@ -34,6 +45,7 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --config)      BATCH_CONFIG="$2"; shift 2 ;;
         --count)       COUNT="$2"; shift 2 ;;
         --prefix)      PREFIX="$2"; shift 2 ;;
         --location-id) LOCATION="$2"; shift 2 ;;
@@ -43,15 +55,24 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --- Load credentials ---
+# --- Load config file (CLI flags take precedence) ---
 
-CREDS_FILE="${CONFIG_DIR}/viam-credentials.env"
-if [[ -f "$CREDS_FILE" ]]; then
-    source "$CREDS_FILE"
+CLI_COUNT="$COUNT"
+CLI_PREFIX="$PREFIX"
+CLI_LOCATION="$LOCATION"
+CLI_ORG="$ORG"
+
+if [[ -n "$BATCH_CONFIG" ]]; then
+    [[ -f "$BATCH_CONFIG" ]] || die "Config file not found: $BATCH_CONFIG"
+    source "$BATCH_CONFIG"
+elif [[ -f "${CONFIG_DIR}/viam-credentials.env" ]]; then
+    source "${CONFIG_DIR}/viam-credentials.env"
 fi
 
-LOCATION="${LOCATION:-${VIAM_LOCATION_ID:-}}"
-ORG="${ORG:-${VIAM_ORG_ID:-}}"
+COUNT="${CLI_COUNT:-${COUNT:-}}"
+PREFIX="${CLI_PREFIX:-${PREFIX:-}}"
+LOCATION="${CLI_LOCATION:-${VIAM_LOCATION_ID:-}}"
+ORG="${CLI_ORG:-${VIAM_ORG_ID:-}}"
 [[ -n "$COUNT" ]]    || die "--count is required"
 [[ -n "$PREFIX" ]]   || die "--prefix is required (e.g. --prefix lab-meerkat)"
 [[ -n "$LOCATION" ]] || die "--location-id is required (or set VIAM_LOCATION_ID in config/viam-credentials.env)"
