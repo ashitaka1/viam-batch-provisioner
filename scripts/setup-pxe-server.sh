@@ -88,10 +88,10 @@ fi
 
 # --- Stage ISO for HTTP serving ---
 
-ISO_HTTP="${UBUNTU_DIR}/$(basename ${ISO_FILE})"
+ISO_HTTP="${UBUNTU_DIR}/$(basename ${ISO_URL})"
 if [[ ! -f "${ISO_HTTP}" ]]; then
     echo "Staging ISO for HTTP serving..."
-    ln -sf "${ISO_FILE}" "${ISO_HTTP}" 2>/dev/null || cp "${ISO_FILE}" "${ISO_HTTP}"
+    cp "${ISO_FILE}" "${ISO_HTTP}"
     echo "  ISO: $(du -h "${ISO_HTTP}" | cut -f1)"
 else
     echo "ISO already staged for HTTP."
