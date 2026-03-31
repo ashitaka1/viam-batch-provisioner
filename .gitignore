@@ -18,6 +18,8 @@ http-server/ubuntu/initrd
 http-server/ubuntu/casper/
 netboot/vmlinuz
 netboot/initrd
+netboot/grubx64.efi
+netboot/grub/x86_64-efi/
 
 # Generated autoinstall config (contains stamped secrets)
 http-server/autoinstall/user-data
