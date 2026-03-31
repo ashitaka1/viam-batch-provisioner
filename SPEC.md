@@ -1,10 +1,19 @@
-# TCOS Machine Provisioning System — Architecture Spec
+# Architecture Spec (Historical)
+
+> **Note:** This was the original design brief. The implementation diverged in
+> several significant ways based on real-world testing. See `CLAUDE.md` for
+> the current architecture and `QUICKSTART.md` for the operator workflow.
+>
+> Key divergences: GRUB replaces netboot.xyz/iPXE, dnsmasq runs natively
+> (not in Docker), NIC names are auto-detected (no network.conf), the
+> `url=` kernel parameter is required for Ubuntu live server ISO fetch,
+> and the provisioning key pattern differs from the original credential model.
 
 ## Purpose
 
-Zero-touch provisioning of System76 Meerkats as Viam robotics hosts. A PXE server on the local network handles OS installation, machine naming, Viam registration, and all configuration. The operator's workflow is: unbox machines, plug them into Ethernet, power on, apply labels.
+Zero-touch provisioning of x86 Linux machines as Viam robotics hosts. A PXE server on the local network handles OS installation, machine naming, Viam registration, and all configuration. The operator's workflow is: unbox machines, plug them into Ethernet, power on, apply labels.
 
-This document is the implementation brief. It contains every decision already made and should be sufficient for an engineer (or Claude Code) to build the system without further design input.
+This document was the original implementation brief.
 
 ---
 

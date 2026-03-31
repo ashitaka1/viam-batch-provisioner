@@ -1,4 +1,4 @@
-.PHONY: watch dhcp up down build-config setup status
+.PHONY: watch dhcp up down build-config setup status provision reset
 
 watch:
 	sudo .venv/bin/python3 pxe-watcher/watcher.py
@@ -17,6 +17,20 @@ build-config:
 
 setup:
 	./scripts/setup-pxe-server.sh
+
+provision:
+	@test -n "$(CONFIG)" || (echo "Usage: make provision CONFIG=config/my-batch.env" && exit 1)
+	./scripts/provision-batch.sh --config $(CONFIG)
+
+reset:
+	@echo "Resetting queue (marking all slots as unassigned)..."
+	@.venv/bin/python3 -c "import json; \
+	  q=json.load(open('http-server/machines/queue.json')); \
+	  [s.update({'assigned': False, 'mac': None}) for s in q]; \
+	  json.dump(q, open('http-server/machines/queue.json', 'w'), indent=2)"
+	@echo "Cleaning MAC-keyed directories..."
+	sudo rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
+	@echo "Done. Queue ready for re-use."
 
 status:
 	@echo "=== Queue ==="
