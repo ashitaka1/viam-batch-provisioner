@@ -40,13 +40,17 @@ autoinstall:
     - curtin in-target -- systemctl set-default multi-user.target
 
     # Larger console font for readability on high-DPI displays
-    - curtin in-target -- bash -c 'echo "FONT=Lat15-Terminus32x16" >> /etc/default/console-setup'
+    - curtin in-target -- apt-get install -y fonts-terminus
+    - curtin in-target -- bash -c 'sed -i "s/^FONTFACE=.*/FONTFACE=\"Terminus\"/" /etc/default/console-setup && sed -i "s/^FONTSIZE=.*/FONTSIZE=\"16x32\"/" /etc/default/console-setup'
     - curtin in-target -- dpkg-reconfigure -f noninteractive console-setup
+    - curtin in-target -- update-initramfs -u
 
     # Disable unneeded services (ignore errors if not present)
     - curtin in-target -- systemctl disable gdm3 || true
     - curtin in-target -- systemctl disable bluetooth || true
     - curtin in-target -- systemctl disable cups || true
+    - curtin in-target -- systemctl disable NetworkManager-wait-online.service || true
+    - curtin in-target -- systemctl disable systemd-networkd-wait-online.service || true
 
     # Set boot order: disk first, so this machine won't PXE boot again
     - |
