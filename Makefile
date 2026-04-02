@@ -1,4 +1,4 @@
-.PHONY: watch dhcp up down build-config setup status provision reset
+.PHONY: watch dhcp up down build-config setup status provision reset clean
 
 watch:
 	sudo .venv/bin/python3 pxe-watcher/watcher.py
@@ -29,8 +29,15 @@ reset:
 	  [s.update({'assigned': False, 'mac': None}) for s in q]; \
 	  json.dump(q, open('http-server/machines/queue.json', 'w'), indent=2)"
 	@echo "Cleaning MAC-keyed directories..."
-	sudo rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
+	rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
 	@echo "Done. Queue ready for re-use."
+
+clean:
+	@echo "Removing all provisioning state from http-server/machines/..."
+	rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
+	rm -rf http-server/machines/slot-*
+	rm -f http-server/machines/queue.json
+	@echo "Clean. Run provision-batch.sh to start a new batch."
 
 status:
 	@echo "=== Queue ==="

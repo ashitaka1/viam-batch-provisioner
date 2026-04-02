@@ -92,6 +92,25 @@ command -v viam &>/dev/null || die "viam CLI not found. Install from https://doc
 echo "Authenticating with Viam..."
 viam login api-key --key-id="$VIAM_API_KEY_ID" --key="$VIAM_API_KEY"
 
+# --- Check for existing batch state ---
+
+QUEUE_FILE="${MACHINES_DIR}/queue.json"
+if [[ -f "$QUEUE_FILE" ]]; then
+    UNASSIGNED=$("$PYTHON" -c "
+import json
+q = json.load(open('$QUEUE_FILE'))
+print(sum(1 for s in q if not s.get('assigned')))
+")
+    if [[ "$UNASSIGNED" -gt 0 ]]; then
+        die "There are ${UNASSIGNED} unassigned machines in the current queue. Run 'make clean' before starting a new batch, or 'make reset' to re-use the current queue."
+    fi
+    # Previous batch fully assigned — clean up stale state
+    echo "Cleaning up previous batch..."
+    rm -rf "${MACHINES_DIR}"/slot-*
+    rm -rf "${MACHINES_DIR}"/[0-9a-f][0-9a-f]:* 2>/dev/null || true
+    rm -f "$QUEUE_FILE"
+fi
+
 # --- Find highest existing machine number ---
 
 echo "Listing existing machines with prefix '${PREFIX}'..."

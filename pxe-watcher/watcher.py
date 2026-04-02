@@ -35,6 +35,14 @@ def load_queue(queue_dir: Path) -> list[dict]:
     return [s for s in slots if not s.get("assigned")]
 
 
+def _chown_to_invoker(path: Path):
+    """Set ownership to the user who invoked sudo, not root."""
+    uid = int(os.environ.get("SUDO_UID", -1))
+    gid = int(os.environ.get("SUDO_GID", -1))
+    if uid >= 0:
+        os.chown(path, uid, gid)
+
+
 def assign_machine(queue_dir: Path, queue: list[dict], mac: str) -> dict | None:
     """Assign the next queued name to a MAC address.
 
@@ -49,15 +57,20 @@ def assign_machine(queue_dir: Path, queue: list[dict], mac: str) -> dict | None:
     machine_dir = queue_dir / mac
 
     machine_dir.mkdir(parents=True, exist_ok=True)
+    _chown_to_invoker(machine_dir)
 
     # Write hostname
-    (machine_dir / "hostname").write_text(name)
+    hostname_file = machine_dir / "hostname"
+    hostname_file.write_text(name)
+    _chown_to_invoker(hostname_file)
 
     # Copy viam.json from the slot's staged credentials
     slot_dir = queue_dir / slot["slot_id"]
     viam_json_src = slot_dir / "viam.json"
     if viam_json_src.exists():
-        (machine_dir / "viam.json").write_text(viam_json_src.read_text())
+        viam_json_dst = machine_dir / "viam.json"
+        viam_json_dst.write_text(viam_json_src.read_text())
+        _chown_to_invoker(viam_json_dst)
 
     # Write machine info
     info = {
@@ -65,7 +78,9 @@ def assign_machine(queue_dir: Path, queue: list[dict], mac: str) -> dict | None:
         "mac": mac,
         "assigned_at": datetime.now(timezone.utc).isoformat(),
     }
-    (machine_dir / "machine-info.json").write_text(json.dumps(info, indent=2))
+    info_file = machine_dir / "machine-info.json"
+    info_file.write_text(json.dumps(info, indent=2))
+    _chown_to_invoker(info_file)
 
     # Mark as assigned in queue.json
     slot["assigned"] = True
