@@ -77,6 +77,27 @@ just status
 #    Machines appear in app.viam.com and on Tailscale automatically.
 ```
 
+## Provisioning Raspberry Pis
+
+Pis use SD card flashing instead of PXE. The cloud provisioning step is the same.
+
+```bash
+# 1. Download Raspberry Pi OS Lite (64-bit) and place in the repo root
+#    https://www.raspberrypi.com/software/operating-systems/
+#    Save as pi-os.img (or leave as .img.xz — the script decompresses it)
+
+# 2. Create machines in Viam (same as Meerkat batch)
+./scripts/provision-batch.sh --config config/pi-batch.env
+
+# 3. Flash each SD card
+just flash /dev/disk4 lab-pi-1
+just flash /dev/disk4 lab-pi-2
+# ...
+
+# 4. Insert cards, power on. First boot installs packages and configures
+#    everything (~5 minutes). Machines appear in Viam + Tailscale.
+```
+
 ## After provisioning
 
 - **SSH**: `ssh viam@<hostname>` (password: `checkmate`, or use your SSH key)
