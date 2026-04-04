@@ -111,25 +111,46 @@ print(sum(1 for s in q if not s.get('assigned')))
     rm -f "$QUEUE_FILE"
 fi
 
-# --- Find highest existing machine number ---
+# --- Find available machine numbers (fills gaps first, then appends) ---
 
 echo "Listing existing machines with prefix '${PREFIX}'..."
 EXISTING=$(viam machines list --organization="$ORG" --location="$LOCATION" 2>/dev/null || true)
 
-HIGHEST=0
+EXISTING_NUMS=()
 while IFS= read -r line; do
     if [[ "$line" =~ ${PREFIX}-([0-9]+) ]]; then
-        NUM="${BASH_REMATCH[1]}"
-        NUM=$((10#$NUM))
-        if (( NUM > HIGHEST )); then
-            HIGHEST=$NUM
-        fi
+        EXISTING_NUMS+=("$((10#${BASH_REMATCH[1]}))")
     fi
 done <<< "$EXISTING"
 
-echo "  Highest existing: ${PREFIX}-${HIGHEST}"
-START=$((HIGHEST + 1))
-END=$((HIGHEST + COUNT))
+# Find available numbers: gaps first, then beyond the highest
+AVAILABLE=()
+HIGHEST=0
+for n in "${EXISTING_NUMS[@]:-}"; do
+    (( n > HIGHEST )) && HIGHEST=$n
+done
+
+# Scan 1..highest for gaps
+for (( n=1; n<=HIGHEST; n++ )); do
+    FOUND=0
+    for e in "${EXISTING_NUMS[@]:-}"; do
+        [[ "$e" -eq "$n" ]] && FOUND=1 && break
+    done
+    [[ "$FOUND" -eq 0 ]] && AVAILABLE+=("$n")
+done
+
+# Fill from gaps, then append beyond highest
+NEXT=$((HIGHEST + 1))
+while [[ ${#AVAILABLE[@]} -lt $COUNT ]]; do
+    AVAILABLE+=("$NEXT")
+    NEXT=$((NEXT + 1))
+done
+
+# Take only what we need
+AVAILABLE=("${AVAILABLE[@]:0:$COUNT}")
+
+echo "  Existing: ${#EXISTING_NUMS[@]} machines"
+echo "  Will create: ${AVAILABLE[*]}"
 
 # --- Create machines and stage credentials ---
 
@@ -137,10 +158,10 @@ mkdir -p "$MACHINES_DIR"
 QUEUE="[]"
 
 echo ""
-echo "Creating $COUNT machines: ${PREFIX}-${START} through ${PREFIX}-${END}"
+echo "Creating $COUNT machines..."
 echo ""
 
-for i in $(seq "$START" "$END"); do
+for i in "${AVAILABLE[@]}"; do
     NAME="${PREFIX}-${i}"
     SLOT_ID="slot-${i}"
     SLOT_DIR="${MACHINES_DIR}/${SLOT_ID}"
