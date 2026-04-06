@@ -58,8 +58,9 @@ write_files:
       curl -fsSL -o /opt/viam/bin/viam-agent \
           https://storage.googleapis.com/packages.viam.com/apps/viam-agent/viam-agent-stable-aarch64
       chmod 755 /opt/viam/bin/viam-agent
-      systemctl enable viam-agent.service
-      systemctl start viam-agent.service
+      printf '[Unit]\nDescription=Viam Agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=/opt/viam/bin/viam-agent --config /etc/viam.json\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/viam-agent.service
+      systemctl daemon-reload
+      systemctl enable --now viam-agent.service
       echo "Viam Agent installed and started" >> $LOG
 
       # Tailscale
@@ -71,26 +72,13 @@ write_files:
       fi
 
       echo "$(date) Phase 2: provisioning complete" >> $LOG
+
+      # Clean up — remove provisioning service and script
       systemctl disable provisioning-phase2.service
+      rm -f /etc/systemd/system/provisioning-phase2.service
+      rm -f /usr/local/bin/provisioning-phase2.sh
+      systemctl daemon-reload
     permissions: '0755'
-    owner: root:root
-
-  - path: /etc/systemd/system/viam-agent.service
-    content: |
-      [Unit]
-      Description=Viam Agent
-      After=network-online.target
-      Wants=network-online.target
-
-      [Service]
-      Type=exec
-      ExecStart=/opt/viam/bin/viam-agent --config /etc/viam.json
-      Restart=on-failure
-      RestartSec=5
-
-      [Install]
-      WantedBy=multi-user.target
-    permissions: '0644'
     owner: root:root
 
   - path: /etc/systemd/system/provisioning-phase2.service
