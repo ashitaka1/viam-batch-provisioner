@@ -4,7 +4,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MACHINES_DIR="${REPO_ROOT}/http-server/machines"
 CONFIG_DIR="${REPO_ROOT}/config"
-TEMPLATE="${REPO_ROOT}/templates/pi-firstboot.sh.tpl"
+USERDATA_TPL="${REPO_ROOT}/templates/pi-user-data.tpl"
+NETWORK_TPL="${REPO_ROOT}/templates/pi-network-config.tpl"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -138,47 +139,40 @@ SSH_KEY=$(cat "${CONFIG_DIR}/ssh_host_key.pub")
 PASSWORD_HASH=$(echo 'checkmate' | mkpasswd -m sha-512 --stdin 2>/dev/null) \
     || PASSWORD_HASH=$(openssl passwd -6 'checkmate')
 
-# --- Generate and write firstrun.sh ---
+# --- Generate cloud-init user-data ---
 
-echo "Writing first-boot config..."
+echo "Writing cloud-init config..."
+VIAM_JSON=$(cat "${SLOT_DIR}/viam.json")
+TAILSCALE_KEY=""
+if [[ -f "${CONFIG_DIR}/tailscale.key" ]]; then
+    TAILSCALE_KEY=$(grep -v '^#' "${CONFIG_DIR}/tailscale.key" | tr -d '[:space:]')
+fi
+
 python3 -c "
 import sys
 template = open(sys.argv[1]).read()
 template = template.replace('PLACEHOLDER_HOSTNAME', sys.argv[2])
 template = template.replace('PLACEHOLDER_PASSWORD_HASH', sys.argv[3])
 template = template.replace('PLACEHOLDER_SSH_KEY', sys.argv[4])
-open(sys.argv[5], 'w').write(template)
-" "$TEMPLATE" "$MACHINE_NAME" "$PASSWORD_HASH" "$SSH_KEY" "${BOOT_MOUNT}/firstrun.sh"
-chmod 755 "${BOOT_MOUNT}/firstrun.sh"
+template = template.replace('PLACEHOLDER_VIAM_JSON', sys.argv[5])
+open(sys.argv[6], 'w').write(template)
+" "$USERDATA_TPL" "$MACHINE_NAME" "$PASSWORD_HASH" "$SSH_KEY" "$VIAM_JSON" "${BOOT_MOUNT}/user-data"
 
-# --- Write viam.json to boot partition ---
+# --- Write Tailscale key for Phase 2 to pick up ---
 
-cp "${SLOT_DIR}/viam.json" "${BOOT_MOUNT}/viam.json"
-
-# --- Write Tailscale key to boot partition ---
-
-if [[ -f "${CONFIG_DIR}/tailscale.key" ]]; then
-    grep -v '^#' "${CONFIG_DIR}/tailscale.key" | tr -d '[:space:]' > "${BOOT_MOUNT}/tailscale.key"
+if [[ -n "$TAILSCALE_KEY" ]]; then
+    echo "$TAILSCALE_KEY" > "${BOOT_MOUNT}/tailscale-authkey"
 fi
 
-# --- Enable SSH ---
+# --- Write network config ---
 
-touch "${BOOT_MOUNT}/ssh"
+cp "$NETWORK_TPL" "${BOOT_MOUNT}/network-config"
 
-# --- Wire firstrun.sh into cmdline.txt ---
-# Pi OS Bookworm+ mounts boot at /boot/firmware, older at /boot
-# The firstrun.sh path in cmdline.txt must match the on-Pi mount point
+# --- Write meta-data (reset instance ID so cloud-init runs) ---
 
-CMDLINE="${BOOT_MOUNT}/cmdline.txt"
-if [[ -f "$CMDLINE" ]]; then
-    if ! grep -q 'systemd.run=' "$CMDLINE"; then
-        # Use /boot/firmware path for Bookworm+
-        sed -i.bak 's/$/ systemd.run=\/boot\/firmware\/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target/' "$CMDLINE"
-        rm -f "${CMDLINE}.bak"
-    fi
-else
-    echo "WARNING: cmdline.txt not found at ${CMDLINE}" >&2
-fi
+cat > "${BOOT_MOUNT}/meta-data" <<META
+instance_id: $(date +%s)-${MACHINE_NAME}
+META
 
 # --- Unmount ---
 
