@@ -142,11 +142,6 @@ PASSWORD_HASH=$(echo 'checkmate' | mkpasswd -m sha-512 --stdin 2>/dev/null) \
 # --- Generate cloud-init user-data ---
 
 echo "Writing cloud-init config..."
-VIAM_JSON=$(cat "${SLOT_DIR}/viam.json")
-TAILSCALE_KEY=""
-if [[ -f "${CONFIG_DIR}/tailscale.key" ]]; then
-    TAILSCALE_KEY=$(grep -v '^#' "${CONFIG_DIR}/tailscale.key" | tr -d '[:space:]')
-fi
 
 python3 -c "
 import sys
@@ -154,21 +149,24 @@ template = open(sys.argv[1]).read()
 template = template.replace('PLACEHOLDER_HOSTNAME', sys.argv[2])
 template = template.replace('PLACEHOLDER_PASSWORD_HASH', sys.argv[3])
 template = template.replace('PLACEHOLDER_SSH_KEY', sys.argv[4])
-template = template.replace('PLACEHOLDER_VIAM_JSON', sys.argv[5])
-open(sys.argv[6], 'w').write(template)
-" "$USERDATA_TPL" "$MACHINE_NAME" "$PASSWORD_HASH" "$SSH_KEY" "$VIAM_JSON" "${BOOT_MOUNT}/user-data"
+open(sys.argv[5], 'w').write(template)
+" "$USERDATA_TPL" "$MACHINE_NAME" "$PASSWORD_HASH" "$SSH_KEY" "${BOOT_MOUNT}/user-data"
+
+# --- Write viam.json to boot partition (moved to /etc by runcmd) ---
+
+cp "${SLOT_DIR}/viam.json" "${BOOT_MOUNT}/viam.json"
 
 # --- Write Tailscale key for Phase 2 to pick up ---
 
-if [[ -n "$TAILSCALE_KEY" ]]; then
-    echo "$TAILSCALE_KEY" > "${BOOT_MOUNT}/tailscale-authkey"
+if [[ -f "${CONFIG_DIR}/tailscale.key" ]]; then
+    grep -v '^#' "${CONFIG_DIR}/tailscale.key" | tr -d '[:space:]' > "${BOOT_MOUNT}/tailscale-authkey"
 fi
 
 # --- Write network config ---
 
 cp "$NETWORK_TPL" "${BOOT_MOUNT}/network-config"
 
-# --- Write meta-data (reset instance ID so cloud-init runs) ---
+# --- Write meta-data (unique instance ID so cloud-init runs fresh) ---
 
 cat > "${BOOT_MOUNT}/meta-data" <<META
 instance_id: $(date +%s)-${MACHINE_NAME}

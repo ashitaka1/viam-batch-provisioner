@@ -22,12 +22,6 @@ keyboard:
   layout: us
 
 write_files:
-  - path: /etc/viam.json
-    content: |
-      PLACEHOLDER_VIAM_JSON
-    permissions: '0644'
-    owner: root:root
-
   - path: /etc/default/console-setup
     content: |
       ACTIVE_CONSOLES="/dev/tty[1-6]"
@@ -119,9 +113,12 @@ write_files:
 
 runcmd:
   - systemctl daemon-reload
-  - systemctl enable provisioning-phase2.service
+  - systemctl enable --now ssh
   - systemctl disable NetworkManager-wait-online.service || true
   - systemctl disable systemd-networkd-wait-online.service || true
-  # Move Tailscale key from boot partition to /etc for Phase 2
+  # Move secrets from boot partition to /etc for Phase 2
+  - "[ -f /boot/firmware/viam.json ] && mv /boot/firmware/viam.json /etc/viam.json || true"
   - "[ -f /boot/firmware/tailscale-authkey ] && mv /boot/firmware/tailscale-authkey /etc/tailscale-authkey || true"
-  - echo "$(date) Cloud-init first boot complete" >> /var/log/provisioning.log
+  - echo "$(date) Cloud-init runcmd complete, starting Phase 2" >> /var/log/provisioning.log
+  # Start Phase 2 now (enable for boot + start immediately)
+  - systemctl enable --now provisioning-phase2.service
