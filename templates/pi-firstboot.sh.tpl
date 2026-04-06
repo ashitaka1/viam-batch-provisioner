@@ -1,8 +1,10 @@
 #!/bin/bash
-set -e
+# Phase 1: Offline configuration (runs early via systemd.run= kernel param)
+# No network required. Sets up user, SSH, hostname, WiFi, timezone.
+# Installs a Phase 2 service for network-dependent tasks.
 
 LOG=/var/log/provisioning.log
-echo "$(date) Provisioning first boot starting" >> $LOG
+echo "$(date) Phase 1: offline configuration starting" >> $LOG
 
 # --- Hostname ---
 HOSTNAME="PLACEHOLDER_HOSTNAME"
@@ -56,30 +58,49 @@ else
     echo "No WiFi interface found" >> $LOG
 fi
 
+# --- Viam credentials (from boot partition, no network needed) ---
+BOOT_FW="/boot/firmware"
+BOOT="/boot"
+for dir in "$BOOT_FW" "$BOOT"; do
+    [ -f "$dir/viam.json" ] && cp "$dir/viam.json" /etc/viam.json && rm "$dir/viam.json" && echo "viam.json installed" >> $LOG && break
+done
+[ -f /etc/viam.json ] || echo "WARNING: no viam.json found on boot partition" >> $LOG
+
+# --- Tailscale key (from boot partition) ---
+for dir in "$BOOT_FW" "$BOOT"; do
+    [ -f "$dir/tailscale.key" ] && cp "$dir/tailscale.key" /etc/tailscale-authkey && rm "$dir/tailscale.key" && echo "Tailscale key staged" >> $LOG && break
+done
+
+# --- Disable wait-online services ---
+systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
+systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
+
+# --- Install Phase 2 service (runs after network is up) ---
+cat > /usr/local/bin/provisioning-phase2.sh <<'PHASE2'
+#!/bin/bash
+LOG=/var/log/provisioning.log
+echo "$(date) Phase 2: network configuration starting" >> $LOG
+
+# Wait for DNS to work (up to 60 seconds)
+for i in $(seq 1 60); do
+    if host deb.debian.org >/dev/null 2>&1 || ping -c1 -W1 deb.debian.org >/dev/null 2>&1; then
+        echo "Network available after ${i}s" >> $LOG
+        break
+    fi
+    sleep 1
+done
+
 # --- Console font ---
-apt-get install -y fonts-terminus 2>> $LOG || true
+apt-get update >> $LOG 2>&1
+apt-get install -y fonts-terminus >> $LOG 2>&1 || true
 sed -i 's/^FONTFACE=.*/FONTFACE="Terminus"/' /etc/default/console-setup 2>/dev/null
 sed -i 's/^FONTSIZE=.*/FONTSIZE="16x32"/' /etc/default/console-setup 2>/dev/null
-dpkg-reconfigure -f noninteractive console-setup 2>> $LOG || true
+dpkg-reconfigure -f noninteractive console-setup >> $LOG 2>&1 || true
 echo "Console font configured" >> $LOG
 
 # --- Packages ---
-apt-get update >> $LOG 2>&1
 apt-get install -y curl jq net-tools mosh speedtest-cli unattended-upgrades >> $LOG 2>&1
 echo "Packages installed" >> $LOG
-
-# --- Viam credentials ---
-if [ -f /boot/firmware/viam.json ]; then
-    cp /boot/firmware/viam.json /etc/viam.json
-    rm /boot/firmware/viam.json
-    echo "viam.json installed" >> $LOG
-elif [ -f /boot/viam.json ]; then
-    cp /boot/viam.json /etc/viam.json
-    rm /boot/viam.json
-    echo "viam.json installed" >> $LOG
-else
-    echo "WARNING: no viam.json found on boot partition" >> $LOG
-fi
 
 # --- Viam CLI ---
 curl --compressed -fsSL -o /usr/local/bin/viam \
@@ -109,49 +130,45 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 systemctl enable viam-agent.service
-echo "Viam Agent installed" >> $LOG
+systemctl start viam-agent.service
+echo "Viam Agent installed and started" >> $LOG
 
 # --- Tailscale ---
 curl -fsSL https://tailscale.com/install.sh | sh >> $LOG 2>&1
-
-TSKEY=""
-if [ -f /boot/firmware/tailscale.key ]; then
-    TSKEY=$(cat /boot/firmware/tailscale.key)
-    rm /boot/firmware/tailscale.key
-elif [ -f /boot/tailscale.key ]; then
-    TSKEY=$(cat /boot/tailscale.key)
-    rm /boot/tailscale.key
+if [ -f /etc/tailscale-authkey ]; then
+    tailscale up --authkey=$(cat /etc/tailscale-authkey) --hostname=$(hostname) >> $LOG 2>&1
+    rm /etc/tailscale-authkey
+    echo "Tailscale joined" >> $LOG
+else
+    echo "No Tailscale key found, skipping join" >> $LOG
 fi
 
-if [ -n "$TSKEY" ]; then
-    cat > /etc/systemd/system/tailscale-join.service <<TSUNIT
+echo "$(date) Phase 2: provisioning complete" >> $LOG
+
+# Disable this service so it doesn't run again
+systemctl disable provisioning-phase2.service
+PHASE2
+chmod 755 /usr/local/bin/provisioning-phase2.sh
+
+cat > /etc/systemd/system/provisioning-phase2.service <<'P2UNIT'
 [Unit]
-Description=Tailscale first-boot join
-After=network-online.target tailscaled.service
+Description=Provisioning Phase 2 (network-dependent setup)
+After=network-online.target
 Wants=network-online.target
-ConditionPathExists=/etc/tailscale-authkey
+ConditionPathExists=/usr/local/bin/provisioning-phase2.sh
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c 'tailscale up --authkey=\$(cat /etc/tailscale-authkey) --hostname=\$(hostname) && rm /etc/tailscale-authkey'
+ExecStart=/usr/local/bin/provisioning-phase2.sh
 RemainAfterExit=true
+TimeoutStartSec=600
 
 [Install]
 WantedBy=multi-user.target
-TSUNIT
-    echo "$TSKEY" > /etc/tailscale-authkey
-    systemctl enable tailscale-join.service
-    echo "Tailscale configured" >> $LOG
-else
-    echo "WARNING: no tailscale key found" >> $LOG
-fi
+P2UNIT
+systemctl enable provisioning-phase2.service
 
-# --- Disable wait-online services ---
-systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
-systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
+echo "$(date) Phase 1: complete, Phase 2 will run after reboot with network" >> $LOG
 
-# --- Clean up ---
-echo "$(date) Provisioning first boot complete" >> $LOG
-
-# Remove this script so it doesn't run again
+# Remove this script
 rm -f /boot/firmware/firstrun.sh /boot/firstrun.sh
