@@ -49,18 +49,21 @@ SLOT_DIR="${MACHINES_DIR}/${SLOT_ID}"
 
 # --- Locate the base image ---
 
-PI_IMAGE="${REPO_ROOT}/pi-os.img"
-if [[ ! -f "$PI_IMAGE" ]]; then
-    # Check for compressed images
-    for f in "${REPO_ROOT}"/pi-os.img.xz "${REPO_ROOT}"/*raspios*.img.xz "${REPO_ROOT}"/*raspios*.img; do
+PI_IMAGE=""
+# Look for an uncompressed image first
+for f in "${REPO_ROOT}"/pi-os.img "${REPO_ROOT}"/*raspios*.img; do
+    if [[ -f "$f" ]]; then
+        PI_IMAGE="$f"
+        break
+    fi
+done
+# Fall back to compressed images
+if [[ -z "$PI_IMAGE" ]]; then
+    for f in "${REPO_ROOT}"/pi-os.img.xz "${REPO_ROOT}"/*raspios*.img.xz; do
         if [[ -f "$f" ]]; then
-            if [[ "$f" == *.xz ]]; then
-                echo "Decompressing $(basename $f)..."
-                xz -dk "$f"
-                PI_IMAGE="${f%.xz}"
-            else
-                PI_IMAGE="$f"
-            fi
+            echo "Decompressing $(basename $f)..."
+            xz -dk "$f"
+            PI_IMAGE="${f%.xz}"
             break
         fi
     done
@@ -138,11 +141,14 @@ PASSWORD_HASH=$(echo 'checkmate' | mkpasswd -m sha-512 --stdin 2>/dev/null) \
 # --- Generate and write firstrun.sh ---
 
 echo "Writing first-boot config..."
-sed \
-    -e "s|PLACEHOLDER_HOSTNAME|${MACHINE_NAME}|g" \
-    -e "s|PLACEHOLDER_PASSWORD_HASH|${PASSWORD_HASH}|g" \
-    -e "s|PLACEHOLDER_SSH_KEY|${SSH_KEY}|g" \
-    "$TEMPLATE" > "${BOOT_MOUNT}/firstrun.sh"
+python3 -c "
+import sys
+template = open(sys.argv[1]).read()
+template = template.replace('PLACEHOLDER_HOSTNAME', sys.argv[2])
+template = template.replace('PLACEHOLDER_PASSWORD_HASH', sys.argv[3])
+template = template.replace('PLACEHOLDER_SSH_KEY', sys.argv[4])
+open(sys.argv[5], 'w').write(template)
+" "$TEMPLATE" "$MACHINE_NAME" "$PASSWORD_HASH" "$SSH_KEY" "${BOOT_MOUNT}/firstrun.sh"
 chmod 755 "${BOOT_MOUNT}/firstrun.sh"
 
 # --- Write viam.json to boot partition ---
