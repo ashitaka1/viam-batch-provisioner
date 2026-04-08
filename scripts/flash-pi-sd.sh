@@ -3,9 +3,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MACHINES_DIR="${REPO_ROOT}/http-server/machines"
-CONFIG_DIR="${REPO_ROOT}/config"
+SITE_CONFIG="${REPO_ROOT}/config/site.env"
 USERDATA_TPL="${REPO_ROOT}/templates/pi-user-data.tpl"
-NETWORK_TPL="${REPO_ROOT}/templates/pi-network-config.tpl"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -14,9 +13,7 @@ usage() {
 Usage: $0 <device> <machine-name>
 
   device        Block device for the SD card (e.g., /dev/disk4 on macOS, /dev/sdb on Linux)
-  machine-name  Name of a machine already created by provision-batch.sh
-
-The machine-name must have a matching slot in http-server/machines/ with viam.json.
+  machine-name  Machine name (from provision-batch.sh queue, or any name in os-only mode)
 
 Example:
   $0 /dev/disk4 lab-pi-1
@@ -28,13 +25,25 @@ EOF
 DEVICE="$1"
 MACHINE_NAME="$2"
 
-# --- Find the machine's credentials ---
+# --- Load site config ---
 
-SLOT_DIR=""
-QUEUE_FILE="${MACHINES_DIR}/queue.json"
-[[ -f "$QUEUE_FILE" ]] || die "No queue.json found. Run provision-batch.sh first."
+[[ -f "$SITE_CONFIG" ]] || die "config/site.env not found. Run 'just setup-wizard' to create it."
+source "$SITE_CONFIG"
 
-SLOT_ID=$(python3 -c "
+SSH_PUBLIC_KEY=$(cat "${SSH_PUBLIC_KEY_FILE/#\~/$HOME}" 2>/dev/null) \
+    || die "SSH public key not found at ${SSH_PUBLIC_KEY_FILE}"
+
+PASSWORD_HASH=$(echo "$PASSWORD" | mkpasswd -m sha-512 --stdin 2>/dev/null) \
+    || PASSWORD_HASH=$(openssl passwd -6 "$PASSWORD")
+
+# --- Find the machine's credentials (full mode only) ---
+
+VIAM_JSON_FILE=""
+if [[ "$PROVISION_MODE" == "full" ]]; then
+    QUEUE_FILE="${MACHINES_DIR}/queue.json"
+    [[ -f "$QUEUE_FILE" ]] || die "No queue.json found. Run provision-batch.sh first."
+
+    SLOT_ID=$(python3 -c "
 import json, sys
 q = json.load(open('$QUEUE_FILE'))
 for s in q:
@@ -43,22 +52,20 @@ for s in q:
         sys.exit(0)
 print('')
 ")
-
-[[ -n "$SLOT_ID" ]] || die "Machine '$MACHINE_NAME' not found in queue.json"
-SLOT_DIR="${MACHINES_DIR}/${SLOT_ID}"
-[[ -f "${SLOT_DIR}/viam.json" ]] || die "No viam.json found in ${SLOT_DIR}"
+    [[ -n "$SLOT_ID" ]] || die "Machine '$MACHINE_NAME' not found in queue.json"
+    VIAM_JSON_FILE="${MACHINES_DIR}/${SLOT_ID}/viam.json"
+    [[ -f "$VIAM_JSON_FILE" ]] || die "No viam.json found in ${MACHINES_DIR}/${SLOT_ID}"
+fi
 
 # --- Locate the base image ---
 
 PI_IMAGE=""
-# Look for an uncompressed image first
 for f in "${REPO_ROOT}"/pi-os.img "${REPO_ROOT}"/*raspios*.img; do
     if [[ -f "$f" ]]; then
         PI_IMAGE="$f"
         break
     fi
 done
-# Fall back to compressed images
 if [[ -z "$PI_IMAGE" ]]; then
     for f in "${REPO_ROOT}"/pi-os.img.xz "${REPO_ROOT}"/*raspios*.img.xz; do
         if [[ -f "$f" ]]; then
@@ -69,17 +76,15 @@ if [[ -z "$PI_IMAGE" ]]; then
         fi
     done
 fi
-[[ -f "$PI_IMAGE" ]] || die "No Pi OS image found. Download Raspberry Pi OS Lite (64-bit) and place as pi-os.img or *.img.xz in the repo root."
+[[ -n "$PI_IMAGE" ]] || die "No Pi OS image found. Run 'just download-pi-image' or place a .img/.img.xz in the repo root."
 
 # --- Validate the target device ---
 
 [[ -e "$DEVICE" ]] || die "Device $DEVICE does not exist"
 
-# Safety: refuse to write to the boot disk
 if [[ "$(uname)" == "Darwin" ]]; then
     BOOT_DISK=$(diskutil info / | awk '/Part of Whole:/ {print "/dev/" $NF}')
     [[ "$DEVICE" != "$BOOT_DISK" ]] || die "Refusing to write to boot disk $DEVICE"
-    # Show disk info for confirmation
     echo "=== Target Device ==="
     diskutil list "$DEVICE"
 else
@@ -97,9 +102,7 @@ read -p "Write $(basename $PI_IMAGE) to $DEVICE? This will ERASE ALL DATA. (yes/
 
 echo "Writing image to $DEVICE..."
 if [[ "$(uname)" == "Darwin" ]]; then
-    # Unmount all partitions on the device
     diskutil unmountDisk "$DEVICE"
-    # Use raw device for speed
     RAW_DEVICE="${DEVICE/disk/rdisk}"
     sudo dd if="$PI_IMAGE" of="$RAW_DEVICE" bs=4m status=progress
     sleep 2
@@ -114,10 +117,8 @@ echo "Mounting boot partition..."
 if [[ "$(uname)" == "Darwin" ]]; then
     diskutil mountDisk "$DEVICE"
     sleep 2
-    # Find the FAT32 boot partition mount point
     BOOT_MOUNT=$(mount | grep "${DEVICE}" | grep -i 'msdos\|fat' | awk '{print $3}' | head -1)
     if [[ -z "$BOOT_MOUNT" ]]; then
-        # Try the common name
         BOOT_MOUNT="/Volumes/bootfs"
         [[ -d "$BOOT_MOUNT" ]] || BOOT_MOUNT="/Volumes/boot"
     fi
@@ -131,42 +132,78 @@ fi
 [[ -d "$BOOT_MOUNT" ]] || die "Could not find boot partition mount at $BOOT_MOUNT"
 echo "  Boot partition mounted at: $BOOT_MOUNT"
 
-# --- Load secrets ---
+# --- Build conditional blocks for template ---
 
-[[ -f "${CONFIG_DIR}/ssh_host_key.pub" ]] || die "Missing config/ssh_host_key.pub"
-SSH_KEY=$(cat "${CONFIG_DIR}/ssh_host_key.pub")
+INSTALL_VIAM="false"
+[[ "$PROVISION_MODE" == "full" || "$PROVISION_MODE" == "agent" ]] && INSTALL_VIAM="true"
 
-PASSWORD_HASH=$(echo 'checkmate' | mkpasswd -m sha-512 --stdin 2>/dev/null) \
-    || PASSWORD_HASH=$(openssl passwd -6 'checkmate')
+INSTALL_TAILSCALE="false"
+[[ -n "${TAILSCALE_AUTH_KEY:-}" ]] && INSTALL_TAILSCALE="true"
 
 # --- Generate cloud-init user-data ---
 
 echo "Writing cloud-init config..."
-
 python3 -c "
 import sys
 template = open(sys.argv[1]).read()
 template = template.replace('PLACEHOLDER_HOSTNAME', sys.argv[2])
 template = template.replace('PLACEHOLDER_PASSWORD_HASH', sys.argv[3])
 template = template.replace('PLACEHOLDER_SSH_KEY', sys.argv[4])
-open(sys.argv[5], 'w').write(template)
-" "$USERDATA_TPL" "$MACHINE_NAME" "$PASSWORD_HASH" "$SSH_KEY" "${BOOT_MOUNT}/user-data"
+template = template.replace('PLACEHOLDER_USERNAME', sys.argv[5])
+template = template.replace('PLACEHOLDER_TIMEZONE', sys.argv[6])
+template = template.replace('PLACEHOLDER_INSTALL_VIAM', sys.argv[7])
+template = template.replace('PLACEHOLDER_INSTALL_TAILSCALE', sys.argv[8])
+open(sys.argv[9], 'w').write(template)
+" "$USERDATA_TPL" "$MACHINE_NAME" "$PASSWORD_HASH" "$SSH_PUBLIC_KEY" \
+  "$USERNAME" "$TIMEZONE" "$INSTALL_VIAM" "$INSTALL_TAILSCALE" \
+  "${BOOT_MOUNT}/user-data"
 
-# --- Write viam.json to boot partition (moved to /etc by runcmd) ---
+# --- Write viam.json (full mode only) ---
 
-cp "${SLOT_DIR}/viam.json" "${BOOT_MOUNT}/viam.json"
+if [[ -n "$VIAM_JSON_FILE" ]]; then
+    cp "$VIAM_JSON_FILE" "${BOOT_MOUNT}/viam.json"
+fi
 
-# --- Write Tailscale key for Phase 2 to pick up ---
+# --- Write Tailscale key ---
 
-if [[ -f "${CONFIG_DIR}/tailscale.key" ]]; then
-    grep -v '^#' "${CONFIG_DIR}/tailscale.key" | tr -d '[:space:]' > "${BOOT_MOUNT}/tailscale-authkey"
+if [[ -n "${TAILSCALE_AUTH_KEY:-}" ]]; then
+    echo "$TAILSCALE_AUTH_KEY" > "${BOOT_MOUNT}/tailscale-authkey"
 fi
 
 # --- Write network config ---
 
-cp "$NETWORK_TPL" "${BOOT_MOUNT}/network-config"
+echo "Writing network config..."
+if [[ -n "${WIFI_SSID:-}" ]]; then
+    cat > "${BOOT_MOUNT}/network-config" <<NETEOF
+network:
+  version: 2
 
-# --- Write meta-data (unique instance ID so cloud-init runs fresh) ---
+  ethernets:
+    eth0:
+      dhcp4: true
+      optional: true
+
+  wifis:
+    wlan0:
+      dhcp4: true
+      optional: true
+      access-points:
+        "${WIFI_SSID}":
+          password: "${WIFI_PASSWORD}"
+NETEOF
+else
+    cat > "${BOOT_MOUNT}/network-config" <<NETEOF
+network:
+  version: 2
+
+  ethernets:
+    eth0:
+      dhcp4: true
+      optional: true
+NETEOF
+fi
+
+# --- Write meta-data ---
 
 cat > "${BOOT_MOUNT}/meta-data" <<META
 instance_id: $(date +%s)-${MACHINE_NAME}
@@ -184,9 +221,11 @@ fi
 
 echo ""
 echo "=== SD Card Ready ==="
-echo "  Machine: ${MACHINE_NAME}"
-echo "  Image:   $(basename $PI_IMAGE)"
-echo "  Device:  ${DEVICE}"
+echo "  Machine:  ${MACHINE_NAME}"
+echo "  Mode:     ${PROVISION_MODE}"
+echo "  Image:    $(basename $PI_IMAGE)"
+echo "  Device:   ${DEVICE}"
+[[ -n "${WIFI_SSID:-}" ]] && echo "  WiFi:     ${WIFI_SSID}"
+[[ -n "${TAILSCALE_AUTH_KEY:-}" ]] && echo "  Tailscale: yes"
 echo ""
-echo "Insert into Pi and power on. First boot will take a few minutes"
-echo "while packages install and services configure."
+echo "Insert into Pi and power on."

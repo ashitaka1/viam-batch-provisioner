@@ -2,50 +2,58 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CONFIG_DIR="${REPO_ROOT}/config"
+SITE_CONFIG="${REPO_ROOT}/config/site.env"
 TEMPLATE="${REPO_ROOT}/templates/user-data.tpl"
 OUTPUT="${REPO_ROOT}/http-server/autoinstall/user-data"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-# --- Load config ---
+# --- Load site config ---
 
-[[ -f "${CONFIG_DIR}/viam-credentials.env" ]] || die "Missing config/viam-credentials.env (copy from .example)"
-[[ -f "${CONFIG_DIR}/ssh_host_key.pub" ]]     || die "Missing config/ssh_host_key.pub"
-[[ -f "${CONFIG_DIR}/tailscale.key" ]]         || die "Missing config/tailscale.key"
+[[ -f "$SITE_CONFIG" ]] || die "config/site.env not found. Run 'just setup-wizard' to create it."
+source "$SITE_CONFIG"
 
-SSH_PUBLIC_KEY=$(cat "${CONFIG_DIR}/ssh_host_key.pub")
+SSH_PUBLIC_KEY=$(cat "${SSH_PUBLIC_KEY_FILE/#\~/$HOME}" 2>/dev/null) \
+    || die "SSH public key not found at ${SSH_PUBLIC_KEY_FILE}"
 
-# Generate password hash
-PASSWORD_HASH=$(echo 'checkmate' | mkpasswd -m sha-512 --stdin 2>/dev/null) \
-  || PASSWORD_HASH=$(openssl passwd -6 'checkmate')
+PASSWORD_HASH=$(echo "$PASSWORD" | mkpasswd -m sha-512 --stdin 2>/dev/null) \
+    || PASSWORD_HASH=$(openssl passwd -6 "$PASSWORD")
 
-# --- PXE server address (host:port) ---
+# --- PXE server address ---
 
 HTTP_PORT="${HTTP_PORT:-8080}"
 if [[ -z "${PXE_SERVER:-}" ]]; then
-    # Auto-detect: use the IP of the default route interface
     if command -v ip &>/dev/null; then
         PXE_IP=$(ip -o -4 addr show "$(ip route | awk '/default/ {print $5; exit}')" | awk '{print $4}' | cut -d/ -f1)
     else
-        # macOS
         PXE_IFACE=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
         PXE_IP=$(ifconfig "$PXE_IFACE" 2>/dev/null | awk '/inet / {print $2}')
     fi
     PXE_SERVER="${PXE_IP}:${HTTP_PORT}"
 fi
-echo "  PXE server: ${PXE_SERVER}"
 
 # --- Generate user-data ---
 
 export SSH_PUBLIC_KEY PASSWORD_HASH PXE_SERVER
-envsubst '${SSH_PUBLIC_KEY} ${PASSWORD_HASH} ${PXE_SERVER}' < "${TEMPLATE}" > "${OUTPUT}"
+export USERNAME="${USERNAME:-viam}"
+export TIMEZONE="${TIMEZONE:-America/New_York}"
+export WIFI_SSID="${WIFI_SSID:-}"
+export WIFI_PASSWORD="${WIFI_PASSWORD:-}"
+export PROVISION_MODE="${PROVISION_MODE:-os-only}"
+export TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
 
-# --- Stage Tailscale key for HTTP serving ---
+envsubst '${SSH_PUBLIC_KEY} ${PASSWORD_HASH} ${PXE_SERVER} ${USERNAME} ${TIMEZONE} ${WIFI_SSID} ${WIFI_PASSWORD} ${PROVISION_MODE} ${TAILSCALE_AUTH_KEY}' \
+    < "${TEMPLATE}" > "${OUTPUT}"
+
+# --- Stage Tailscale key for HTTP serving (if provided) ---
 
 mkdir -p "${REPO_ROOT}/http-server/config"
-grep -v '^#' "${CONFIG_DIR}/tailscale.key" | tr -d '[:space:]' > "${REPO_ROOT}/http-server/config/tailscale.key"
+if [[ -n "${TAILSCALE_AUTH_KEY:-}" ]]; then
+    echo "$TAILSCALE_AUTH_KEY" > "${REPO_ROOT}/http-server/config/tailscale.key"
+    echo "  Tailscale key staged"
+fi
 
 echo "Generated ${OUTPUT}"
+echo "  PXE server: ${PXE_SERVER}"
 echo "  SSH key: ${SSH_PUBLIC_KEY:0:40}..."
-echo "  Tailscale key staged to http-server/config/tailscale.key"
+echo "  Mode: ${PROVISION_MODE}"

@@ -4,11 +4,11 @@ autoinstall:
   locale: en_US.UTF-8
   keyboard:
     layout: us
-  timezone: America/New_York
+  timezone: ${TIMEZONE}
 
   identity:
     hostname: provisioning
-    username: viam
+    username: ${USERNAME}
     password: "${PASSWORD_HASH}"
 
   ssh:
@@ -34,7 +34,7 @@ autoinstall:
 
   late-commands:
     # Set timezone
-    - curtin in-target -- timedatectl set-timezone America/New_York
+    - curtin in-target -- timedatectl set-timezone ${TIMEZONE}
 
     # Headless mode
     - curtin in-target -- systemctl set-default multi-user.target
@@ -112,8 +112,8 @@ autoinstall:
         wifis:
           ${WIFI_IFACE}:
             access-points:
-              "Viam":
-                password: "checkmate"
+              "${WIFI_SSID}":
+                password: "${WIFI_PASSWORD}"
             dhcp4: true
       NETPLAN
         netplan apply

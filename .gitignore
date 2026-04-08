@@ -39,3 +39,4 @@ dnsmasq.log
 .DS_Store
 *.swp
 *~
+.mcp.json

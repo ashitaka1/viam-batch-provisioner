@@ -2,43 +2,33 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CONFIG_DIR="${REPO_ROOT}/config"
 MACHINES_DIR="${REPO_ROOT}/http-server/machines"
 FETCH_CREDS="${REPO_ROOT}/scripts/fetch-credentials.py"
 PYTHON="${REPO_ROOT}/.venv/bin/python3"
+SITE_CONFIG="${REPO_ROOT}/config/site.env"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 # --- Parse arguments ---
 
-COUNT=""
-PREFIX=""
-LOCATION=""
-ORG=""
 BATCH_CONFIG=""
+CLI_COUNT=""
+CLI_PREFIX=""
+CLI_LOCATION=""
+CLI_ORG=""
 
 usage() {
     cat <<EOF
-Usage: $0 --config FILE [--count N] [--prefix PREFIX] [--location-id ID] [--org-id ID]
-       $0 --count N --prefix PREFIX --location-id ID --org-id ID
+Usage: $0 [--config FILE] [--count N] [--prefix PREFIX] [--location-id ID] [--org-id ID]
 
-  --config FILE      Batch config file (sources all values; CLI flags override)
-  --count N          Number of machines to provision
-  --prefix PREFIX    Name prefix, e.g. lab-meerkat, lab-nuc
+  --config FILE      Config file (default: config/site.env; CLI flags override)
+  --count N          Number of machines
+  --prefix PREFIX    Name prefix
   --location-id ID   Viam location ID
   --org-id ID        Viam organization ID
 
-Config file format (shell variables):
-  COUNT=6
-  PREFIX=lab-meerkat
-  VIAM_ORG_ID=...
-  VIAM_LOCATION_ID=...
-  VIAM_API_KEY_ID=...
-  VIAM_API_KEY=...
-
-Requires:
-  - viam CLI (authenticated, or credentials in config file)
-  - Python 3 with viam-sdk: pip install viam-sdk
+In os-only/agent mode, generates a names-only queue for SD card flashing.
+In full mode, creates machines in Viam and retrieves cloud credentials.
 EOF
     exit 1
 }
@@ -46,73 +36,92 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --config)      BATCH_CONFIG="$2"; shift 2 ;;
-        --count)       COUNT="$2"; shift 2 ;;
-        --prefix)      PREFIX="$2"; shift 2 ;;
-        --location-id) LOCATION="$2"; shift 2 ;;
-        --org-id)      ORG="$2"; shift 2 ;;
+        --count)       CLI_COUNT="$2"; shift 2 ;;
+        --prefix)      CLI_PREFIX="$2"; shift 2 ;;
+        --location-id) CLI_LOCATION="$2"; shift 2 ;;
+        --org-id)      CLI_ORG="$2"; shift 2 ;;
         -h|--help)     usage ;;
         *)             die "Unknown argument: $1" ;;
     esac
 done
 
-# --- Load config file (CLI flags take precedence) ---
+# --- Load config ---
 
-CLI_COUNT="$COUNT"
-CLI_PREFIX="$PREFIX"
-CLI_LOCATION="$LOCATION"
-CLI_ORG="$ORG"
-
-if [[ -n "$BATCH_CONFIG" ]]; then
-    [[ -f "$BATCH_CONFIG" ]] || die "Config file not found: $BATCH_CONFIG"
-    source "$BATCH_CONFIG"
-elif [[ -f "${CONFIG_DIR}/viam-credentials.env" ]]; then
-    source "${CONFIG_DIR}/viam-credentials.env"
-fi
+CONFIG_FILE="${BATCH_CONFIG:-$SITE_CONFIG}"
+[[ -f "$CONFIG_FILE" ]] || die "Config not found: $CONFIG_FILE. Run 'just setup-wizard' to create config/site.env."
+source "$CONFIG_FILE"
 
 COUNT="${CLI_COUNT:-${COUNT:-}}"
 PREFIX="${CLI_PREFIX:-${PREFIX:-}}"
-LOCATION="${CLI_LOCATION:-${VIAM_LOCATION_ID:-}}"
-ORG="${CLI_ORG:-${VIAM_ORG_ID:-}}"
-[[ -n "$COUNT" ]]    || die "--count is required"
-[[ -n "$PREFIX" ]]   || die "--prefix is required (e.g. --prefix lab-meerkat)"
-[[ -n "$LOCATION" ]] || die "--location-id is required (or set VIAM_LOCATION_ID in config/viam-credentials.env)"
-[[ -n "$ORG" ]]      || die "--org-id is required (or set VIAM_ORG_ID in config/viam-credentials.env)"
-[[ -n "${VIAM_API_KEY_ID:-}" ]] || die "VIAM_API_KEY_ID is required in config/viam-credentials.env"
-[[ -n "${VIAM_API_KEY:-}" ]]    || die "VIAM_API_KEY is required in config/viam-credentials.env"
-export VIAM_API_KEY_ID VIAM_API_KEY
+PROVISION_MODE="${PROVISION_MODE:-os-only}"
 
-# --- Check dependencies ---
-
-command -v viam &>/dev/null || die "viam CLI not found. Install from https://docs.viam.com/dev/tools/cli/"
-[[ -x "$PYTHON" ]] || die "Python venv not found. Run: python3 -m venv .venv && .venv/bin/pip install viam-sdk"
-"$PYTHON" -c "import viam" 2>/dev/null || die "viam-sdk not installed. Run: .venv/bin/pip install viam-sdk"
-
-# --- Authenticate CLI ---
-
-echo "Authenticating with Viam..."
-viam login api-key --key-id="$VIAM_API_KEY_ID" --key="$VIAM_API_KEY"
+[[ -n "$COUNT" ]]  || die "--count or COUNT in config is required"
+[[ -n "$PREFIX" ]] || die "--prefix or PREFIX in config is required"
 
 # --- Check for existing batch state ---
 
 QUEUE_FILE="${MACHINES_DIR}/queue.json"
 if [[ -f "$QUEUE_FILE" ]]; then
-    UNASSIGNED=$("$PYTHON" -c "
+    UNASSIGNED=$(python3 -c "
 import json
 q = json.load(open('$QUEUE_FILE'))
 print(sum(1 for s in q if not s.get('assigned')))
 ")
     if [[ "$UNASSIGNED" -gt 0 ]]; then
-        die "There are ${UNASSIGNED} unassigned machines in the current queue. Run 'make clean' before starting a new batch, or 'make reset' to re-use the current queue."
+        die "There are ${UNASSIGNED} unassigned machines in the current queue. Run 'just clean' first, or 'just reset' to re-use."
     fi
-    # Previous batch fully assigned — clean up stale state
     echo "Cleaning up previous batch..."
     rm -rf "${MACHINES_DIR}"/slot-*
     rm -rf "${MACHINES_DIR}"/[0-9a-f][0-9a-f]:* 2>/dev/null || true
     rm -f "$QUEUE_FILE"
 fi
 
-# --- Find available machine numbers (fills gaps first, then appends) ---
+# --- OS-only / agent mode: just generate names ---
 
+if [[ "$PROVISION_MODE" != "full" ]]; then
+    echo "Mode: ${PROVISION_MODE} (no Viam cloud provisioning)"
+    echo ""
+
+    mkdir -p "$MACHINES_DIR"
+    QUEUE="[]"
+    for i in $(seq 1 "$COUNT"); do
+        NAME="${PREFIX}-${i}"
+        QUEUE=$(python3 -c "
+import json, sys
+q = json.load(sys.stdin)
+q.append({'name': '${NAME}', 'assigned': False})
+json.dump(q, sys.stdout)
+" <<< "$QUEUE")
+    done
+    echo "$QUEUE" | python3 -m json.tool > "${MACHINES_DIR}/queue.json"
+
+    echo "=== Queue Ready ==="
+    echo "  Machines: ${COUNT} (${PREFIX}-1 through ${PREFIX}-${COUNT})"
+    echo "  Queue file: ${MACHINES_DIR}/queue.json"
+    echo ""
+    echo "Next: just flash-batch"
+    exit 0
+fi
+
+# --- Full mode: create machines in Viam ---
+
+ORG="${CLI_ORG:-${VIAM_ORG_ID:-}}"
+LOCATION="${CLI_LOCATION:-${VIAM_LOCATION_ID:-}}"
+[[ -n "$ORG" ]]      || die "VIAM_ORG_ID required for full provisioning"
+[[ -n "$LOCATION" ]] || die "VIAM_LOCATION_ID required for full provisioning"
+[[ -n "${VIAM_API_KEY_ID:-}" ]] || die "VIAM_API_KEY_ID required for full provisioning"
+[[ -n "${VIAM_API_KEY:-}" ]]    || die "VIAM_API_KEY required for full provisioning"
+export VIAM_API_KEY_ID VIAM_API_KEY
+
+# Check dependencies
+command -v viam &>/dev/null || die "viam CLI not found. Install from https://docs.viam.com/dev/tools/cli/"
+[[ -x "$PYTHON" ]] || die "Python venv not found. Run: python3 -m venv .venv && .venv/bin/pip install viam-sdk"
+"$PYTHON" -c "import viam" 2>/dev/null || die "viam-sdk not installed. Run: .venv/bin/pip install viam-sdk"
+
+echo "Authenticating with Viam..."
+viam login api-key --key-id="$VIAM_API_KEY_ID" --key="$VIAM_API_KEY"
+
+# Find available machine numbers (fills gaps first)
 echo "Listing existing machines with prefix '${PREFIX}'..."
 EXISTING=$(viam machines list --organization="$ORG" --location="$LOCATION" 2>/dev/null || true)
 
@@ -123,14 +132,12 @@ while IFS= read -r line; do
     fi
 done <<< "$EXISTING"
 
-# Find available numbers: gaps first, then beyond the highest
 AVAILABLE=()
 HIGHEST=0
 for n in "${EXISTING_NUMS[@]:-}"; do
     (( n > HIGHEST )) && HIGHEST=$n
 done
 
-# Scan 1..highest for gaps
 for (( n=1; n<=HIGHEST; n++ )); do
     FOUND=0
     for e in "${EXISTING_NUMS[@]:-}"; do
@@ -139,21 +146,17 @@ for (( n=1; n<=HIGHEST; n++ )); do
     [[ "$FOUND" -eq 0 ]] && AVAILABLE+=("$n")
 done
 
-# Fill from gaps, then append beyond highest
 NEXT=$((HIGHEST + 1))
 while [[ ${#AVAILABLE[@]} -lt $COUNT ]]; do
     AVAILABLE+=("$NEXT")
     NEXT=$((NEXT + 1))
 done
-
-# Take only what we need
 AVAILABLE=("${AVAILABLE[@]:0:$COUNT}")
 
 echo "  Existing: ${#EXISTING_NUMS[@]} machines"
 echo "  Will create: ${AVAILABLE[*]}"
 
-# --- Create machines and stage credentials ---
-
+# Create machines and stage credentials
 mkdir -p "$MACHINES_DIR"
 QUEUE="[]"
 
@@ -168,7 +171,6 @@ for i in "${AVAILABLE[@]}"; do
 
     echo -n "  ${NAME}... "
 
-    # Create machine via CLI
     CREATE_OUTPUT=$(viam machines create --name="$NAME" --organization="$ORG" --location="$LOCATION" 2>&1)
     MACHINE_ID=$(echo "$CREATE_OUTPUT" | grep -oE '[a-f0-9-]{36}' | head -1)
 
@@ -177,7 +179,6 @@ for i in "${AVAILABLE[@]}"; do
         continue
     fi
 
-    # Get the main part ID from part list output (format: "ID: <uuid>")
     PARTS_OUTPUT=$(viam machines part list --organization="$ORG" --machine="$MACHINE_ID" 2>&1)
     PART_ID=$(echo "$PARTS_OUTPUT" | grep -oE '[a-f0-9-]{36}' | head -1 || true)
 
@@ -186,7 +187,6 @@ for i in "${AVAILABLE[@]}"; do
         continue
     fi
 
-    # Fetch cloud credentials via Python SDK using provisioning key
     mkdir -p "$SLOT_DIR"
     CRED_OUTPUT=$("$PYTHON" "$FETCH_CREDS" --part-id="$PART_ID" --output="${SLOT_DIR}/viam.json" 2>&1)
 
@@ -195,7 +195,6 @@ for i in "${AVAILABLE[@]}"; do
         continue
     fi
 
-    # Add to queue
     QUEUE=$(echo "$QUEUE" | "$PYTHON" -c "
 import json, sys
 q = json.load(sys.stdin)
@@ -206,17 +205,15 @@ json.dump(q, sys.stdout)
     echo "OK (machine: ${MACHINE_ID}, part: ${PART_ID})"
 done
 
-# --- Write queue file ---
-
 echo "$QUEUE" | "$PYTHON" -m json.tool > "${MACHINES_DIR}/queue.json"
 
 echo ""
 echo "=== Provisioning Complete ==="
 echo "  Machines created: ${COUNT}"
 echo "  Queue file: ${MACHINES_DIR}/queue.json"
-echo "  Credential slots: ${MACHINES_DIR}/slot-*/"
 echo ""
-echo "Next steps:"
-echo "  1. Start the PXE server:  docker compose up -d"
-echo "  2. Start the watcher:     sudo python3 pxe-watcher/watcher.py -i <interface>"
-echo "  3. Power on machines one at a time (F10 for network boot)"
+echo "Next steps (PXE):"
+echo "  just build-config && just up && just dhcp && just watch"
+echo ""
+echo "Next steps (Pi SD):"
+echo "  just flash-batch"

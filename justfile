@@ -1,5 +1,9 @@
 # PXE/SD provisioning commands
 
+# Interactive setup — creates config/site.env
+setup-wizard:
+    ./scripts/setup-wizard.sh
+
 # Start PXE watcher (assigns names to MACs as machines boot)
 watch:
     sudo .venv/bin/python3 pxe-watcher/watcher.py
@@ -24,13 +28,32 @@ build-config:
 setup:
     ./scripts/setup-pxe-server.sh
 
-# Create machines in Viam and stage credentials
-provision config:
+# Create machines / generate queue from config
+provision config="config/site.env":
     ./scripts/provision-batch.sh --config {{config}}
 
-# Flash a Pi SD card
+# Flash a single Pi SD card
 flash device name:
     ./scripts/flash-pi-sd.sh {{device}} {{name}}
+
+# Flash all queued machines, prompting for SD card swaps
+flash-batch:
+    ./scripts/flash-batch.sh
+
+# Download Raspberry Pi OS Lite image
+download-pi-image:
+    #!/usr/bin/env bash
+    if ls {{justfile_directory()}}/*raspios*.img {{justfile_directory()}}/pi-os.img 2>/dev/null | head -1 > /dev/null; then
+        echo "Pi OS image already present."
+    else
+        echo "Downloading Raspberry Pi OS Lite (64-bit)..."
+        URL=$(curl -fsSL "https://downloads.raspberrypi.com/raspios_lite_arm64/images/" | grep -oE 'raspios_lite_arm64-[0-9-]+/' | tail -1)
+        IMG=$(curl -fsSL "https://downloads.raspberrypi.com/raspios_lite_arm64/images/${URL}" | grep -oE '[0-9a-z-]+raspios[^"]+\.img\.xz' | head -1)
+        curl -fSL --progress-bar -o "{{justfile_directory()}}/${IMG}" "https://downloads.raspberrypi.com/raspios_lite_arm64/images/${URL}${IMG}"
+        echo "Decompressing..."
+        xz -dk "{{justfile_directory()}}/${IMG}"
+        echo "Done: ${IMG%.xz}"
+    fi
 
 # Reset queue (mark all slots unassigned, re-use same batch)
 reset:
@@ -51,17 +74,17 @@ clean:
     rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
     rm -rf http-server/machines/slot-*
     rm -f http-server/machines/queue.json
-    echo "Clean. Run provision-batch.sh to start a new batch."
+    echo "Clean. Run 'just provision' to start a new batch."
 
 # Show queue state and service status
 status:
     #!/usr/bin/env bash
     echo "=== Queue ==="
     if [ -f http-server/machines/queue.json ]; then
-      .venv/bin/python3 -c "import json; q=json.load(open('http-server/machines/queue.json')); \
+      python3 -c "import json; q=json.load(open('http-server/machines/queue.json')); \
         [print(f\"  {'✓' if s.get('assigned') else '○'} {s['name']:<25} {s.get('mac', 'waiting...')}\") for s in q]"
     else
-      echo "  No queue. Run provision-batch.sh first."
+      echo "  No queue. Run 'just provision' first."
     fi
     echo ""
     echo "=== Services ==="
