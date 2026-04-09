@@ -4,19 +4,38 @@
 setup-wizard:
     ./scripts/setup-wizard.sh
 
-# Start PXE watcher (assigns names to MACs as machines boot)
+# Start all PXE services, run watcher in foreground (Ctrl-C to stop watcher, `just stop` for all)
+serve:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Starting HTTP server..."
+    docker compose up -d
+    echo "Starting dnsmasq (DHCP proxy + TFTP)..."
+    sudo dnsmasq --conf-file=netboot/dnsmasq.conf --tftp-root={{justfile_directory()}}/netboot --log-facility={{justfile_directory()}}/dnsmasq.log
+    echo "Starting PXE watcher (Ctrl-C to stop)..."
+    echo ""
+    sudo {{justfile_directory()}}/.venv/bin/python3 {{justfile_directory()}}/pxe-watcher/watcher.py
+
+# Stop all PXE services
+stop:
+    #!/usr/bin/env bash
+    echo "Stopping services..."
+    sudo killall dnsmasq 2>/dev/null && echo "  dnsmasq stopped" || echo "  dnsmasq not running"
+    docker compose down 2>/dev/null && echo "  Docker stopped" || echo "  Docker not running"
+
+# Start PXE watcher only (assigns names to MACs as machines boot)
 watch:
     sudo .venv/bin/python3 pxe-watcher/watcher.py
 
-# Start dnsmasq proxy DHCP + TFTP server
+# Start dnsmasq proxy DHCP + TFTP server only
 dhcp:
     sudo dnsmasq --conf-file=netboot/dnsmasq.conf --tftp-root={{justfile_directory()}}/netboot --log-facility={{justfile_directory()}}/dnsmasq.log --no-daemon 2>&1 | grep -v '^dnsmasq-dhcp'
 
-# Start HTTP server (Docker)
+# Start HTTP server only (Docker)
 up:
     docker compose up -d
 
-# Stop HTTP server
+# Stop HTTP server only
 down:
     docker compose down
 
