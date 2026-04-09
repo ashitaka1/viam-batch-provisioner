@@ -4,7 +4,7 @@ services:
     container_name: pxe-http
     restart: unless-stopped
     ports:
-      - "${HTTP_PORT:-8080}:8080"
+      - "${HTTP_PORT:-8234}:8080"
     volumes:
       - ./http-server/ubuntu:/srv/ubuntu:ro
       - ./http-server/autoinstall:/srv/autoinstall:ro

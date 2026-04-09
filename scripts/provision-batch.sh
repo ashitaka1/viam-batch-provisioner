@@ -68,7 +68,19 @@ q = json.load(open('$QUEUE_FILE'))
 print(sum(1 for s in q if not s.get('assigned')))
 ")
     if [[ "$UNASSIGNED" -gt 0 ]]; then
-        die "There are ${UNASSIGNED} unassigned machines in the current queue. Run 'just clean' first, or 'just reset' to re-use."
+        echo "ERROR: Existing queue has ${UNASSIGNED} unassigned machine(s):" >&2
+        python3 -c "
+import json
+q = json.load(open('$QUEUE_FILE'))
+for s in q:
+    status = '✓ assigned' if s.get('assigned') else '○ waiting'
+    print(f\"  {status}  {s['name']}\")
+" >&2
+        echo "" >&2
+        echo "Options:" >&2
+        echo "  just clean    — wipe queue and start fresh" >&2
+        echo "  just reset    — mark all as unassigned (re-flash same batch)" >&2
+        exit 1
     fi
     echo "Cleaning up previous batch..."
     rm -rf "${MACHINES_DIR}"/slot-*
@@ -210,10 +222,6 @@ echo "$QUEUE" | "$PYTHON" -m json.tool > "${MACHINES_DIR}/queue.json"
 echo ""
 echo "=== Provisioning Complete ==="
 echo "  Machines created: ${COUNT}"
-echo "  Queue file: ${MACHINES_DIR}/queue.json"
+echo "  Queue: just status"
 echo ""
-echo "Next steps (PXE):"
-echo "  just build-config && just up && just dhcp && just watch"
-echo ""
-echo "Next steps (Pi SD):"
-echo "  just flash-batch"
+echo "Next: just flash-batch (Pi SD) or just watch (PXE)"
