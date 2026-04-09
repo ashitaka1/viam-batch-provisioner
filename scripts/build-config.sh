@@ -21,7 +21,7 @@ PASSWORD_HASH=$(echo "$PASSWORD" | mkpasswd -m sha-512 --stdin 2>/dev/null) \
 
 # --- PXE server address ---
 
-HTTP_PORT="${HTTP_PORT:-8080}"
+HTTP_PORT="${HTTP_PORT:-8234}"
 if [[ -z "${PXE_SERVER:-}" ]]; then
     if command -v ip &>/dev/null; then
         PXE_IP=$(ip -o -4 addr show "$(ip route | awk '/default/ {print $5; exit}')" | awk '{print $4}' | cut -d/ -f1)
