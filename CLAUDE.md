@@ -2,6 +2,8 @@
 
 Zero-touch provisioning for x86 Linux machines (PXE) and Raspberry Pis (SD card) as Viam robotics hosts.
 
+A Flutter desktop GUI (macOS only, under `app/`) coexists with the CLI — see `APP_SPEC.md`.
+
 ## Configuration
 
 All site-specific settings live in `config/site.env` (gitignored). Run `just setup-wizard` to create it interactively. Settings include: machine prefix/count, username/password, WiFi, SSH key, Viam Cloud credentials (optional), Tailscale (optional).
