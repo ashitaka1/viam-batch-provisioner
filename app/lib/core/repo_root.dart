@@ -8,12 +8,6 @@ final repoRootProvider = Provider<String>((ref) {
 });
 
 String _findRepoRoot() {
-  // Check environment variable first (useful for development)
-  final envRoot = Platform.environment['RICHMOND_ROOT'];
-  if (envRoot != null && File(p.join(envRoot, 'justfile')).existsSync()) {
-    return envRoot;
-  }
-
   // Walk up from the executable looking for justfile as a sentinel
   var dir = Directory(p.dirname(Platform.resolvedExecutable));
   for (var i = 0; i < 10; i++) {
@@ -32,7 +26,6 @@ String _findRepoRoot() {
   }
 
   throw StateError(
-    'Cannot find repo root (justfile). '
-    'Set RICHMOND_ROOT environment variable or run from the repo directory.',
+    'Cannot find repo root. The app must be run from within the repository.',
   );
 }

@@ -58,8 +58,13 @@ class Toolbar extends ConsumerWidget {
               );
             },
             loading: () => const CupertinoActivityIndicator(radius: 8),
-            error: (_, __) =>
-                const Text('Error', style: TextStyle(fontSize: 14)),
+            error: (_, __) => const Text(
+              'No environment',
+              style: TextStyle(
+                fontSize: 14,
+                color: CupertinoColors.secondaryLabel,
+              ),
+            ),
           ),
 
           const Spacer(),
