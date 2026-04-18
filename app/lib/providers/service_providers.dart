@@ -28,6 +28,12 @@ class ServicesController extends StateNotifier<ServicesStatus> {
   final _log = StreamController<ServiceLogLine>.broadcast();
   Stream<ServiceLogLine> get log => _log.stream;
 
+  /// Appends an arbitrary line to the shared service log. Used by prep
+  /// tasks (setup-pxe-server, build-config) that share this log view.
+  void emitLog(String tag, String line, {bool isError = false}) {
+    _log.add(ServiceLogLine(tag, line, isError: isError));
+  }
+
   Future<void> startAll() async {
     if (state.anyBusy) return;
 

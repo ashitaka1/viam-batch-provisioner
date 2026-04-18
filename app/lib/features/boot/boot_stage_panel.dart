@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/service_status.dart';
+import '../../providers/prep_providers.dart';
 import '../../providers/service_providers.dart';
 
 class BootStagePanel extends ConsumerWidget {
@@ -18,6 +19,8 @@ class BootStagePanel extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _Header(services: services),
+          const SizedBox(height: 16),
+          const _PrepRow(),
           const SizedBox(height: 16),
           _ServiceRow(
             label: 'HTTP server',
@@ -121,6 +124,106 @@ class _Header extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _PrepRow extends ConsumerWidget {
+  const _PrepRow();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final prep = ref.watch(prepControllerProvider);
+    final controller = ref.read(prepControllerProvider.notifier);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: CupertinoColors.systemGrey6.resolveFrom(context),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            CupertinoIcons.wrench,
+            size: 16,
+            color: CupertinoColors.secondaryLabel,
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('PXE prep',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    )),
+                Text(
+                  'One-time: extract GRUB + kernel, then stamp autoinstall config.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: CupertinoColors.secondaryLabel,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _PrepButton(
+            label: 'Setup PXE',
+            task: PrepTask.setupPxe,
+            prep: prep,
+            onRun: controller.run,
+          ),
+          const SizedBox(width: 8),
+          _PrepButton(
+            label: 'Build config',
+            task: PrepTask.buildConfig,
+            prep: prep,
+            onRun: controller.run,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrepButton extends StatelessWidget {
+  const _PrepButton({
+    required this.label,
+    required this.task,
+    required this.prep,
+    required this.onRun,
+  });
+  final String label;
+  final PrepTask task;
+  final PrepStatus prep;
+  final void Function(PrepTask) onRun;
+
+  @override
+  Widget build(BuildContext context) {
+    final running = prep.isRunning(task);
+    return CupertinoButton(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: CupertinoColors.systemGrey5.resolveFrom(context),
+      borderRadius: BorderRadius.circular(6),
+      onPressed: prep.isBusy ? null : () => onRun(task),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (running) ...[
+            const CupertinoActivityIndicator(radius: 7),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: CupertinoColors.label,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
