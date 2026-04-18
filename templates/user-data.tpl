@@ -52,13 +52,31 @@ autoinstall:
     - curtin in-target -- systemctl disable NetworkManager-wait-online.service || true
     - curtin in-target -- systemctl disable systemd-networkd-wait-online.service || true
 
-    # Set boot order: disk first, so this machine won't PXE boot again
+    # Set boot order: disk first, so this machine won't PXE boot again.
+    # Identifies network entries by device path (MAC/IPv4/IPv6) rather than
+    # display name, and moves them to the end of the boot order.
     - |
-      DISK_ENTRY=$(efibootmgr | grep -iE 'ubuntu|hard drive|ssd|nvme' | head -1 | grep -oP '^\w+\K\d{4}')
-      if [ -n "$DISK_ENTRY" ]; then
-        BOOT_ORDER=$(efibootmgr | grep BootOrder | sed 's/BootOrder: //')
-        NEW_ORDER="${DISK_ENTRY},$(echo "$BOOT_ORDER" | sed "s/${DISK_ENTRY},\?//;s/,$//")"
+      LOG=/target/var/log/provisioning.log
+      BOOT_ORDER=$(efibootmgr | grep '^BootOrder:' | awk '{print $2}')
+      DISK_ENTRIES=""
+      NET_ENTRIES=""
+      IFS=',' read -ra ENTRIES <<< "$BOOT_ORDER"
+      for entry in "${ENTRIES[@]}"; do
+        if efibootmgr -v | grep -qP "^Boot${entry}\*.*(/MAC\(|/IPv4\(|/IPv6\()"; then
+          NET_ENTRIES="${NET_ENTRIES:+$NET_ENTRIES,}$entry"
+        else
+          DISK_ENTRIES="${DISK_ENTRIES:+$DISK_ENTRIES,}$entry"
+        fi
+      done
+      if [ -n "$DISK_ENTRIES" ]; then
+        NEW_ORDER="${DISK_ENTRIES}${NET_ENTRIES:+,$NET_ENTRIES}"
         efibootmgr -o "$NEW_ORDER"
+        echo "Boot order set: $NEW_ORDER" >> $LOG
+        # Also set bootnext as a belt-and-suspenders for firmware that ignores BootOrder
+        FIRST_DISK=$(echo "$DISK_ENTRIES" | cut -d, -f1)
+        efibootmgr -n "$FIRST_DISK" 2>/dev/null || true
+      else
+        echo "WARNING: no non-network boot entries found" >> $LOG
       fi
 
     # Discover ethernet NICs and write netplan config
@@ -125,24 +143,33 @@ autoinstall:
       chmod 755 /target/usr/local/bin/wifi-setup.sh
     - curtin in-target -- systemctl enable wifi-setup.service
 
-    # Fetch per-machine identity from PXE server by MAC address
+    # Fetch per-machine identity from PXE server by MAC address.
+    # Tries all ethernet MACs since the PXE boot NIC may differ from
+    # the first interface with an IP (multi-NIC machines).
     - |
       LOG=/target/var/log/provisioning.log
-      UPLINK_IFACE=$(ip -o -4 addr show | awk '$2 != "lo" {print $2; exit}')
-      MAC=$(ip link show "$UPLINK_IFACE" | awk '/ether/ {print $2}' | tr '[:upper:]' '[:lower:]')
-      echo "Identity fetch: MAC=$MAC from http://${PXE_SERVER}" >> $LOG
-      if curl -sf http://${PXE_SERVER}/machines/${MAC}/hostname -o /tmp/assigned-hostname; then
+      FOUND_MAC=""
+      for IFACE in $(ip -o link show | awk '$2 ~ /^(en|eth)/ {gsub(/:/, "", $2); print $2}'); do
+        MAC=$(ip link show "$IFACE" | awk '/ether/ {print $2}' | tr '[:upper:]' '[:lower:]')
+        echo "Trying MAC=$MAC ($IFACE)..." >> $LOG
+        if curl -sf http://${PXE_SERVER}/machines/${MAC}/hostname -o /tmp/assigned-hostname; then
+          FOUND_MAC="$MAC"
+          echo "Found identity via $IFACE MAC=$MAC" >> $LOG
+          break
+        fi
+      done
+      if [ -n "$FOUND_MAC" ]; then
         HOSTNAME=$(cat /tmp/assigned-hostname)
         echo "${HOSTNAME}" > /target/etc/hostname
         sed -i "s/127.0.1.1.*/127.0.1.1\t${HOSTNAME}/" /target/etc/hosts
         echo "Hostname set to ${HOSTNAME}" >> $LOG
+        if curl -sf http://${PXE_SERVER}/machines/${FOUND_MAC}/viam.json -o /target/etc/viam.json; then
+          echo "viam.json installed" >> $LOG
+        else
+          echo "FAILED to fetch viam.json" >> $LOG
+        fi
       else
-        echo "FAILED to fetch hostname for MAC $MAC" >> $LOG
-      fi
-      if curl -sf http://${PXE_SERVER}/machines/${MAC}/viam.json -o /target/etc/viam.json; then
-        echo "viam.json installed" >> $LOG
-      else
-        echo "FAILED to fetch viam.json for MAC $MAC" >> $LOG
+        echo "FAILED to fetch hostname — no MAC matched on server" >> $LOG
       fi
 
     # Install Viam CLI
