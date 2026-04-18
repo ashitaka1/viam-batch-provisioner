@@ -7,6 +7,8 @@ import 'app.dart';
 import 'providers/service_providers.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
   final container = ProviderContainer();
 
   // Stop any running child processes (dnsmasq, pxe-watcher, embedded HTTP)
