@@ -28,34 +28,42 @@ class FlashStagePanel extends ConsumerWidget {
           _Header(done: done, total: batch.count),
           const SizedBox(height: 20),
           Expanded(
-            child: switch (flash.phase) {
-              FlashPhase.idle => _PickMachine(
-                  unflashed: unflashed.map((e) => e.name).toList(),
-                  onPick: controller.begin,
-                ),
-              FlashPhase.awaitInsert => _AwaitInsert(
-                  name: flash.machineName!,
-                  onRescan: controller.rescan,
-                  onCancel: controller.cancel,
-                ),
-              FlashPhase.detected => _Detected(
-                  state: flash,
-                  onConfirm: controller.flash,
-                  onRescan: controller.rescan,
-                  onCancel: controller.cancel,
-                ),
-              FlashPhase.flashing => _Flashing(state: flash),
-              FlashPhase.done => _Done(
-                  name: flash.machineName!,
-                  remaining: remaining,
-                  onNext: controller.finish,
-                ),
-              FlashPhase.error => _Error(
-                  message: flash.error ?? 'Unknown error',
-                  onRetry: () => controller.begin(flash.machineName!),
-                  onCancel: controller.cancel,
-                ),
-            },
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              child: KeyedSubtree(
+                key: ValueKey(flash.phase),
+                child: switch (flash.phase) {
+                  FlashPhase.idle => _PickMachine(
+                      unflashed: unflashed.map((e) => e.name).toList(),
+                      onPick: controller.begin,
+                    ),
+                  FlashPhase.awaitInsert => _AwaitInsert(
+                      name: flash.machineName!,
+                      onRescan: controller.rescan,
+                      onCancel: controller.cancel,
+                    ),
+                  FlashPhase.detected => _Detected(
+                      state: flash,
+                      onConfirm: controller.flash,
+                      onRescan: controller.rescan,
+                      onCancel: controller.cancel,
+                    ),
+                  FlashPhase.flashing => _Flashing(state: flash),
+                  FlashPhase.done => _Done(
+                      name: flash.machineName!,
+                      remaining: remaining,
+                      onNext: controller.finish,
+                    ),
+                  FlashPhase.error => _Error(
+                      message: flash.error ?? 'Unknown error',
+                      onRetry: () => controller.begin(flash.machineName!),
+                      onCancel: controller.cancel,
+                    ),
+                },
+              ),
+            ),
           ),
         ],
       ),
@@ -475,9 +483,19 @@ class _LogViewState extends State<_LogView> {
           borderRadius: BorderRadius.circular(6),
         ),
         alignment: Alignment.center,
-        child: const Text(
-          'Waiting for progress…',
-          style: TextStyle(fontSize: 12, color: CupertinoColors.tertiaryLabel),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CupertinoActivityIndicator(radius: 9),
+            SizedBox(height: 8),
+            Text(
+              'Waiting for dd progress…',
+              style: TextStyle(
+                fontSize: 12,
+                color: CupertinoColors.tertiaryLabel,
+              ),
+            ),
+          ],
         ),
       );
     }

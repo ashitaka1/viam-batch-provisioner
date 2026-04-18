@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/service_status.dart';
@@ -188,7 +189,7 @@ class _PrepRow extends ConsumerWidget {
   }
 }
 
-class _PrepButton extends StatelessWidget {
+class _PrepButton extends ConsumerWidget {
   const _PrepButton({
     required this.label,
     required this.task,
@@ -201,8 +202,9 @@ class _PrepButton extends StatelessWidget {
   final void Function(PrepTask) onRun;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final running = prep.isRunning(task);
+    final done = ref.watch(prepDoneProvider(task)).valueOrNull ?? false;
     return CupertinoButton(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       color: CupertinoColors.systemGrey5.resolveFrom(context),
@@ -211,10 +213,21 @@ class _PrepButton extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (running) ...[
-            const CupertinoActivityIndicator(radius: 7),
-            const SizedBox(width: 6),
-          ],
+          if (running)
+            const CupertinoActivityIndicator(radius: 7)
+          else if (done)
+            const Icon(
+              CupertinoIcons.checkmark_circle_fill,
+              size: 13,
+              color: CupertinoColors.activeGreen,
+            )
+          else
+            const Icon(
+              CupertinoIcons.play_arrow_solid,
+              size: 12,
+              color: CupertinoColors.secondaryLabel,
+            ),
+          const SizedBox(width: 6),
           Text(
             label,
             style: const TextStyle(
@@ -335,60 +348,130 @@ class _ServiceLogState extends State<_ServiceLog> {
     super.dispose();
   }
 
+  Future<void> _copy(BuildContext context) async {
+    final text = widget.lines
+        .map((l) => '[${l.service}] ${l.line}')
+        .join('\n');
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bg = CupertinoColors.systemGrey6.resolveFrom(context);
     if (widget.lines.isEmpty) {
       return Container(
         decoration: BoxDecoration(
-          color: CupertinoColors.systemGrey6.resolveFrom(context),
+          color: bg,
           borderRadius: BorderRadius.circular(6),
         ),
         alignment: Alignment.center,
-        child: const Text(
-          'No service output yet.',
-          style: TextStyle(fontSize: 12, color: CupertinoColors.tertiaryLabel),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              CupertinoIcons.square_list,
+              size: 22,
+              color: CupertinoColors.tertiaryLabel,
+            ),
+            SizedBox(height: 6),
+            Text(
+              'No service output yet.',
+              style: TextStyle(
+                fontSize: 12,
+                color: CupertinoColors.tertiaryLabel,
+              ),
+            ),
+          ],
         ),
       );
     }
     return Container(
       decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6.resolveFrom(context),
+        color: bg,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: CupertinoColors.separator, width: 0.5),
       ),
-      padding: const EdgeInsets.all(12),
-      child: ListView.builder(
-        controller: _scroll,
-        itemCount: widget.lines.length,
-        itemBuilder: (context, i) {
-          final line = widget.lines[i];
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1),
-            child: Text.rich(
-              TextSpan(children: [
-                TextSpan(
-                  text: '[${line.service}] ',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 4, 4),
+            child: Row(
+              children: [
+                Text(
+                  '${widget.lines.length} line${widget.lines.length == 1 ? '' : 's'}',
                   style: const TextStyle(
-                    fontFamily: '.SF Mono',
                     fontSize: 11,
-                    color: CupertinoColors.secondaryLabel,
+                    color: CupertinoColors.tertiaryLabel,
                   ),
                 ),
-                TextSpan(
-                  text: line.line,
-                  style: TextStyle(
-                    fontFamily: '.SF Mono',
-                    fontSize: 11,
-                    height: 1.3,
-                    color: line.isError
-                        ? CupertinoColors.systemRed.resolveFrom(context)
-                        : CupertinoColors.label.resolveFrom(context),
+                const Spacer(),
+                CupertinoButton(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  onPressed: () => _copy(context),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        CupertinoIcons.doc_on_clipboard,
+                        size: 12,
+                        color: CupertinoColors.secondaryLabel,
+                      ),
+                      SizedBox(width: 4),
+                      Text(
+                        'Copy',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: CupertinoColors.secondaryLabel,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ]),
+              ],
             ),
-          );
-        },
+          ),
+          Container(height: 0.5, color: CupertinoColors.separator),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: ListView.builder(
+                controller: _scroll,
+                itemCount: widget.lines.length,
+                itemBuilder: (context, i) {
+                  final line = widget.lines[i];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 1),
+                    child: Text.rich(
+                      TextSpan(children: [
+                        TextSpan(
+                          text: '[${line.service}] ',
+                          style: const TextStyle(
+                            fontFamily: '.SF Mono',
+                            fontSize: 11,
+                            color: CupertinoColors.secondaryLabel,
+                          ),
+                        ),
+                        TextSpan(
+                          text: line.line,
+                          style: TextStyle(
+                            fontFamily: '.SF Mono',
+                            fontSize: 11,
+                            height: 1.3,
+                            color: line.isError
+                                ? CupertinoColors.systemRed.resolveFrom(context)
+                                : CupertinoColors.label.resolveFrom(context),
+                          ),
+                        ),
+                      ]),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

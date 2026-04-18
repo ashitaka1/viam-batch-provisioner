@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show Tooltip;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/service_status.dart';
@@ -72,25 +73,32 @@ class Toolbar extends ConsumerWidget {
 
           const Spacer(),
 
-          _serviceIndicator('HTTP', services.http),
+          _serviceIndicator('HTTP', services.http,
+              tooltip: 'Embedded HTTP server (port 8234)'),
           const SizedBox(width: 8),
-          _serviceIndicator('DHCP', services.dnsmasq),
+          _serviceIndicator('DHCP', services.dnsmasq,
+              tooltip: 'dnsmasq proxy DHCP + TFTP'),
           const SizedBox(width: 8),
-          _serviceIndicator('Watch', services.watcher),
+          _serviceIndicator('Watch', services.watcher,
+              tooltip: 'PXE watcher — assigns names to MACs as machines boot'),
 
           const SizedBox(width: 16),
 
           // Settings gear
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            onPressed: () {
-              ref.read(settingsOpenProvider.notifier).state = !settingsOpen;
-            },
-            child: Icon(
-              settingsOpen
-                  ? CupertinoIcons.gear_solid
-                  : CupertinoIcons.gear,
-              size: 22,
+          Tooltip(
+            message: 'Settings',
+            waitDuration: const Duration(milliseconds: 500),
+            child: CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: () {
+                ref.read(settingsOpenProvider.notifier).state = !settingsOpen;
+              },
+              child: Icon(
+                settingsOpen
+                    ? CupertinoIcons.gear_solid
+                    : CupertinoIcons.gear,
+                size: 22,
+              ),
             ),
           ),
         ],
@@ -98,7 +106,11 @@ class Toolbar extends ConsumerWidget {
     );
   }
 
-  Widget _serviceIndicator(String label, ServiceStatus status) {
+  Widget _serviceIndicator(
+    String label,
+    ServiceStatus status, {
+    required String tooltip,
+  }) {
     final color = switch (status.state) {
       ServiceState.running => CupertinoColors.activeGreen,
       ServiceState.starting ||
@@ -107,23 +119,35 @@ class Toolbar extends ConsumerWidget {
       ServiceState.error => CupertinoColors.systemRed,
       ServiceState.stopped => CupertinoColors.systemGrey3,
     };
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11,
-            color: CupertinoColors.secondaryLabel,
+    final stateLabel = switch (status.state) {
+      ServiceState.running => 'running',
+      ServiceState.starting => 'starting',
+      ServiceState.stopping => 'stopping',
+      ServiceState.error => 'error',
+      ServiceState.stopped => 'stopped',
+    };
+    return Tooltip(
+      message: '$tooltip — $stateLabel',
+      waitDuration: const Duration(milliseconds: 500),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
           ),
-        ),
-      ],
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: CupertinoColors.secondaryLabel,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

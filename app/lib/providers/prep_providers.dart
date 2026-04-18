@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -21,7 +22,30 @@ extension PrepTaskLabel on PrepTask {
         PrepTask.buildConfig =>
           p.join(repoRoot, 'cli', 'build-config.sh'),
       };
+
+  /// Files this task is responsible for creating. If all exist, the task
+  /// is considered "already done" and the operator can skip it.
+  List<String> outputs(String repoRoot) => switch (this) {
+        PrepTask.setupPxe => [
+            p.join(repoRoot, 'netboot', 'grubx64.efi'),
+            p.join(repoRoot, 'netboot', 'vmlinuz'),
+            p.join(repoRoot, 'netboot', 'initrd'),
+          ],
+        PrepTask.buildConfig => [
+            p.join(repoRoot, 'http-server', 'autoinstall', 'user-data'),
+          ],
+      };
 }
+
+/// Returns whether [task]'s output files all exist on disk.
+final prepDoneProvider =
+    FutureProvider.family<bool, PrepTask>((ref, task) async {
+  final repoRoot = ref.watch(repoRootProvider);
+  for (final path in task.outputs(repoRoot)) {
+    if (!await File(path).exists()) return false;
+  }
+  return true;
+});
 
 class PrepStatus {
   const PrepStatus({this.running, this.lastError});
@@ -66,6 +90,7 @@ class PrepController extends StateNotifier<PrepStatus> {
             lastError: 'Exit code ${event.exitCode}',
           );
         }
+        _ref.invalidate(prepDoneProvider(task));
         _sub = null;
       }
     });
