@@ -60,9 +60,9 @@ autoinstall:
       BOOT_ORDER=$(efibootmgr | grep '^BootOrder:' | awk '{print $2}')
       DISK_ENTRIES=""
       NET_ENTRIES=""
-      IFS=',' read -ra ENTRIES <<< "$BOOT_ORDER"
-      for entry in "${ENTRIES[@]}"; do
-        if efibootmgr -v | grep -qP "^Boot${entry}\*.*(/MAC\(|/IPv4\(|/IPv6\()"; then
+      VERBOSE=$(efibootmgr -v)
+      for entry in $(echo "$BOOT_ORDER" | tr ',' ' '); do
+        if echo "$VERBOSE" | grep "^Boot${entry}" | grep -qE '/MAC\(|/IPv4\(|/IPv6\('; then
           NET_ENTRIES="${NET_ENTRIES:+$NET_ENTRIES,}$entry"
         else
           DISK_ENTRIES="${DISK_ENTRIES:+$DISK_ENTRIES,}$entry"
@@ -72,7 +72,6 @@ autoinstall:
         NEW_ORDER="${DISK_ENTRIES}${NET_ENTRIES:+,$NET_ENTRIES}"
         efibootmgr -o "$NEW_ORDER"
         echo "Boot order set: $NEW_ORDER" >> $LOG
-        # Also set bootnext as a belt-and-suspenders for firmware that ignores BootOrder
         FIRST_DISK=$(echo "$DISK_ENTRIES" | cut -d, -f1)
         efibootmgr -n "$FIRST_DISK" 2>/dev/null || true
       else
