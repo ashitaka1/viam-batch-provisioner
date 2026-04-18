@@ -51,3 +51,6 @@ app/pubspec.lock
 *.swp
 *~
 .mcp.json
+
+# Claude Code local state
+.claude/

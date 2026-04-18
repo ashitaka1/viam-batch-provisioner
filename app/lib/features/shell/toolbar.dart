@@ -1,7 +1,9 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/service_status.dart';
 import '../../providers/environment_providers.dart';
+import '../../providers/service_providers.dart';
 import 'app_shell.dart';
 
 class Toolbar extends ConsumerWidget {
@@ -12,6 +14,7 @@ class Toolbar extends ConsumerWidget {
     final envList = ref.watch(environmentListProvider);
     final activeEnvName = ref.watch(activeEnvironmentNameProvider);
     final settingsOpen = ref.watch(settingsOpenProvider);
+    final services = ref.watch(servicesControllerProvider);
 
     return Container(
       height: 52,
@@ -69,12 +72,11 @@ class Toolbar extends ConsumerWidget {
 
           const Spacer(),
 
-          // Service indicators (placeholder for Phase 4)
-          _serviceIndicator('HTTP', false),
+          _serviceIndicator('HTTP', services.http),
           const SizedBox(width: 8),
-          _serviceIndicator('DHCP', false),
+          _serviceIndicator('DHCP', services.dnsmasq),
           const SizedBox(width: 8),
-          _serviceIndicator('Watch', false),
+          _serviceIndicator('Watch', services.watcher),
 
           const SizedBox(width: 16),
 
@@ -96,19 +98,22 @@ class Toolbar extends ConsumerWidget {
     );
   }
 
-  Widget _serviceIndicator(String label, bool running) {
+  Widget _serviceIndicator(String label, ServiceStatus status) {
+    final color = switch (status.state) {
+      ServiceState.running => CupertinoColors.activeGreen,
+      ServiceState.starting ||
+      ServiceState.stopping =>
+        CupertinoColors.systemYellow,
+      ServiceState.error => CupertinoColors.systemRed,
+      ServiceState.stopped => CupertinoColors.systemGrey3,
+    };
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
           width: 8,
           height: 8,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: running
-                ? CupertinoColors.activeGreen
-                : CupertinoColors.systemGrey3,
-          ),
+          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
         ),
         const SizedBox(width: 4),
         Text(

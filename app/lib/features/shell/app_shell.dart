@@ -7,6 +7,7 @@ import '../../providers/queue_providers.dart';
 import '../batch/new_batch_form.dart';
 import '../batch/provision_stage_panel.dart';
 import '../batch/stage_placeholder.dart';
+import '../boot/boot_stage_panel.dart';
 import '../settings/settings_drawer.dart';
 import 'toolbar.dart';
 import 'sidebar.dart';
@@ -59,7 +60,7 @@ class _MainPanel extends ConsumerWidget {
         return switch (selectedStage) {
           BatchStage.provision => const ProvisionStagePanel(),
           BatchStage.flash => const StagePlaceholder(stage: BatchStage.flash),
-          BatchStage.boot => const StagePlaceholder(stage: BatchStage.boot),
+          BatchStage.boot => const BootStagePanel(),
           BatchStage.verify => const StagePlaceholder(stage: BatchStage.verify),
           null => const ProvisionStagePanel(),
         };
