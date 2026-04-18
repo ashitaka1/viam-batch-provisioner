@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'features/shell/app_shell.dart';
+import 'providers/preferences_providers.dart';
 import 'theme/theme.dart';
 
 class ViamProvisionerApp extends ConsumerWidget {
@@ -9,7 +10,9 @@ class ViamProvisionerApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final brightness = MediaQuery.platformBrightnessOf(context);
+    final platformBrightness = MediaQuery.platformBrightnessOf(context);
+    final mode = ref.watch(themeModeProvider);
+    final brightness = resolveBrightness(mode, platformBrightness);
     return CupertinoApp(
       title: 'Viam Provisioner',
       theme: cupertinoTheme(brightness),

@@ -6,10 +6,10 @@ import '../../providers/environment_providers.dart';
 import '../../providers/queue_providers.dart';
 import '../batch/new_batch_form.dart';
 import '../batch/provision_stage_panel.dart';
-import '../batch/stage_placeholder.dart';
 import '../boot/boot_stage_panel.dart';
 import '../flash/flash_stage_panel.dart';
 import '../settings/settings_drawer.dart';
+import '../verify/verify_stage_panel.dart';
 import 'toolbar.dart';
 import 'sidebar.dart';
 
@@ -62,7 +62,7 @@ class _MainPanel extends ConsumerWidget {
           BatchStage.provision => const ProvisionStagePanel(),
           BatchStage.flash => const FlashStagePanel(),
           BatchStage.boot => const BootStagePanel(),
-          BatchStage.verify => const StagePlaceholder(stage: BatchStage.verify),
+          BatchStage.verify => const VerifyStagePanel(),
           null => const ProvisionStagePanel(),
         };
       },

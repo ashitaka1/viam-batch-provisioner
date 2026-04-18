@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/environment_providers.dart';
+import '../../providers/preferences_providers.dart';
 import 'environment_form.dart';
 
 class SettingsDrawer extends ConsumerWidget {
@@ -32,6 +33,119 @@ class SettingsDrawer extends ConsumerWidget {
           // Environments section
           Expanded(
             child: _EnvironmentSection(),
+          ),
+
+          Container(height: 0.5, color: CupertinoColors.separator),
+          const _AppearanceSection(),
+          Container(height: 0.5, color: CupertinoColors.separator),
+          const _NetworkSection(),
+        ],
+      ),
+    );
+  }
+}
+
+class _AppearanceSection extends ConsumerWidget {
+  const _AppearanceSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(themeModeProvider);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Appearance',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: CupertinoColors.secondaryLabel,
+            ),
+          ),
+          const SizedBox(height: 8),
+          CupertinoSlidingSegmentedControl<AppThemeMode>(
+            groupValue: mode,
+            onValueChanged: (value) {
+              if (value == null) return;
+              ref.read(themeModeProvider.notifier).state = value;
+            },
+            children: const {
+              AppThemeMode.system: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: Text('System', style: TextStyle(fontSize: 12)),
+              ),
+              AppThemeMode.light: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: Text('Light', style: TextStyle(fontSize: 12)),
+              ),
+              AppThemeMode.dark: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: Text('Dark', style: TextStyle(fontSize: 12)),
+              ),
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NetworkSection extends ConsumerWidget {
+  const _NetworkSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final interfaces = ref.watch(networkInterfacesProvider);
+    final defaultIface = ref.watch(defaultNetworkInterfaceProvider);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Network',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: CupertinoColors.secondaryLabel,
+            ),
+          ),
+          const SizedBox(height: 6),
+          interfaces.when(
+            data: (list) => Text(
+              list.isEmpty
+                  ? 'No interfaces detected'
+                  : list.join(' · '),
+              style: const TextStyle(
+                fontSize: 11,
+                fontFamily: '.SF Mono',
+                color: CupertinoColors.secondaryLabel,
+              ),
+            ),
+            loading: () => const CupertinoActivityIndicator(radius: 7),
+            error: (e, _) => Text(
+              '$e',
+              style: const TextStyle(
+                fontSize: 11,
+                color: CupertinoColors.systemRed,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          defaultIface.when(
+            data: (iface) => Text(
+              iface == null
+                  ? 'No ethernet / thunderbolt interface detected'
+                  : 'Default: $iface',
+              style: const TextStyle(
+                fontSize: 11,
+                color: CupertinoColors.tertiaryLabel,
+              ),
+            ),
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
           ),
         ],
       ),
