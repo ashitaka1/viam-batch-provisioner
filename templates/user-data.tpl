@@ -52,11 +52,12 @@ autoinstall:
     - curtin in-target -- systemctl disable NetworkManager-wait-online.service || true
     - curtin in-target -- systemctl disable systemd-networkd-wait-online.service || true
 
-    # Set boot order: disk first, so this machine won't PXE boot again.
-    # Identifies network entries by device path (MAC/IPv4/IPv6) rather than
-    # display name, and moves them to the end of the boot order.
+    # Set boot order: disk first. Done as a first-boot service because
+    # the Ubuntu EFI boot entry may not exist yet during late-commands.
     - |
-      LOG=/target/var/log/provisioning.log
+      cat > /target/usr/local/bin/fix-boot-order.sh <<'BOOTSCRIPT'
+      #!/bin/bash
+      LOG=/var/log/provisioning.log
       BOOT_ORDER=$(efibootmgr | grep '^BootOrder:' | awk '{print $2}')
       DISK_ENTRIES=""
       NET_ENTRIES=""
@@ -72,11 +73,30 @@ autoinstall:
         NEW_ORDER="${DISK_ENTRIES}${NET_ENTRIES:+,$NET_ENTRIES}"
         efibootmgr -o "$NEW_ORDER"
         echo "Boot order set: $NEW_ORDER" >> $LOG
-        FIRST_DISK=$(echo "$DISK_ENTRIES" | cut -d, -f1)
-        efibootmgr -n "$FIRST_DISK" 2>/dev/null || true
       else
         echo "WARNING: no non-network boot entries found" >> $LOG
       fi
+      # Clean up
+      systemctl disable fix-boot-order.service
+      rm -f /etc/systemd/system/fix-boot-order.service
+      rm -f /usr/local/bin/fix-boot-order.sh
+      systemctl daemon-reload
+      BOOTSCRIPT
+      chmod 755 /target/usr/local/bin/fix-boot-order.sh
+      cat > /target/etc/systemd/system/fix-boot-order.service <<'BOOTUNIT'
+      [Unit]
+      Description=Set boot order to disk-first (one-shot)
+      After=local-fs.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/fix-boot-order.sh
+      RemainAfterExit=true
+
+      [Install]
+      WantedBy=multi-user.target
+      BOOTUNIT
+    - curtin in-target -- systemctl enable fix-boot-order.service
 
     # Discover ethernet NICs and write netplan config
     # WiFi is handled by a first-boot service (firmware not available in installer)

@@ -96,6 +96,16 @@ def assign_machine(queue_dir: Path, queue: list[dict], mac: str) -> dict | None:
     with open(queue_file, "w") as f:
         json.dump(all_slots, f, indent=2)
 
+    # Write PXE guard file so GRUB skips this machine on future PXE boots.
+    # GRUB loads grub/provisioned/<MAC>.cfg — if it contains "exit",
+    # GRUB exits and UEFI falls through to disk boot.
+    grub_guard_dir = queue_dir.parent.parent / "netboot" / "grub" / "provisioned"
+    grub_guard_dir.mkdir(parents=True, exist_ok=True)
+    _chown_to_invoker(grub_guard_dir)
+    guard_file = grub_guard_dir / f"{mac}.cfg"
+    guard_file.write_text("exit\n")
+    _chown_to_invoker(guard_file)
+
     return info
 
 
