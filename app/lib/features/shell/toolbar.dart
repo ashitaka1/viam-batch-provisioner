@@ -1,5 +1,5 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Tooltip;
+import 'package:flutter/material.dart' show MenuAnchor, MenuItemButton, Tooltip;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/service_status.dart';
@@ -18,8 +18,8 @@ class Toolbar extends ConsumerWidget {
     final services = ref.watch(servicesControllerProvider);
 
     return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
         color: CupertinoTheme.of(context).barBackgroundColor,
         border: const Border(
@@ -28,44 +28,18 @@ class Toolbar extends ConsumerWidget {
       ),
       child: Row(
         children: [
-          // Environment dropdown
-          const Icon(CupertinoIcons.doc_text, size: 16),
-          const SizedBox(width: 8),
+          const Icon(CupertinoIcons.cube_box, size: 14),
+          const SizedBox(width: 6),
           envList.when(
-            data: (envs) {
-              final active = activeEnvName.valueOrNull;
-              return CupertinoButton(
-                padding: EdgeInsets.zero,
-                onPressed: envs.isEmpty
-                    ? null
-                    : () => _showEnvPicker(context, ref, envs, active),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      active ?? 'No environment',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: active != null
-                            ? CupertinoTheme.of(context)
-                                .textTheme
-                                .textStyle
-                                .color
-                            : CupertinoColors.secondaryLabel,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    const Icon(CupertinoIcons.chevron_down,
-                        size: 12, color: CupertinoColors.secondaryLabel),
-                  ],
-                ),
-              );
-            },
-            loading: () => const CupertinoActivityIndicator(radius: 8),
+            data: (envs) => _EnvPicker(
+              envs: envs,
+              active: activeEnvName.valueOrNull,
+            ),
+            loading: () => const CupertinoActivityIndicator(radius: 7),
             error: (_, __) => const Text(
               'No environment',
               style: TextStyle(
-                fontSize: 14,
+                fontSize: 13,
                 color: CupertinoColors.secondaryLabel,
               ),
             ),
@@ -82,9 +56,8 @@ class Toolbar extends ConsumerWidget {
           _serviceIndicator('Watch', services.watcher,
               tooltip: 'PXE watcher — assigns names to MACs as machines boot'),
 
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
 
-          // Settings gear
           Tooltip(
             message: 'Settings',
             waitDuration: const Duration(milliseconds: 500),
@@ -97,7 +70,7 @@ class Toolbar extends ConsumerWidget {
                 settingsOpen
                     ? CupertinoIcons.gear_solid
                     : CupertinoIcons.gear,
-                size: 22,
+                size: 16,
               ),
             ),
           ),
@@ -150,36 +123,73 @@ class Toolbar extends ConsumerWidget {
       ),
     );
   }
+}
 
-  void _showEnvPicker(
-    BuildContext context,
-    WidgetRef ref,
-    List<String> envs,
-    String? active,
-  ) {
-    showCupertinoModalPopup(
-      context: context,
-      builder: (ctx) => CupertinoActionSheet(
-        title: const Text('Switch Environment'),
-        actions: envs
-            .map(
-              (name) => CupertinoActionSheetAction(
-                isDefaultAction: name == active,
-                onPressed: () async {
-                  final repo = ref.read(environmentRepositoryProvider);
-                  await repo.setActiveEnvironment(name);
-                  if (ctx.mounted) Navigator.pop(ctx);
+class _EnvPicker extends ConsumerWidget {
+  const _EnvPicker({required this.envs, required this.active});
+
+  final List<String> envs;
+  final String? active;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final labelColor = active != null
+        ? CupertinoTheme.of(context).textTheme.textStyle.color
+        : CupertinoColors.secondaryLabel;
+
+    return MenuAnchor(
+      alignmentOffset: const Offset(0, 4),
+      menuChildren: [
+        for (final name in envs)
+          MenuItemButton(
+            leadingIcon: Icon(
+              name == active
+                  ? CupertinoIcons.checkmark
+                  : null,
+              size: 13,
+              color: CupertinoColors.activeBlue,
+            ),
+            onPressed: name == active
+                ? null
+                : () async {
+                    final repo = ref.read(environmentRepositoryProvider);
+                    await repo.setActiveEnvironment(name);
+                  },
+            child: Text(
+              name,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+      ],
+      builder: (context, controller, _) {
+        return CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: envs.isEmpty
+              ? null
+              : () {
+                  if (controller.isOpen) {
+                    controller.close();
+                  } else {
+                    controller.open();
+                  }
                 },
-                child: Text(name),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                active ?? 'No environment',
+                style: TextStyle(fontSize: 13, color: labelColor),
               ),
-            )
-            .toList(),
-        cancelButton: CupertinoActionSheetAction(
-          isDestructiveAction: true,
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('Cancel'),
-        ),
-      ),
+              const SizedBox(width: 4),
+              const Icon(
+                CupertinoIcons.chevron_up_chevron_down,
+                size: 10,
+                color: CupertinoColors.secondaryLabel,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
