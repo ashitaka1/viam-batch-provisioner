@@ -93,17 +93,19 @@ reset:
       q=json.load(open('http-server/machines/queue.json')); \
       [s.update({'assigned': False, 'mac': None}) for s in q]; \
       json.dump(q, open('http-server/machines/queue.json', 'w'), indent=2)"
-    echo "Cleaning MAC-keyed directories..."
+    echo "Cleaning MAC-keyed directories and PXE guards..."
     rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
+    rm -rf netboot/grub/provisioned/
     echo "Done. Queue ready for re-use."
 
 # Wipe all provisioning state (between batches)
 clean:
     #!/usr/bin/env bash
-    echo "Removing all provisioning state from http-server/machines/..."
+    echo "Removing all provisioning state..."
     rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
     rm -rf http-server/machines/slot-*
     rm -f http-server/machines/queue.json
+    rm -rf netboot/grub/provisioned/
     echo "Clean. Run 'just provision' to start a new batch."
 
 # Show queue state and service status
