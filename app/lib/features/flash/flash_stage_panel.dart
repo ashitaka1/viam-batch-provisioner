@@ -5,6 +5,7 @@ import '../../core/disk_utils.dart';
 import '../../models/flash_state.dart';
 import '../../providers/flash_providers.dart';
 import '../../providers/queue_providers.dart';
+import '../../theme/theme.dart';
 
 class FlashStagePanel extends ConsumerWidget {
   const FlashStagePanel({super.key});
@@ -433,7 +434,7 @@ class _Choose extends StatelessWidget {
                               d.device,
                               style: const TextStyle(
                                 fontSize: 13,
-                                fontFamily: '.SF Mono',
+                                fontFamilyFallback: monospaceFontFallback,
                                 color: CupertinoColors.label,
                               ),
                             ),
@@ -681,7 +682,7 @@ class _LogViewState extends State<_LogView> {
             child: Text(
               widget.lines[i],
               style: const TextStyle(
-                fontFamily: '.SF Mono',
+                fontFamilyFallback: monospaceFontFallback,
                 fontSize: 11,
                 height: 1.3,
               ),

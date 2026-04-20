@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/service_status.dart';
 import '../../providers/prep_providers.dart';
 import '../../providers/service_providers.dart';
+import '../../theme/theme.dart';
 
 class BootStagePanel extends ConsumerWidget {
   const BootStagePanel({super.key});
@@ -509,7 +510,7 @@ class _ServiceLogState extends State<_ServiceLog> {
                         TextSpan(
                           text: '[${line.service}] ',
                           style: const TextStyle(
-                            fontFamily: '.SF Mono',
+                            fontFamilyFallback: monospaceFontFallback,
                             fontSize: 11,
                             color: CupertinoColors.secondaryLabel,
                           ),
@@ -517,7 +518,7 @@ class _ServiceLogState extends State<_ServiceLog> {
                         TextSpan(
                           text: line.line,
                           style: TextStyle(
-                            fontFamily: '.SF Mono',
+                            fontFamilyFallback: monospaceFontFallback,
                             fontSize: 11,
                             height: 1.3,
                             color: line.isError

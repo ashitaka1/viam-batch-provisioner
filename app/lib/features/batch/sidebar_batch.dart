@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/batch.dart';
 import '../../providers/queue_providers.dart';
+import '../../theme/theme.dart';
 
 class SidebarBatch extends ConsumerWidget {
   const SidebarBatch({super.key, required this.batch});
@@ -211,7 +212,7 @@ class _MachineRow extends StatelessWidget {
               style: const TextStyle(
                 fontSize: 10,
                 color: CupertinoColors.tertiaryLabel,
-                fontFamily: '.SF Mono',
+                fontFamilyFallback: monospaceFontFallback,
               ),
             ),
         ],

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/batch.dart';
 import '../../models/queue_entry.dart';
 import '../../providers/queue_providers.dart';
+import '../../theme/theme.dart';
 
 class VerifyStagePanel extends ConsumerWidget {
   const VerifyStagePanel({super.key});
@@ -215,7 +216,7 @@ class _MachineRow extends StatelessWidget {
               identifier,
               style: const TextStyle(
                 fontSize: 12,
-                fontFamily: '.SF Mono',
+                fontFamilyFallback: monospaceFontFallback,
                 color: CupertinoColors.secondaryLabel,
               ),
               overflow: TextOverflow.ellipsis,

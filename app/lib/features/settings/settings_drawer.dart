@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/environment_providers.dart';
 import '../../providers/preferences_providers.dart';
+import '../../theme/theme.dart';
 import 'environment_form.dart';
 
 class SettingsDrawer extends ConsumerWidget {
@@ -120,7 +121,7 @@ class _NetworkSection extends ConsumerWidget {
                   : list.join(' · '),
               style: const TextStyle(
                 fontSize: 11,
-                fontFamily: '.SF Mono',
+                fontFamilyFallback: monospaceFontFallback,
                 color: CupertinoColors.secondaryLabel,
               ),
             ),
@@ -241,7 +242,6 @@ class _EnvironmentSection extends ConsumerWidget {
         ),
         actions: [
           CupertinoDialogAction(
-            isDestructiveAction: true,
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancel'),
           ),

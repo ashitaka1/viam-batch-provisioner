@@ -5,6 +5,7 @@ import '../../models/batch.dart';
 import '../../providers/environment_providers.dart';
 import '../../providers/provision_providers.dart';
 import '../../providers/queue_providers.dart';
+import '../../theme/theme.dart';
 
 class NewBatchForm extends ConsumerStatefulWidget {
   const NewBatchForm({super.key});
@@ -146,7 +147,7 @@ class _NewBatchFormState extends ConsumerState<NewBatchForm> {
                     mode,
                     style: const TextStyle(
                       fontSize: 13,
-                      fontFamily: '.SF Mono',
+                      fontFamilyFallback: monospaceFontFallback,
                     ),
                   ),
                 ],

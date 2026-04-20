@@ -5,6 +5,7 @@ import '../../core/process_runner.dart';
 import '../../models/batch.dart';
 import '../../providers/provision_providers.dart';
 import '../../providers/queue_providers.dart';
+import '../../theme/theme.dart';
 
 class ProvisionStagePanel extends ConsumerWidget {
   const ProvisionStagePanel({super.key});
@@ -188,7 +189,7 @@ class _OutputLogState extends State<_OutputLog> {
             child: Text(
               _stripAnsi(line.line),
               style: TextStyle(
-                fontFamily: '.SF Mono',
+                fontFamilyFallback: monospaceFontFallback,
                 fontSize: 11,
                 height: 1.3,
                 color: line.isError
