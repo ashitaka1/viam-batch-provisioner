@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -16,6 +17,7 @@ class FlashController extends StateNotifier<FlashState> {
   final String _repoRoot;
   final Ref _ref;
   List<DiskInfo> _baselineDisks = const [];
+  ProcessHandle? _flashHandle;
   StreamSubscription<ProcessEvent>? _flashSub;
   Timer? _pollTimer;
 
@@ -36,16 +38,7 @@ class FlashController extends StateNotifier<FlashState> {
   Future<void> rescan() async {
     final after = await listExternalDisks();
     final newOnes = diffDisks(_baselineDisks, after);
-    if (newOnes.isEmpty) {
-      state = state.copyWith(clearDisk: true, phase: FlashPhase.awaitInsert);
-      _startPoll();
-      return;
-    }
-    _pollTimer?.cancel();
-    state = state.copyWith(
-      phase: FlashPhase.detected,
-      detectedDisk: newOnes.first,
-    );
+    _applyDetection(newOnes);
   }
 
   void _startPoll() {
@@ -54,14 +47,43 @@ class FlashController extends StateNotifier<FlashState> {
       if (state.phase != FlashPhase.awaitInsert) return;
       final after = await listExternalDisks();
       final newOnes = diffDisks(_baselineDisks, after);
-      if (newOnes.isNotEmpty) {
-        _pollTimer?.cancel();
-        state = state.copyWith(
-          phase: FlashPhase.detected,
-          detectedDisk: newOnes.first,
-        );
-      }
+      if (newOnes.isNotEmpty) _applyDetection(newOnes);
     });
+  }
+
+  void _applyDetection(List<DiskInfo> newOnes) {
+    if (newOnes.isEmpty) {
+      state = state.copyWith(
+        clearDisk: true,
+        candidateDisks: const [],
+        phase: FlashPhase.awaitInsert,
+      );
+      _startPoll();
+      return;
+    }
+    _pollTimer?.cancel();
+    if (newOnes.length == 1) {
+      state = state.copyWith(
+        phase: FlashPhase.detected,
+        detectedDisk: newOnes.first,
+        candidateDisks: const [],
+      );
+    } else {
+      state = state.copyWith(
+        phase: FlashPhase.choose,
+        candidateDisks: newOnes,
+        clearDisk: true,
+      );
+    }
+  }
+
+  /// Operator picked a specific disk from the multi-detected chooser.
+  void pickCandidate(DiskInfo disk) {
+    state = state.copyWith(
+      phase: FlashPhase.detected,
+      detectedDisk: disk,
+      candidateDisks: const [],
+    );
   }
 
   Future<void> _cancelPoll() async {
@@ -92,11 +114,13 @@ class FlashController extends StateNotifier<FlashState> {
     );
 
     final script = p.join(_repoRoot, 'cli', 'flash-pi-sd.sh');
-    _flashSub = runProcess(
+    final handle = await startProcess(
       executable: script,
       arguments: ['--yes', disk.device, name],
       workingDirectory: _repoRoot,
-    ).listen((event) async {
+    );
+    _flashHandle = handle;
+    _flashSub = handle.events.listen((event) async {
       if (event is ProcessLine) {
         state = state.copyWith(
           progressLines: [...state.progressLines, event.line],
@@ -108,12 +132,14 @@ class FlashController extends StateNotifier<FlashState> {
             phase: FlashPhase.done,
             flashedNames: [...state.flashedNames, name],
           );
-        } else {
+        } else if (state.phase != FlashPhase.idle) {
+          // Non-zero exit that wasn't already folded into the cancel path.
           state = state.copyWith(
             phase: FlashPhase.error,
             error: 'flash-pi-sd.sh exited with code ${event.exitCode}',
           );
         }
+        _flashHandle = null;
         _flashSub = null;
       }
     });
@@ -124,15 +150,33 @@ class FlashController extends StateNotifier<FlashState> {
     state = FlashState(flashedNames: state.flashedNames);
   }
 
-  void cancel() {
-    _flashSub?.cancel();
+  Future<void> cancel() async {
+    // Kill the child script first. Its sudo'd `dd` child is not
+    // automatically killed by signalling the shell parent, so chase
+    // it with a scoped `sudo -n pkill` as belt-and-suspenders.
+    final handle = _flashHandle;
+    if (handle != null) {
+      handle.kill();
+      final disk = state.detectedDisk?.device;
+      if (disk != null) {
+        // Kill the dd that's writing to this specific device. The -n flag
+        // requires a prior sudo unlock (we have one from flash()).
+        unawaited(Process.run(
+          '/usr/bin/sudo',
+          ['-n', '/usr/bin/pkill', '-TERM', '-f', 'dd if=.* of=$disk'],
+        ));
+      }
+    }
+    await _flashSub?.cancel();
     _flashSub = null;
+    _flashHandle = null;
     _pollTimer?.cancel();
     state = FlashState(flashedNames: state.flashedNames);
   }
 
   @override
   void dispose() {
+    _flashHandle?.kill();
     _flashSub?.cancel();
     _pollTimer?.cancel();
     super.dispose();

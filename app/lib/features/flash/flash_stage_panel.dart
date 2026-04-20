@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/disk_utils.dart';
 import '../../models/flash_state.dart';
 import '../../providers/flash_providers.dart';
 import '../../providers/queue_providers.dart';
@@ -44,13 +45,23 @@ class FlashStagePanel extends ConsumerWidget {
                       onRescan: controller.rescan,
                       onCancel: controller.cancel,
                     ),
+                  FlashPhase.choose => _Choose(
+                      candidates: flash.candidateDisks,
+                      machineName: flash.machineName!,
+                      onPick: controller.pickCandidate,
+                      onRescan: controller.rescan,
+                      onCancel: controller.cancel,
+                    ),
                   FlashPhase.detected => _Detected(
                       state: flash,
                       onConfirm: controller.flash,
                       onRescan: controller.rescan,
                       onCancel: controller.cancel,
                     ),
-                  FlashPhase.flashing => _Flashing(state: flash),
+                  FlashPhase.flashing => _Flashing(
+                      state: flash,
+                      onCancel: () => _confirmCancelFlash(context, controller),
+                    ),
                   FlashPhase.done => _Done(
                       name: flash.machineName!,
                       remaining: remaining,
@@ -308,8 +319,9 @@ class _Detected extends StatelessWidget {
 }
 
 class _Flashing extends StatelessWidget {
-  const _Flashing({required this.state});
+  const _Flashing({required this.state, required this.onCancel});
   final FlashState state;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -329,12 +341,166 @@ class _Flashing extends StatelessWidget {
                 ),
               ),
             ),
+            CupertinoButton(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              onPressed: onCancel,
+              child: const Text(
+                'Cancel',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: CupertinoColors.systemRed,
+                ),
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 12),
         Expanded(child: _LogView(lines: state.progressLines)),
       ],
     );
+  }
+}
+
+class _Choose extends StatelessWidget {
+  const _Choose({
+    required this.candidates,
+    required this.machineName,
+    required this.onPick,
+    required this.onRescan,
+    required this.onCancel,
+  });
+
+  final List<DiskInfo> candidates;
+  final String machineName;
+  final void Function(DiskInfo) onPick;
+  final VoidCallback onRescan;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Icon(
+              CupertinoIcons.exclamationmark_triangle_fill,
+              size: 22,
+              color: CupertinoColors.systemOrange,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Multiple new disks detected — pick the SD card for "$machineName".',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Eject anything that isn\'t the target card, then click Rescan, or pick the right device below.',
+          style: TextStyle(fontSize: 12, color: CupertinoColors.secondaryLabel),
+        ),
+        const SizedBox(height: 14),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: CupertinoColors.systemGrey6.resolveFrom(context),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              itemCount: candidates.length,
+              separatorBuilder: (_, __) => Container(
+                height: 0.5,
+                color: CupertinoColors.separator,
+                margin: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              itemBuilder: (context, i) {
+                final d = candidates[i];
+                return CupertinoButton(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  onPressed: () => onPick(d),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              d.device,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontFamily: '.SF Mono',
+                                color: CupertinoColors.label,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${d.description}  ·  ${d.sizeHuman}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: CupertinoColors.secondaryLabel,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        CupertinoIcons.chevron_right,
+                        size: 14,
+                        color: CupertinoColors.tertiaryLabel,
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            CupertinoButton(onPressed: onRescan, child: const Text('Rescan')),
+            const SizedBox(width: 8),
+            CupertinoButton(onPressed: onCancel, child: const Text('Cancel')),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+Future<void> _confirmCancelFlash(
+  BuildContext context,
+  FlashController controller,
+) async {
+  final confirmed = await showCupertinoDialog<bool>(
+    context: context,
+    builder: (ctx) => CupertinoAlertDialog(
+      title: const Text('Cancel flash?'),
+      content: const Text(
+        'Stopping mid-write leaves the SD card in an inconsistent state. '
+        'You\'ll need to re-flash it before the Pi will boot.',
+      ),
+      actions: [
+        CupertinoDialogAction(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Keep flashing'),
+        ),
+        CupertinoDialogAction(
+          isDestructiveAction: true,
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Cancel flash'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) {
+    await controller.cancel();
   }
 }
 

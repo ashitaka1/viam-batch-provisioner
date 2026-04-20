@@ -18,12 +18,27 @@ class ProcessExit extends ProcessEvent {
   bool get ok => exitCode == 0;
 }
 
-Stream<ProcessEvent> runProcess({
+/// Handle to a running child process: line-oriented event stream plus the
+/// ability to signal the process. Prefer this over [runProcess] when the
+/// caller needs to cancel mid-run (e.g. `dd` during SD card flash).
+class ProcessHandle {
+  ProcessHandle._(this._process, this.events);
+
+  final Process _process;
+  final Stream<ProcessEvent> events;
+
+  int get pid => _process.pid;
+
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) =>
+      _process.kill(signal);
+}
+
+Future<ProcessHandle> startProcess({
   required String executable,
   required List<String> arguments,
   required String workingDirectory,
   Map<String, String>? environment,
-}) async* {
+}) async {
   final process = await Process.start(
     executable,
     arguments,
@@ -31,7 +46,7 @@ Stream<ProcessEvent> runProcess({
     environment: environment,
   );
 
-  final events = StreamController<ProcessEvent>();
+  final events = StreamController<ProcessEvent>.broadcast();
 
   final stdoutDone = process.stdout
       .transform(utf8.decoder)
@@ -49,5 +64,20 @@ Stream<ProcessEvent> runProcess({
     }),
   );
 
-  yield* events.stream;
+  return ProcessHandle._(process, events.stream);
+}
+
+Stream<ProcessEvent> runProcess({
+  required String executable,
+  required List<String> arguments,
+  required String workingDirectory,
+  Map<String, String>? environment,
+}) async* {
+  final handle = await startProcess(
+    executable: executable,
+    arguments: arguments,
+    workingDirectory: workingDirectory,
+    environment: environment,
+  );
+  yield* handle.events;
 }
