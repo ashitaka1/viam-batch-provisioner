@@ -16,6 +16,9 @@ serve:
         echo "Done."
     }
     trap cleanup EXIT
+    echo "Generating autoinstall config..."
+    ./scripts/build-config.sh
+    echo ""
     echo "Starting HTTP server..."
     docker compose up -d
     echo "Starting dnsmasq (DHCP proxy + TFTP)..."
