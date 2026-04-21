@@ -7,7 +7,7 @@ SITE_CONFIG="${REPO_ROOT}/config/site.env"
 
 mkdir -p "$ENV_DIR"
 
-echo "=== Viam Lab Provisioner Setup ==="
+echo "=== Viam Batch Provisioner Setup ==="
 echo ""
 
 # --- Check for existing environments ---

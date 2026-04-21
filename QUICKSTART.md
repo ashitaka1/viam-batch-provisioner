@@ -12,7 +12,7 @@
 ## Setup
 
 ```bash
-git clone <repo-url> && cd viam-lab-provisioner
+git clone <repo-url> && cd viam-batch-provisioner
 
 # Interactive setup — creates config/site.env with all your settings
 just setup-wizard

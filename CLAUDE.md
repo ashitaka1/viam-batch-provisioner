@@ -1,4 +1,4 @@
-# Viam Lab Provisioner
+# Viam Batch Provisioner
 
 Zero-touch provisioning for x86 Linux machines (PXE) and Raspberry Pis (SD card) as Viam robotics hosts.
 
