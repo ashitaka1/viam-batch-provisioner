@@ -154,6 +154,7 @@ Installed automatically:
 |---------|-------------|--------|
 | System76 Meerkat (CRARL579) | Intel, dual I226-V NICs | Fully validated |
 | Minisforum UM890 Pro | AMD Ryzen, dual Realtek 2.5GbE | Fully validated |
+| Advantech MIC-770 V3 | Intel Core i-series, dual Intel NICs (I219 + I210) | Fully validated |
 | Raspberry Pi 5 | ARM64 | Fully validated |
 | Raspberry Pi 4 | ARM64 | Untested (should work) |
 
