@@ -1,18 +1,25 @@
 import 'dart:ui';
 
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_window_utils/macos_window_utils.dart';
 
 import 'app.dart';
 import 'providers/service_providers.dart';
 
-void main() {
+Future<void> _configureMacosWindow() async {
+  await WindowManipulator.initialize(enableWindowDelegate: true);
+  await WindowManipulator.makeTitlebarTransparent();
+  await WindowManipulator.enableFullSizeContentView();
+  await WindowManipulator.hideTitle();
+}
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _configureMacosWindow();
 
   final container = ProviderContainer();
 
-  // Stop any running child processes (dnsmasq, pxe-watcher, embedded HTTP)
-  // before the app terminates.
   AppLifecycleListener(
     onExitRequested: () async {
       final controller = container.read(servicesControllerProvider.notifier);
