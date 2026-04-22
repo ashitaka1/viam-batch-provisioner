@@ -136,6 +136,23 @@ command -v viam &>/dev/null || die "viam CLI not found. Install from https://doc
 echo "Authenticating with Viam..."
 viam login api-key --key-id="$VIAM_API_KEY_ID" --key="$VIAM_API_KEY"
 
+# Resolve org + location names so the operator knows where machines will land
+LABELS=$("$PYTHON" "${REPO_ROOT}/scripts/resolve-labels.py" --org-id="$ORG" --location-id="$LOCATION" 2>/dev/null || true)
+ORG_NAME=$(echo "$LABELS" | sed -n 's/^ORG_NAME=//p')
+LOC_NAME=$(echo "$LABELS" | sed -n 's/^LOCATION_NAME=//p')
+echo ""
+echo "About to create ${COUNT} machine(s):"
+echo "  Org:      ${ORG_NAME:-<unresolved>}   (${ORG})"
+echo "  Location: ${LOC_NAME:-<unresolved>}   (${LOCATION})"
+echo "  Names:    ${PREFIX}-1 .. ${PREFIX}-${COUNT}"
+echo ""
+read -p "Continue? [Y/n] " CONFIRM
+case "${CONFIRM:-y}" in
+    y|Y|yes|YES|"") ;;
+    *) echo "Aborted."; exit 1 ;;
+esac
+echo ""
+
 # Find available machine numbers (fills gaps first)
 echo "Listing existing machines with prefix '${PREFIX}'..."
 EXISTING=$(viam machines list --organization="$ORG" --location="$LOCATION" 2>/dev/null || true)
