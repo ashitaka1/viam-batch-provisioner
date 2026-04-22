@@ -1,6 +1,9 @@
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show MenuAnchor, MenuItemButton;
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/material.dart'
+    show MaterialPageRoute, MenuAnchor, MenuItemButton;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../providers/environment_providers.dart';
 import '../../providers/preferences_providers.dart';
@@ -11,48 +14,103 @@ import 'environment_form.dart';
 /// then pushes the environment form. Used by the settings drawer's "+"
 /// button and by the first-launch empty state.
 void showCreateEnvironmentFlow(BuildContext context, WidgetRef ref) {
-  final controller = TextEditingController();
-  showCupertinoDialog(
+  showMacosSheet(
     context: context,
-    builder: (ctx) => CupertinoAlertDialog(
-      title: const Text('New Environment'),
-      content: Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: CupertinoTextField(
-          controller: controller,
-          placeholder: 'Environment name',
-          autofocus: true,
-          onSubmitted: (value) {
-            final name = value.trim();
-            if (name.isEmpty) return;
-            Navigator.pop(ctx);
-            _pushEnvironmentForm(context, name);
-          },
+    builder: (ctx) => _NewEnvironmentSheet(parent: context),
+  );
+}
+
+class _NewEnvironmentSheet extends StatefulWidget {
+  const _NewEnvironmentSheet({required this.parent});
+  final BuildContext parent;
+
+  @override
+  State<_NewEnvironmentSheet> createState() => _NewEnvironmentSheetState();
+}
+
+class _NewEnvironmentSheetState extends State<_NewEnvironmentSheet> {
+  final _controller = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isEmpty) return;
+    Navigator.pop(context);
+    _pushEnvironmentForm(widget.parent, name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final valid = _controller.text.trim().isNotEmpty;
+    return MacosSheet(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'New Environment',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'An environment holds credentials and network settings for a batch.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: MacosColors.secondaryLabelColor,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              MacosTextField(
+                controller: _controller,
+                autofocus: true,
+                placeholder: 'Environment name',
+                onSubmitted: (_) => _submit(),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  PushButton(
+                    controlSize: ControlSize.large,
+                    secondary: true,
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  PushButton(
+                    controlSize: ControlSize.large,
+                    onPressed: valid ? _submit : null,
+                    child: const Text('Create'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
-      actions: [
-        CupertinoDialogAction(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('Cancel'),
-        ),
-        CupertinoDialogAction(
-          isDefaultAction: true,
-          onPressed: () {
-            final name = controller.text.trim();
-            if (name.isEmpty) return;
-            Navigator.pop(ctx);
-            _pushEnvironmentForm(context, name);
-          },
-          child: const Text('Create'),
-        ),
-      ],
-    ),
-  );
+    );
+  }
 }
 
 void _pushEnvironmentForm(BuildContext context, String name) {
   Navigator.of(context, rootNavigator: true).push(
-    CupertinoPageRoute(
+    MaterialPageRoute(
       builder: (_) => EnvironmentForm(environmentName: name),
     ),
   );
@@ -63,18 +121,17 @@ class SettingsDrawer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final dividerColor = MacosTheme.of(context).dividerColor;
     return Container(
-      color: CupertinoTheme.of(context).barBackgroundColor,
+      color: MacosTheme.of(context).canvasColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               border: Border(
-                bottom:
-                    BorderSide(color: CupertinoColors.separator, width: 0.5),
+                bottom: BorderSide(color: dividerColor, width: 0.5),
               ),
             ),
             child: const Text(
@@ -82,15 +139,10 @@ class SettingsDrawer extends ConsumerWidget {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
           ),
-
-          // Environments section
-          Expanded(
-            child: _EnvironmentSection(),
-          ),
-
-          Container(height: 0.5, color: CupertinoColors.separator),
+          Expanded(child: _EnvironmentSection()),
+          Container(height: 0.5, color: dividerColor),
           const _AppearanceSection(),
-          Container(height: 0.5, color: CupertinoColors.separator),
+          Container(height: 0.5, color: dividerColor),
           const _NetworkSection(),
         ],
       ),
@@ -114,35 +166,51 @@ class _AppearanceSection extends ConsumerWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
           const SizedBox(height: 8),
-          CupertinoSlidingSegmentedControl<AppThemeMode>(
-            groupValue: mode,
-            onValueChanged: (value) {
-              if (value == null) return;
+          _ThemeModePicker(
+            mode: mode,
+            onChanged: (value) {
               ref.read(themeModeProvider.notifier).state = value;
-            },
-            children: const {
-              AppThemeMode.system: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                child: Text('System', style: TextStyle(fontSize: 12)),
-              ),
-              AppThemeMode.light: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                child: Text('Light', style: TextStyle(fontSize: 12)),
-              ),
-              AppThemeMode.dark: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                child: Text('Dark', style: TextStyle(fontSize: 12)),
-              ),
             },
           ),
         ],
       ),
     );
   }
+}
+
+class _ThemeModePicker extends StatelessWidget {
+  const _ThemeModePicker({required this.mode, required this.onChanged});
+
+  final AppThemeMode mode;
+  final ValueChanged<AppThemeMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (final option in AppThemeMode.values)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: PushButton(
+              controlSize: ControlSize.small,
+              secondary: option != mode,
+              onPressed: option == mode ? null : () => onChanged(option),
+              child: Text(_label(option)),
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _label(AppThemeMode m) => switch (m) {
+        AppThemeMode.system => 'System',
+        AppThemeMode.light => 'Light',
+        AppThemeMode.dark => 'Dark',
+      };
 }
 
 class _NetworkSection extends ConsumerWidget {
@@ -163,7 +231,7 @@ class _NetworkSection extends ConsumerWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
           const SizedBox(height: 4),
@@ -171,7 +239,7 @@ class _NetworkSection extends ConsumerWidget {
             'Interface for PXE watcher (sniffs DHCP to assign machine names).',
             style: TextStyle(
               fontSize: 11,
-              color: CupertinoColors.tertiaryLabel,
+              color: MacosColors.tertiaryLabelColor,
               height: 1.3,
             ),
           ),
@@ -186,12 +254,12 @@ class _NetworkSection extends ConsumerWidget {
                     value;
               },
             ),
-            loading: () => const CupertinoActivityIndicator(radius: 7),
+            loading: () => const ProgressCircle(radius: 7),
             error: (e, _) => Text(
               '$e',
               style: const TextStyle(
                 fontSize: 11,
-                color: CupertinoColors.systemRed,
+                color: MacosColors.systemRedColor,
               ),
             ),
           ),
@@ -225,10 +293,10 @@ class _InterfacePicker extends StatelessWidget {
       alignmentOffset: const Offset(0, 4),
       menuChildren: [
         MenuItemButton(
-          leadingIcon: Icon(
+          leadingIcon: MacosIcon(
             selected == null ? CupertinoIcons.checkmark : null,
             size: 13,
-            color: CupertinoColors.activeBlue,
+            color: MacosColors.controlAccentColor,
           ),
           onPressed: selected == null ? null : () => onChanged(null),
           child: Text(
@@ -240,10 +308,10 @@ class _InterfacePicker extends StatelessWidget {
         ),
         for (final name in interfaces)
           MenuItemButton(
-            leadingIcon: Icon(
+            leadingIcon: MacosIcon(
               name == selected ? CupertinoIcons.checkmark : null,
               size: 13,
-              color: CupertinoColors.activeBlue,
+              color: MacosColors.controlAccentColor,
             ),
             onPressed: name == selected ? null : () => onChanged(name),
             child: Text(
@@ -256,11 +324,9 @@ class _InterfacePicker extends StatelessWidget {
           ),
       ],
       builder: (context, controller, _) {
-        return CupertinoButton(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          color: CupertinoColors.tertiarySystemFill.resolveFrom(context),
-          borderRadius: BorderRadius.circular(6),
-          onPressed: interfaces.isEmpty
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: interfaces.isEmpty
               ? null
               : () {
                   if (controller.isOpen) {
@@ -269,23 +335,36 @@ class _InterfacePicker extends StatelessWidget {
                     controller.open();
                   }
                 },
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: CupertinoTheme.of(context).textTheme.textStyle.color,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: MacosTheme.of(context)
+                  .canvasColor
+                  .withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: MacosTheme.of(context).dividerColor,
+                width: 0.5,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: MacosTheme.of(context).typography.body.color,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              const Icon(
-                CupertinoIcons.chevron_up_chevron_down,
-                size: 10,
-                color: CupertinoColors.secondaryLabel,
-              ),
-            ],
+                const SizedBox(width: 6),
+                const MacosIcon(
+                  CupertinoIcons.chevron_up_chevron_down,
+                  size: 10,
+                  color: MacosColors.secondaryLabelColor,
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -311,15 +390,19 @@ class _EnvironmentSection extends ConsumerWidget {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: CupertinoColors.secondaryLabel,
+                  color: MacosColors.secondaryLabelColor,
                 ),
               ),
               const Spacer(),
-              CupertinoButton(
-                padding: EdgeInsets.zero,
-                minSize: 24,
+              MacosIconButton(
+                icon: const MacosIcon(CupertinoIcons.plus, size: 16),
+                boxConstraints: const BoxConstraints(
+                  minHeight: 24,
+                  minWidth: 24,
+                  maxWidth: 32,
+                  maxHeight: 32,
+                ),
                 onPressed: () => showCreateEnvironmentFlow(context, ref),
-                child: const Icon(CupertinoIcons.plus, size: 18),
               ),
             ],
           ),
@@ -335,7 +418,7 @@ class _EnvironmentSection extends ConsumerWidget {
                       'No environments yet.\nTap + to create one.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: CupertinoColors.tertiaryLabel,
+                        color: MacosColors.tertiaryLabelColor,
                         fontSize: 13,
                       ),
                     ),
@@ -356,16 +439,13 @@ class _EnvironmentSection extends ConsumerWidget {
                 },
               );
             },
-            loading: () =>
-                const Center(child: CupertinoActivityIndicator()),
+            loading: () => const Center(child: ProgressCircle()),
             error: (e, _) => Center(child: Text('Error: $e')),
           ),
         ),
       ],
     );
   }
-
-
 }
 
 class _EnvironmentTile extends ConsumerWidget {
@@ -389,7 +469,7 @@ class _EnvironmentTile extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: isActive
-              ? CupertinoColors.activeBlue.withOpacity(0.15)
+              ? MacosColors.controlAccentColor.withValues(alpha: 0.15)
               : null,
           borderRadius: BorderRadius.circular(6),
         ),
@@ -398,10 +478,10 @@ class _EnvironmentTile extends ConsumerWidget {
             if (isActive)
               const Padding(
                 padding: EdgeInsets.only(right: 8),
-                child: Icon(
+                child: MacosIcon(
                   CupertinoIcons.checkmark,
                   size: 14,
-                  color: CupertinoColors.activeBlue,
+                  color: MacosColors.controlAccentColor,
                 ),
               ),
             Expanded(
@@ -413,32 +493,40 @@ class _EnvironmentTile extends ConsumerWidget {
                 ),
               ),
             ),
-            CupertinoButton(
-              padding: EdgeInsets.zero,
-              minSize: 24,
+            MacosIconButton(
+              icon: const MacosIcon(
+                CupertinoIcons.pencil,
+                size: 14,
+                color: MacosColors.secondaryLabelColor,
+              ),
+              boxConstraints: const BoxConstraints(
+                minHeight: 24,
+                minWidth: 24,
+                maxWidth: 32,
+                maxHeight: 32,
+              ),
               onPressed: () {
                 Navigator.of(context, rootNavigator: true).push(
-                  CupertinoPageRoute(
+                  MaterialPageRoute(
                     builder: (_) =>
                         EnvironmentForm(environmentName: name),
                   ),
                 );
               },
-              child: const Icon(
-                CupertinoIcons.pencil,
-                size: 16,
-                color: CupertinoColors.secondaryLabel,
-              ),
             ),
-            CupertinoButton(
-              padding: EdgeInsets.zero,
-              minSize: 24,
-              onPressed: () => _confirmDelete(context, ref),
-              child: const Icon(
+            MacosIconButton(
+              icon: const MacosIcon(
                 CupertinoIcons.trash,
-                size: 16,
-                color: CupertinoColors.destructiveRed,
+                size: 14,
+                color: MacosColors.systemRedColor,
               ),
+              boxConstraints: const BoxConstraints(
+                minHeight: 24,
+                minWidth: 24,
+                maxWidth: 32,
+                maxHeight: 32,
+              ),
+              onPressed: () => _confirmDelete(context, ref),
             ),
           ],
         ),
@@ -447,26 +535,34 @@ class _EnvironmentTile extends ConsumerWidget {
   }
 
   void _confirmDelete(BuildContext context, WidgetRef ref) {
-    showCupertinoDialog(
+    showMacosAlertDialog<void>(
       context: context,
-      builder: (ctx) => CupertinoAlertDialog(
+      builder: (ctx) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.trash,
+          size: 56,
+          color: MacosColors.systemRedColor,
+        ),
         title: Text('Delete "$name"?'),
-        content: const Text('This environment configuration will be removed.'),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final repo = ref.read(environmentRepositoryProvider);
-              await repo.deleteEnvironment(name);
-            },
-            child: const Text('Delete'),
-          ),
-        ],
+        message: const Text(
+          'This environment configuration will be removed.',
+          textAlign: TextAlign.center,
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          onPressed: () async {
+            Navigator.pop(ctx);
+            final repo = ref.read(environmentRepositoryProvider);
+            await repo.deleteEnvironment(name);
+          },
+          child: const Text('Delete'),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Cancel'),
+        ),
       ),
     );
   }

@@ -1,86 +1,103 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart' show MenuAnchor, MenuItemButton, Tooltip;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../models/service_status.dart';
 import '../../providers/environment_providers.dart';
 import '../../providers/service_providers.dart';
 import 'app_shell.dart';
 
-class Toolbar extends ConsumerWidget {
-  const Toolbar({super.key});
+ToolBar buildAppToolBar(BuildContext context, WidgetRef ref) {
+  return ToolBar(
+    title: const Text('Viam Provisioner'),
+    titleWidth: 180,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    actions: [
+      CustomToolbarItem(
+        inToolbarBuilder: (context) => const _EnvSection(),
+      ),
+      const ToolBarSpacer(),
+      CustomToolbarItem(
+        inToolbarBuilder: (context) => const _ServicesSection(),
+      ),
+      CustomToolbarItem(
+        inToolbarBuilder: (context) => const _SettingsButton(),
+      ),
+    ],
+  );
+}
+
+class _EnvSection extends ConsumerWidget {
+  const _EnvSection();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final envList = ref.watch(environmentListProvider);
     final activeEnvName = ref.watch(activeEnvironmentNameProvider);
-    final settingsOpen = ref.watch(settingsOpenProvider);
-    final services = ref.watch(servicesControllerProvider);
-
-    return Container(
-      height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: CupertinoTheme.of(context).barBackgroundColor,
-        border: const Border(
-          bottom: BorderSide(color: CupertinoColors.separator, width: 0.5),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const MacosIcon(CupertinoIcons.cube_box, size: 14),
+        const SizedBox(width: 6),
+        envList.when(
+          data: (envs) => _EnvPicker(
+            envs: envs,
+            active: activeEnvName.valueOrNull,
+          ),
+          loading: () => const ProgressCircle(radius: 7),
+          error: (_, __) => const Text(
+            'No environment',
+            style: TextStyle(
+              fontSize: 13,
+              color: MacosColors.secondaryLabelColor,
+            ),
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          const Icon(CupertinoIcons.cube_box, size: 14),
-          const SizedBox(width: 6),
-          envList.when(
-            data: (envs) => _EnvPicker(
-              envs: envs,
-              active: activeEnvName.valueOrNull,
-            ),
-            loading: () => const CupertinoActivityIndicator(radius: 7),
-            error: (_, __) => const Text(
-              'No environment',
-              style: TextStyle(
-                fontSize: 13,
-                color: CupertinoColors.secondaryLabel,
-              ),
-            ),
-          ),
+      ],
+    );
+  }
+}
 
-          const Spacer(),
+class _ServicesSection extends ConsumerWidget {
+  const _ServicesSection();
 
-          _ServicesMenu(services: services),
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final services = ref.watch(servicesControllerProvider);
+    return _ServicesMenu(services: services);
+  }
+}
 
-          const SizedBox(width: 12),
+class _SettingsButton extends ConsumerWidget {
+  const _SettingsButton();
 
-          Tooltip(
-            message: 'Settings',
-            waitDuration: const Duration(milliseconds: 500),
-            child: CupertinoButton(
-              padding: EdgeInsets.zero,
-              onPressed: () {
-                ref.read(settingsOpenProvider.notifier).state = !settingsOpen;
-              },
-              child: Icon(
-                settingsOpen
-                    ? CupertinoIcons.gear_solid
-                    : CupertinoIcons.gear,
-                size: 16,
-              ),
-            ),
-          ),
-        ],
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settingsOpen = ref.watch(settingsOpenProvider);
+    return Padding(
+      padding: const EdgeInsets.only(left: 8),
+      child: MacosIconButton(
+        icon: MacosIcon(
+          settingsOpen ? CupertinoIcons.gear_solid : CupertinoIcons.gear,
+          size: 16,
+        ),
+        onPressed: () {
+          ref.read(settingsOpenProvider.notifier).state = !settingsOpen;
+        },
       ),
     );
   }
-
 }
 
 Color _serviceColor(ServiceState state) => switch (state) {
-      ServiceState.running => CupertinoColors.activeGreen,
+      ServiceState.running => MacosColors.systemGreenColor,
       ServiceState.starting ||
       ServiceState.stopping =>
-        CupertinoColors.systemYellow,
-      ServiceState.error => CupertinoColors.systemRed,
-      ServiceState.stopped => CupertinoColors.systemGrey3,
+        MacosColors.systemYellowColor,
+      ServiceState.error => MacosColors.systemRedColor,
+      ServiceState.stopped => MacosColors.systemGrayColor,
     };
 
 String _serviceStateLabel(ServiceState state) => switch (state) {
@@ -105,22 +122,19 @@ class _ServicesMenu extends ConsumerWidget {
       alignmentOffset: const Offset(0, 4),
       menuChildren: [
         _MenuHeader(services: services),
-        Container(height: 0.5, color: CupertinoColors.separator),
+        Container(height: 0.5, color: MacosTheme.of(context).dividerColor),
         MenuItemButton(
           onPressed: anyBusy
               ? null
               : () {
                   ref.read(servicesControllerProvider.notifier).startAll();
                 },
-          leadingIcon: const Icon(
+          leadingIcon: const MacosIcon(
             CupertinoIcons.play_fill,
             size: 13,
-            color: CupertinoColors.activeGreen,
+            color: MacosColors.systemGreenColor,
           ),
-          child: const Text(
-            'Start all',
-            style: TextStyle(fontSize: 13),
-          ),
+          child: const Text('Start all', style: TextStyle(fontSize: 13)),
         ),
         MenuItemButton(
           onPressed: (!anyRunning || anyBusy)
@@ -128,15 +142,12 @@ class _ServicesMenu extends ConsumerWidget {
               : () {
                   ref.read(servicesControllerProvider.notifier).stopAll();
                 },
-          leadingIcon: const Icon(
+          leadingIcon: const MacosIcon(
             CupertinoIcons.stop_fill,
             size: 13,
-            color: CupertinoColors.systemRed,
+            color: MacosColors.systemRedColor,
           ),
-          child: const Text(
-            'Stop all',
-            style: TextStyle(fontSize: 13),
-          ),
+          child: const Text('Stop all', style: TextStyle(fontSize: 13)),
         ),
       ],
       builder: (context, controller, _) {
@@ -144,49 +155,52 @@ class _ServicesMenu extends ConsumerWidget {
           message:
               'PXE services — needed for x86 network boot. Click for controls.',
           waitDuration: const Duration(milliseconds: 500),
-          child: CupertinoButton(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            minSize: 0,
-            onPressed: () {
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
               if (controller.isOpen) {
                 controller.close();
               } else {
                 controller.open();
               }
             },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _Dot(state: services.http.state),
-                const SizedBox(width: 4),
-                const Text(
-                  'HTTP',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: CupertinoColors.secondaryLabel,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _Dot(state: services.http.state),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'HTTP',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: MacosColors.secondaryLabelColor,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                _Dot(state: services.dnsmasq.state),
-                const SizedBox(width: 4),
-                const Text(
-                  'DHCP',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: CupertinoColors.secondaryLabel,
+                  const SizedBox(width: 8),
+                  _Dot(state: services.dnsmasq.state),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'DHCP',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: MacosColors.secondaryLabelColor,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                _Dot(state: services.watcher.state),
-                const SizedBox(width: 4),
-                const Text(
-                  'Watch',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: CupertinoColors.secondaryLabel,
+                  const SizedBox(width: 8),
+                  _Dot(state: services.watcher.state),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Watch',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: MacosColors.secondaryLabelColor,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -230,7 +244,7 @@ class _MenuHeader extends StatelessWidget {
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
           const SizedBox(height: 6),
@@ -279,7 +293,7 @@ class _MenuHeader extends StatelessWidget {
             _serviceStateLabel(status.state),
             style: const TextStyle(
               fontSize: 11,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
         ),
@@ -287,7 +301,7 @@ class _MenuHeader extends StatelessWidget {
           subtitle,
           style: const TextStyle(
             fontSize: 11,
-            color: CupertinoColors.tertiaryLabel,
+            color: MacosColors.tertiaryLabelColor,
           ),
         ),
       ],
@@ -304,20 +318,18 @@ class _EnvPicker extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final labelColor = active != null
-        ? CupertinoTheme.of(context).textTheme.textStyle.color
-        : CupertinoColors.secondaryLabel;
+        ? MacosTheme.of(context).typography.body.color
+        : MacosColors.secondaryLabelColor;
 
     return MenuAnchor(
       alignmentOffset: const Offset(0, 4),
       menuChildren: [
         for (final name in envs)
           MenuItemButton(
-            leadingIcon: Icon(
-              name == active
-                  ? CupertinoIcons.checkmark
-                  : null,
+            leadingIcon: MacosIcon(
+              name == active ? CupertinoIcons.checkmark : null,
               size: 13,
-              color: CupertinoColors.activeBlue,
+              color: MacosColors.controlAccentColor,
             ),
             onPressed: name == active
                 ? null
@@ -325,16 +337,13 @@ class _EnvPicker extends ConsumerWidget {
                     final repo = ref.read(environmentRepositoryProvider);
                     await repo.setActiveEnvironment(name);
                   },
-            child: Text(
-              name,
-              style: const TextStyle(fontSize: 13),
-            ),
+            child: Text(name, style: const TextStyle(fontSize: 13)),
           ),
       ],
       builder: (context, controller, _) {
-        return CupertinoButton(
-          padding: EdgeInsets.zero,
-          onPressed: envs.isEmpty
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: envs.isEmpty
               ? null
               : () {
                   if (controller.isOpen) {
@@ -343,20 +352,23 @@ class _EnvPicker extends ConsumerWidget {
                     controller.open();
                   }
                 },
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                active ?? 'No environment',
-                style: TextStyle(fontSize: 13, color: labelColor),
-              ),
-              const SizedBox(width: 4),
-              const Icon(
-                CupertinoIcons.chevron_up_chevron_down,
-                size: 10,
-                color: CupertinoColors.secondaryLabel,
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  active ?? 'No environment',
+                  style: TextStyle(fontSize: 13, color: labelColor),
+                ),
+                const SizedBox(width: 4),
+                const MacosIcon(
+                  CupertinoIcons.chevron_up_chevron_down,
+                  size: 10,
+                  color: MacosColors.secondaryLabelColor,
+                ),
+              ],
+            ),
           ),
         );
       },

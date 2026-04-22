@@ -1,5 +1,7 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../core/disk_utils.dart';
 import '../../models/flash_state.dart';
@@ -93,10 +95,10 @@ class _Header extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const Icon(
+        const MacosIcon(
           CupertinoIcons.square_stack_3d_down_right,
           size: 22,
-          color: CupertinoColors.systemBlue,
+          color: MacosColors.systemBlueColor,
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -112,7 +114,7 @@ class _Header extends StatelessWidget {
                 '$done of $total flashed.',
                 style: const TextStyle(
                   fontSize: 13,
-                  color: CupertinoColors.secondaryLabel,
+                  color: MacosColors.secondaryLabelColor,
                 ),
               ),
             ],
@@ -134,7 +136,10 @@ class _PickMachine extends StatelessWidget {
       return const Center(
         child: Text(
           'All machines have been flashed.',
-          style: TextStyle(fontSize: 14, color: CupertinoColors.secondaryLabel),
+          style: TextStyle(
+            fontSize: 14,
+            color: MacosColors.secondaryLabelColor,
+          ),
         ),
       );
     }
@@ -143,44 +148,38 @@ class _PickMachine extends StatelessWidget {
       children: [
         const Text(
           'Choose the next machine to flash.',
-          style: TextStyle(fontSize: 13, color: CupertinoColors.secondaryLabel),
+          style: TextStyle(
+            fontSize: 13,
+            color: MacosColors.secondaryLabelColor,
+          ),
         ),
         const SizedBox(height: 12),
         Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: CupertinoColors.systemGrey6.resolveFrom(context),
-              borderRadius: BorderRadius.circular(8),
-            ),
+          child: _ListSurface(
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 4),
               itemCount: unflashed.length,
               separatorBuilder: (_, __) => Container(
                 height: 0.5,
-                color: CupertinoColors.separator,
+                color: MacosTheme.of(context).dividerColor,
                 margin: const EdgeInsets.symmetric(horizontal: 12),
               ),
               itemBuilder: (context, i) {
                 final name = unflashed[i];
-                return CupertinoButton(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 10),
+                return _ListRowButton(
                   onPressed: () => onPick(name),
                   child: Row(
                     children: [
                       Expanded(
                         child: Text(
                           name,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: CupertinoColors.label,
-                          ),
+                          style: const TextStyle(fontSize: 13),
                         ),
                       ),
-                      const Icon(
+                      const MacosIcon(
                         CupertinoIcons.chevron_right,
                         size: 14,
-                        color: CupertinoColors.tertiaryLabel,
+                        color: MacosColors.tertiaryLabelColor,
                       ),
                     ],
                   ),
@@ -210,10 +209,10 @@ class _AwaitInsert extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          const MacosIcon(
             CupertinoIcons.arrow_down_square,
             size: 40,
-            color: CupertinoColors.systemBlue,
+            color: MacosColors.systemBlueColor,
           ),
           const SizedBox(height: 12),
           Text(
@@ -225,21 +224,25 @@ class _AwaitInsert extends StatelessWidget {
             'Detecting new external disks…',
             style: TextStyle(
               fontSize: 12,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
           const SizedBox(height: 16),
-          const CupertinoActivityIndicator(radius: 10),
+          const ProgressCircle(radius: 10),
           const SizedBox(height: 20),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CupertinoButton(
+              PushButton(
+                controlSize: ControlSize.regular,
+                secondary: true,
                 onPressed: onRescan,
                 child: const Text('Rescan'),
               ),
               const SizedBox(width: 8),
-              CupertinoButton(
+              PushButton(
+                controlSize: ControlSize.regular,
+                secondary: true,
                 onPressed: onCancel,
                 child: const Text('Cancel'),
               ),
@@ -270,10 +273,10 @@ class _Detected extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          const MacosIcon(
             CupertinoIcons.exclamationmark_triangle_fill,
             size: 40,
-            color: CupertinoColors.systemOrange,
+            color: MacosColors.systemOrangeColor,
           ),
           const SizedBox(height: 12),
           Text(
@@ -285,29 +288,37 @@ class _Detected extends StatelessWidget {
             '${disk.description}  ·  ${disk.sizeHuman}',
             style: const TextStyle(
               fontSize: 12,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
           const SizedBox(height: 8),
           const Text(
             'All data on this disk will be erased.',
-            style: TextStyle(fontSize: 12, color: CupertinoColors.systemRed),
+            style: TextStyle(
+              fontSize: 12,
+              color: MacosColors.systemRedColor,
+            ),
           ),
           const SizedBox(height: 20),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CupertinoButton.filled(
+              PushButton(
+                controlSize: ControlSize.large,
                 onPressed: onConfirm,
                 child: Text('Flash "${state.machineName}"'),
               ),
               const SizedBox(width: 8),
-              CupertinoButton(
+              PushButton(
+                controlSize: ControlSize.large,
+                secondary: true,
                 onPressed: onRescan,
                 child: const Text('Rescan'),
               ),
               const SizedBox(width: 8),
-              CupertinoButton(
+              PushButton(
+                controlSize: ControlSize.large,
+                secondary: true,
                 onPressed: onCancel,
                 child: const Text('Cancel'),
               ),
@@ -331,7 +342,7 @@ class _Flashing extends StatelessWidget {
       children: [
         Row(
           children: [
-            const CupertinoActivityIndicator(radius: 10),
+            const ProgressCircle(radius: 10),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -342,16 +353,10 @@ class _Flashing extends StatelessWidget {
                 ),
               ),
             ),
-            CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            DestructivePushButton(
+              controlSize: ControlSize.small,
               onPressed: onCancel,
-              child: const Text(
-                'Cancel',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: CupertinoColors.systemRed,
-                ),
-              ),
+              child: const Text('Cancel'),
             ),
           ],
         ),
@@ -384,16 +389,17 @@ class _Choose extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Icon(
+            const MacosIcon(
               CupertinoIcons.exclamationmark_triangle_fill,
               size: 22,
-              color: CupertinoColors.systemOrange,
+              color: MacosColors.systemOrangeColor,
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 'Multiple new disks detected — pick the SD card for "$machineName".',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -401,28 +407,25 @@ class _Choose extends StatelessWidget {
         const SizedBox(height: 6),
         const Text(
           'Eject anything that isn\'t the target card, then click Rescan, or pick the right device below.',
-          style: TextStyle(fontSize: 12, color: CupertinoColors.secondaryLabel),
+          style: TextStyle(
+            fontSize: 12,
+            color: MacosColors.secondaryLabelColor,
+          ),
         ),
         const SizedBox(height: 14),
         Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: CupertinoColors.systemGrey6.resolveFrom(context),
-              borderRadius: BorderRadius.circular(8),
-            ),
+          child: _ListSurface(
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 4),
               itemCount: candidates.length,
               separatorBuilder: (_, __) => Container(
                 height: 0.5,
-                color: CupertinoColors.separator,
+                color: MacosTheme.of(context).dividerColor,
                 margin: const EdgeInsets.symmetric(horizontal: 12),
               ),
               itemBuilder: (context, i) {
                 final d = candidates[i];
-                return CupertinoButton(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                return _ListRowButton(
                   onPressed: () => onPick(d),
                   child: Row(
                     children: [
@@ -435,7 +438,6 @@ class _Choose extends StatelessWidget {
                               style: const TextStyle(
                                 fontSize: 13,
                                 fontFamilyFallback: monospaceFontFallback,
-                                color: CupertinoColors.label,
                               ),
                             ),
                             const SizedBox(height: 2),
@@ -443,16 +445,16 @@ class _Choose extends StatelessWidget {
                               '${d.description}  ·  ${d.sizeHuman}',
                               style: const TextStyle(
                                 fontSize: 11,
-                                color: CupertinoColors.secondaryLabel,
+                                color: MacosColors.secondaryLabelColor,
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const Icon(
+                      const MacosIcon(
                         CupertinoIcons.chevron_right,
                         size: 14,
-                        color: CupertinoColors.tertiaryLabel,
+                        color: MacosColors.tertiaryLabelColor,
                       ),
                     ],
                   ),
@@ -465,9 +467,19 @@ class _Choose extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            CupertinoButton(onPressed: onRescan, child: const Text('Rescan')),
+            PushButton(
+              controlSize: ControlSize.regular,
+              secondary: true,
+              onPressed: onRescan,
+              child: const Text('Rescan'),
+            ),
             const SizedBox(width: 8),
-            CupertinoButton(onPressed: onCancel, child: const Text('Cancel')),
+            PushButton(
+              controlSize: ControlSize.regular,
+              secondary: true,
+              onPressed: onCancel,
+              child: const Text('Cancel'),
+            ),
           ],
         ),
       ],
@@ -479,25 +491,31 @@ Future<void> _confirmCancelFlash(
   BuildContext context,
   FlashController controller,
 ) async {
-  final confirmed = await showCupertinoDialog<bool>(
+  final confirmed = await showMacosAlertDialog<bool>(
     context: context,
-    builder: (ctx) => CupertinoAlertDialog(
-      title: const Text('Cancel flash?'),
-      content: const Text(
-        'Stopping mid-write leaves the SD card in an inconsistent state. '
-        'You\'ll need to re-flash it before the Pi will boot.',
+    builder: (ctx) => MacosAlertDialog(
+      appIcon: const MacosIcon(
+        CupertinoIcons.exclamationmark_triangle_fill,
+        size: 56,
+        color: MacosColors.systemOrangeColor,
       ),
-      actions: [
-        CupertinoDialogAction(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('Keep flashing'),
-        ),
-        CupertinoDialogAction(
-          isDestructiveAction: true,
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('Cancel flash'),
-        ),
-      ],
+      title: const Text('Cancel flash?'),
+      message: const Text(
+        'Stopping mid-write leaves the SD card in an inconsistent state. '
+        "You'll need to re-flash it before the Pi will boot.",
+        textAlign: TextAlign.center,
+      ),
+      primaryButton: PushButton(
+        controlSize: ControlSize.large,
+        onPressed: () => Navigator.pop(ctx, true),
+        child: const Text('Cancel flash'),
+      ),
+      secondaryButton: PushButton(
+        controlSize: ControlSize.large,
+        secondary: true,
+        onPressed: () => Navigator.pop(ctx, false),
+        child: const Text('Keep flashing'),
+      ),
     ),
   );
   if (confirmed == true) {
@@ -521,10 +539,10 @@ class _Done extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          const MacosIcon(
             CupertinoIcons.checkmark_circle_fill,
             size: 40,
-            color: CupertinoColors.activeGreen,
+            color: MacosColors.systemGreenColor,
           ),
           const SizedBox(height: 12),
           Text(
@@ -539,11 +557,12 @@ class _Done extends StatelessWidget {
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 12,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
           const SizedBox(height: 20),
-          CupertinoButton.filled(
+          PushButton(
+            controlSize: ControlSize.large,
             onPressed: onNext,
             child: Text(remaining == 0 ? 'Finish' : 'Next machine'),
           ),
@@ -569,10 +588,10 @@ class _Error extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          const MacosIcon(
             CupertinoIcons.xmark_octagon_fill,
             size: 40,
-            color: CupertinoColors.systemRed,
+            color: MacosColors.systemRedColor,
           ),
           const SizedBox(height: 12),
           const Text(
@@ -587,7 +606,7 @@ class _Error extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 12,
-                color: CupertinoColors.secondaryLabel,
+                color: MacosColors.secondaryLabelColor,
               ),
             ),
           ),
@@ -595,18 +614,74 @@ class _Error extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CupertinoButton.filled(
+              PushButton(
+                controlSize: ControlSize.large,
                 onPressed: onRetry,
                 child: const Text('Try again'),
               ),
               const SizedBox(width: 8),
-              CupertinoButton(
+              PushButton(
+                controlSize: ControlSize.large,
+                secondary: true,
                 onPressed: onCancel,
                 child: const Text('Cancel'),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ListSurface extends StatelessWidget {
+  const _ListSurface({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: MacosTheme.of(context).canvasColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: MacosTheme.of(context).dividerColor,
+          width: 0.5,
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _ListRowButton extends StatefulWidget {
+  const _ListRowButton({required this.child, required this.onPressed});
+  final Widget child;
+  final VoidCallback onPressed;
+
+  @override
+  State<_ListRowButton> createState() => _ListRowButtonState();
+}
+
+class _ListRowButtonState extends State<_ListRowButton> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = MacosColors.controlAccentColor.withValues(alpha: 0.1);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onPressed,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          color: _hover ? accent : null,
+          child: widget.child,
+        ),
       ),
     );
   }
@@ -643,23 +718,27 @@ class _LogViewState extends State<_LogView> {
 
   @override
   Widget build(BuildContext context) {
+    final bg = MacosTheme.of(context).canvasColor;
+    final divider = MacosTheme.of(context).dividerColor;
+
     if (widget.lines.isEmpty) {
       return Container(
         decoration: BoxDecoration(
-          color: CupertinoColors.systemGrey6.resolveFrom(context),
+          color: bg,
           borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: divider, width: 0.5),
         ),
         alignment: Alignment.center,
         child: const Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CupertinoActivityIndicator(radius: 9),
+            ProgressCircle(radius: 9),
             SizedBox(height: 8),
             Text(
               'Waiting for dd progress…',
               style: TextStyle(
                 fontSize: 12,
-                color: CupertinoColors.tertiaryLabel,
+                color: MacosColors.tertiaryLabelColor,
               ),
             ),
           ],
@@ -668,9 +747,9 @@ class _LogViewState extends State<_LogView> {
     }
     return Container(
       decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6.resolveFrom(context),
+        color: bg,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: CupertinoColors.separator, width: 0.5),
+        border: Border.all(color: divider, width: 0.5),
       ),
       padding: const EdgeInsets.all(12),
       child: ListView.builder(

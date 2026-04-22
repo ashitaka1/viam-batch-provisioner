@@ -1,5 +1,6 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../models/batch.dart';
 import '../../providers/environment_providers.dart';
@@ -83,13 +84,12 @@ class _NewBatchFormState extends ConsumerState<NewBatchForm> {
                 'A batch is a named group of machines provisioned together.',
                 style: TextStyle(
                   fontSize: 13,
-                  color: CupertinoColors.secondaryLabel,
+                  color: MacosColors.secondaryLabelColor,
                 ),
               ),
               const SizedBox(height: 24),
-
-              _FieldLabel('Prefix'),
-              CupertinoTextField(
+              const _FieldLabel('Prefix'),
+              MacosTextField(
                 controller: _prefixCtrl,
                 placeholder: 'lab-pi',
                 autocorrect: false,
@@ -101,38 +101,24 @@ class _NewBatchFormState extends ConsumerState<NewBatchForm> {
                 'Machines will be named prefix-1, prefix-2, etc.',
                 style: TextStyle(
                   fontSize: 11,
-                  color: CupertinoColors.tertiaryLabel,
+                  color: MacosColors.tertiaryLabelColor,
                 ),
               ),
               const SizedBox(height: 16),
-
-              _FieldLabel('Count'),
-              CupertinoTextField(
+              const _FieldLabel('Count'),
+              MacosTextField(
                 controller: _countCtrl,
                 keyboardType: TextInputType.number,
                 enabled: !session.isRunning,
               ),
               const SizedBox(height: 16),
-
-              _FieldLabel('Target'),
-              CupertinoSegmentedControl<BatchTargetType>(
-                groupValue: _targetType,
-                onValueChanged: session.isRunning
-                    ? (_) {}
-                    : (v) => setState(() => _targetType = v),
-                children: const {
-                  BatchTargetType.pi: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    child: Text('Raspberry Pi'),
-                  ),
-                  BatchTargetType.x86: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    child: Text('x86 PXE'),
-                  ),
-                },
+              const _FieldLabel('Target'),
+              _TargetPicker(
+                value: _targetType,
+                enabled: !session.isRunning,
+                onChanged: (v) => setState(() => _targetType = v),
               ),
               const SizedBox(height: 16),
-
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -140,7 +126,7 @@ class _NewBatchFormState extends ConsumerState<NewBatchForm> {
                     'Provision mode',
                     style: TextStyle(
                       fontSize: 13,
-                      color: CupertinoColors.secondaryLabel,
+                      color: MacosColors.secondaryLabelColor,
                     ),
                   ),
                   Text(
@@ -157,23 +143,22 @@ class _NewBatchFormState extends ConsumerState<NewBatchForm> {
                 'Set in the active environment (Settings).',
                 style: TextStyle(
                   fontSize: 11,
-                  color: CupertinoColors.tertiaryLabel,
+                  color: MacosColors.tertiaryLabelColor,
                 ),
               ),
-
               if (_error != null) ...[
                 const SizedBox(height: 16),
                 Text(
                   _error!,
                   style: const TextStyle(
                     fontSize: 13,
-                    color: CupertinoColors.systemRed,
+                    color: MacosColors.systemRedColor,
                   ),
                 ),
               ],
-
               const SizedBox(height: 24),
-              CupertinoButton.filled(
+              PushButton(
+                controlSize: ControlSize.large,
                 onPressed: (noEnv || session.isRunning) ? null : _create,
                 child: Text(
                   session.isRunning ? 'Creating…' : 'Create Batch',
@@ -186,7 +171,7 @@ class _NewBatchFormState extends ConsumerState<NewBatchForm> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 12,
-                    color: CupertinoColors.tertiaryLabel,
+                    color: MacosColors.tertiaryLabelColor,
                   ),
                 ),
               ],
@@ -194,6 +179,43 @@ class _NewBatchFormState extends ConsumerState<NewBatchForm> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _TargetPicker extends StatelessWidget {
+  const _TargetPicker({
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final BatchTargetType value;
+  final bool enabled;
+  final ValueChanged<BatchTargetType> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    const options = {
+      BatchTargetType.pi: 'Raspberry Pi',
+      BatchTargetType.x86: 'x86 PXE',
+    };
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final entry in options.entries)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: PushButton(
+              controlSize: ControlSize.regular,
+              secondary: entry.key != value,
+              onPressed: (entry.key == value || !enabled)
+                  ? null
+                  : () => onChanged(entry.key),
+              child: Text(entry.value),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -211,7 +233,7 @@ class _FieldLabel extends StatelessWidget {
         style: const TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,
-          color: CupertinoColors.secondaryLabel,
+          color: MacosColors.secondaryLabelColor,
         ),
       ),
     );

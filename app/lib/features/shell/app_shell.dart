@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../models/batch.dart';
 import '../../providers/environment_providers.dart';
@@ -21,23 +22,32 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settingsOpen = ref.watch(settingsOpenProvider);
+    final dividerColor = MacosTheme.of(context).dividerColor;
 
-    return CupertinoPageScaffold(
-      child: Column(
+    return MacosWindow(
+      child: MacosScaffold(
+        toolBar: buildAppToolBar(context, ref),
         children: [
-          const Toolbar(),
-          Expanded(
-            child: Row(
-              children: [
-                const SizedBox(width: 240, child: Sidebar()),
-                Container(width: 1, color: CupertinoColors.separator),
-                const Expanded(child: _MainPanel()),
-                if (settingsOpen) ...[
-                  Container(width: 1, color: CupertinoColors.separator),
-                  const SizedBox(width: 320, child: SettingsDrawer()),
+          ContentArea(
+            builder: (context, _) {
+              return Row(
+                children: [
+                  SizedBox(
+                    width: 240,
+                    child: ColoredBox(
+                      color: MacosTheme.of(context).canvasColor,
+                      child: const BatchSidebar(),
+                    ),
+                  ),
+                  Container(width: 1, color: dividerColor),
+                  const Expanded(child: _MainPanel()),
+                  if (settingsOpen) ...[
+                    Container(width: 1, color: dividerColor),
+                    const SizedBox(width: 320, child: SettingsDrawer()),
+                  ],
                 ],
-              ],
-            ),
+              );
+            },
           ),
         ],
       ),
@@ -66,7 +76,7 @@ class _MainPanel extends ConsumerWidget {
           null => const ProvisionStagePanel(),
         };
       },
-      loading: () => const Center(child: CupertinoActivityIndicator()),
+      loading: () => const Center(child: ProgressCircle()),
       error: (e, _) => Center(child: Text('Error: $e')),
     );
   }
@@ -83,10 +93,10 @@ class _NoEnvironment extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            const MacosIcon(
               CupertinoIcons.cube_box,
               size: 40,
-              color: CupertinoColors.tertiaryLabel,
+              color: MacosColors.tertiaryLabelColor,
             ),
             const SizedBox(height: 16),
             const Text(
@@ -103,14 +113,13 @@ class _NoEnvironment extends ConsumerWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,
-                color: CupertinoColors.secondaryLabel,
+                color: MacosColors.secondaryLabelColor,
                 height: 1.4,
               ),
             ),
             const SizedBox(height: 20),
-            CupertinoButton.filled(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 18, vertical: 8),
+            PushButton(
+              controlSize: ControlSize.large,
               onPressed: () => showCreateEnvironmentFlow(context, ref),
               child: const Text('Create environment'),
             ),

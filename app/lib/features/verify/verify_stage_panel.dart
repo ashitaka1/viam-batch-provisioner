@@ -1,5 +1,7 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../models/batch.dart';
 import '../../models/queue_entry.dart';
@@ -52,14 +54,14 @@ class _Header extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(right: 10, top: 2),
-          child: Icon(
+          child: MacosIcon(
             allDone
                 ? CupertinoIcons.checkmark_seal_fill
                 : CupertinoIcons.clock,
             size: 22,
             color: allDone
-                ? CupertinoColors.activeGreen
-                : CupertinoColors.systemOrange,
+                ? MacosColors.systemGreenColor
+                : MacosColors.systemOrangeColor,
           ),
         ),
         Expanded(
@@ -82,7 +84,7 @@ class _Header extends StatelessWidget {
                     : '$pending pending. Complete the ${_stageBefore(batch).label} stage to finish.',
                 style: const TextStyle(
                   fontSize: 13,
-                  color: CupertinoColors.secondaryLabel,
+                  color: MacosColors.secondaryLabelColor,
                 ),
               ),
             ],
@@ -105,23 +107,24 @@ class _MachineTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = CupertinoColors.systemGrey6.resolveFrom(context);
+    final bg = MacosTheme.of(context).canvasColor;
+    final divider = MacosTheme.of(context).dividerColor;
     return Container(
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: CupertinoColors.separator, width: 0.5),
+        border: Border.all(color: divider, width: 0.5),
       ),
       child: Column(
         children: [
           const _TableHeader(),
-          Container(height: 0.5, color: CupertinoColors.separator),
+          Container(height: 0.5, color: divider),
           Expanded(
             child: ListView.separated(
               itemCount: batch.entries.length,
               separatorBuilder: (_, __) => Container(
                 height: 0.5,
-                color: CupertinoColors.separator,
+                color: divider,
               ),
               itemBuilder: (context, i) => _MachineRow(
                 entry: batch.entries[i],
@@ -165,7 +168,7 @@ class _Th extends StatelessWidget {
       style: const TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w600,
-        color: CupertinoColors.tertiaryLabel,
+        color: MacosColors.tertiaryLabelColor,
         letterSpacing: 0.5,
       ),
     );
@@ -183,8 +186,8 @@ class _MachineRow extends StatelessWidget {
     final identifier = entry.mac ?? entry.slotId ?? '—';
     final statusLabel = _statusLabel(assigned, targetType);
     final statusColor = assigned
-        ? CupertinoColors.activeGreen
-        : CupertinoColors.secondaryLabel;
+        ? MacosColors.systemGreenColor
+        : MacosColors.secondaryLabelColor;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -192,14 +195,14 @@ class _MachineRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 24,
-            child: Icon(
+            child: MacosIcon(
               assigned
                   ? CupertinoIcons.checkmark_circle_fill
                   : CupertinoIcons.circle,
               size: 16,
               color: assigned
-                  ? CupertinoColors.activeGreen
-                  : CupertinoColors.systemGrey3,
+                  ? MacosColors.systemGreenColor
+                  : MacosColors.systemGrayColor,
             ),
           ),
           Expanded(
@@ -217,7 +220,7 @@ class _MachineRow extends StatelessWidget {
               style: const TextStyle(
                 fontSize: 12,
                 fontFamilyFallback: monospaceFontFallback,
-                color: CupertinoColors.secondaryLabel,
+                color: MacosColors.secondaryLabelColor,
               ),
               overflow: TextOverflow.ellipsis,
             ),

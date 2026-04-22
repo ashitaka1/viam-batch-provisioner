@@ -1,5 +1,7 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../core/process_runner.dart';
 import '../../models/batch.dart';
@@ -44,17 +46,17 @@ class _Header extends StatelessWidget {
     if (session.isRunning) {
       statusIcon = const Padding(
         padding: EdgeInsets.only(right: 10, top: 4),
-        child: CupertinoActivityIndicator(radius: 9),
+        child: ProgressCircle(radius: 9),
       );
       title = 'Provisioning…';
       subtitle = 'Running cli/provision-batch.sh';
     } else if (session.hasRun && session.succeeded) {
       statusIcon = const Padding(
         padding: EdgeInsets.only(right: 10),
-        child: Icon(
+        child: MacosIcon(
           CupertinoIcons.checkmark_circle_fill,
           size: 22,
-          color: CupertinoColors.activeGreen,
+          color: MacosColors.systemGreenColor,
         ),
       );
       title = 'Provisioning complete';
@@ -64,10 +66,10 @@ class _Header extends StatelessWidget {
     } else if (session.hasRun) {
       statusIcon = const Padding(
         padding: EdgeInsets.only(right: 10),
-        child: Icon(
+        child: MacosIcon(
           CupertinoIcons.xmark_circle_fill,
           size: 22,
-          color: CupertinoColors.systemRed,
+          color: MacosColors.systemRedColor,
         ),
       );
       title = 'Provisioning failed';
@@ -75,10 +77,10 @@ class _Header extends StatelessWidget {
     } else if (b != null) {
       statusIcon = const Padding(
         padding: EdgeInsets.only(right: 10),
-        child: Icon(
+        child: MacosIcon(
           CupertinoIcons.cube_box,
           size: 22,
-          color: CupertinoColors.secondaryLabel,
+          color: MacosColors.secondaryLabelColor,
         ),
       );
       title = 'Batch: ${b.prefix}';
@@ -110,7 +112,7 @@ class _Header extends StatelessWidget {
                   subtitle,
                   style: const TextStyle(
                     fontSize: 13,
-                    color: CupertinoColors.secondaryLabel,
+                    color: MacosColors.secondaryLabelColor,
                   ),
                 ),
               ],
@@ -155,18 +157,23 @@ class _OutputLogState extends State<_OutputLog> {
 
   @override
   Widget build(BuildContext context) {
+    final surface = MacosTheme.of(context).canvasColor;
+    final divider = MacosTheme.of(context).dividerColor;
+    final textColor = MacosTheme.of(context).typography.body.color;
+
     if (widget.lines.isEmpty) {
       return Container(
         decoration: BoxDecoration(
-          color: CupertinoColors.systemGrey6.resolveFrom(context),
+          color: surface,
           borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: divider, width: 0.5),
         ),
         alignment: Alignment.center,
         child: const Text(
           'No output yet.',
           style: TextStyle(
             fontSize: 12,
-            color: CupertinoColors.tertiaryLabel,
+            color: MacosColors.tertiaryLabelColor,
           ),
         ),
       );
@@ -174,9 +181,9 @@ class _OutputLogState extends State<_OutputLog> {
 
     return Container(
       decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6.resolveFrom(context),
+        color: surface,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: CupertinoColors.separator, width: 0.5),
+        border: Border.all(color: divider, width: 0.5),
       ),
       padding: const EdgeInsets.all(12),
       child: ListView.builder(
@@ -193,8 +200,8 @@ class _OutputLogState extends State<_OutputLog> {
                 fontSize: 11,
                 height: 1.3,
                 color: line.isError
-                    ? CupertinoColors.systemRed.resolveFrom(context)
-                    : CupertinoColors.label.resolveFrom(context),
+                    ? MacosColors.systemRedColor
+                    : textColor,
               ),
             ),
           );

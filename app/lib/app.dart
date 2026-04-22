@@ -1,5 +1,7 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show ThemeMode;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import 'features/shell/app_shell.dart';
 import 'providers/preferences_providers.dart';
@@ -10,12 +12,17 @@ class ViamProvisionerApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final platformBrightness = MediaQuery.platformBrightnessOf(context);
     final mode = ref.watch(themeModeProvider);
-    final brightness = resolveBrightness(mode, platformBrightness);
-    return CupertinoApp(
+    final themeMode = switch (mode) {
+      AppThemeMode.system => ThemeMode.system,
+      AppThemeMode.light => ThemeMode.light,
+      AppThemeMode.dark => ThemeMode.dark,
+    };
+    return MacosApp(
       title: 'Viam Provisioner',
-      theme: cupertinoTheme(brightness),
+      theme: macosLightTheme(),
+      darkTheme: macosDarkTheme(),
+      themeMode: themeMode,
       home: const AppShell(),
       debugShowCheckedModeBanner: false,
     );

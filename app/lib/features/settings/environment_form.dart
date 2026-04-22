@@ -1,5 +1,7 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../models/environment.dart';
 import '../../providers/environment_providers.dart';
@@ -106,53 +108,82 @@ class _EnvironmentFormState extends ConsumerState<EnvironmentForm> {
 
   @override
   Widget build(BuildContext context) {
+    final canvas = MacosTheme.of(context).canvasColor;
+    final divider = MacosTheme.of(context).dividerColor;
+
     if (!_loaded) {
-      return const CupertinoPageScaffold(
-        navigationBar: CupertinoNavigationBar(middle: Text('Loading...')),
-        child: Center(child: CupertinoActivityIndicator()),
+      return ColoredBox(
+        color: canvas,
+        child: const Center(child: ProgressCircle()),
       );
     }
 
-    return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        middle: Text(widget.environmentName),
-        trailing: CupertinoButton(
-          padding: EdgeInsets.zero,
-          onPressed: _save,
-          child: const Text('Save'),
-        ),
-      ),
-      child: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            _sectionHeader('OS Account'),
-            _field('Username', _username),
-            _field('Password', _password),
-
-            _sectionHeader('Network'),
-            _field('WiFi SSID', _wifiSsid, placeholder: 'Leave blank to skip'),
-            _field('WiFi Password', _wifiPassword),
-            _field('Timezone', _timezone),
-
-            _sectionHeader('SSH'),
-            _field('Public Key File', _sshKeyFile),
-
-            _sectionHeader('Viam Cloud'),
-            _modeSelector(),
-            if (_provisionMode == 'full') ...[
-              const SizedBox(height: 12),
-              _field('API Key ID', _viamApiKeyId),
-              _field('API Key', _viamApiKey),
-              _field('Org ID', _viamOrgId),
-              _field('Location ID', _viamLocationId),
-            ],
-
-            _sectionHeader('Tailscale'),
-            _field('Auth Key', _tailscaleAuthKey,
-                placeholder: 'Leave blank to skip'),
-          ],
-        ),
+    return ColoredBox(
+      color: canvas,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: divider, width: 0.5),
+              ),
+            ),
+            child: Row(
+              children: [
+                MacosIconButton(
+                  icon: const MacosIcon(CupertinoIcons.chevron_left, size: 16),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.environmentName,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                PushButton(
+                  controlSize: ControlSize.regular,
+                  onPressed: _save,
+                  child: const Text('Save'),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(20),
+              children: [
+                _sectionHeader('OS Account'),
+                _field('Username', _username),
+                _field('Password', _password),
+                _sectionHeader('Network'),
+                _field('WiFi SSID', _wifiSsid,
+                    placeholder: 'Leave blank to skip'),
+                _field('WiFi Password', _wifiPassword),
+                _field('Timezone', _timezone),
+                _sectionHeader('SSH'),
+                _field('Public Key File', _sshKeyFile),
+                _sectionHeader('Viam Cloud'),
+                _modeSelector(),
+                if (_provisionMode == 'full') ...[
+                  const SizedBox(height: 12),
+                  _field('API Key ID', _viamApiKeyId),
+                  _field('API Key', _viamApiKey),
+                  _field('Org ID', _viamOrgId),
+                  _field('Location ID', _viamLocationId),
+                ],
+                _sectionHeader('Tailscale'),
+                _field('Auth Key', _tailscaleAuthKey,
+                    placeholder: 'Leave blank to skip'),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -165,7 +196,7 @@ class _EnvironmentFormState extends ConsumerState<EnvironmentForm> {
         style: const TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: CupertinoColors.secondaryLabel,
+          color: MacosColors.secondaryLabelColor,
         ),
       ),
     );
@@ -183,7 +214,7 @@ class _EnvironmentFormState extends ConsumerState<EnvironmentForm> {
         children: [
           Text(label, style: const TextStyle(fontSize: 13)),
           const SizedBox(height: 4),
-          CupertinoTextField(
+          MacosTextField(
             controller: controller,
             placeholder: placeholder,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -194,25 +225,28 @@ class _EnvironmentFormState extends ConsumerState<EnvironmentForm> {
   }
 
   Widget _modeSelector() {
-    return CupertinoSlidingSegmentedControl<String>(
-      groupValue: _provisionMode,
-      children: const {
-        'os-only': Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8),
-          child: Text('OS Only', style: TextStyle(fontSize: 13)),
-        ),
-        'agent': Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8),
-          child: Text('Agent', style: TextStyle(fontSize: 13)),
-        ),
-        'full': Padding(
-          padding: EdgeInsets.symmetric(horizontal: 8),
-          child: Text('Full', style: TextStyle(fontSize: 13)),
-        ),
-      },
-      onValueChanged: (value) {
-        if (value != null) setState(() => _provisionMode = value);
-      },
+    const modes = ['os-only', 'agent', 'full'];
+    const labels = {
+      'os-only': 'OS Only',
+      'agent': 'Agent',
+      'full': 'Full',
+    };
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final mode in modes)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: PushButton(
+              controlSize: ControlSize.small,
+              secondary: mode != _provisionMode,
+              onPressed: mode == _provisionMode
+                  ? null
+                  : () => setState(() => _provisionMode = mode),
+              child: Text(labels[mode]!),
+            ),
+          ),
+      ],
     );
   }
 }

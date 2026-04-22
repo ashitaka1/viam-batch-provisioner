@@ -1,7 +1,9 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart' show Tooltip;
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../models/service_status.dart';
 import '../../providers/prep_providers.dart';
@@ -66,9 +68,8 @@ class BootStagePanel extends ConsumerWidget {
                         ? 'Run Setup PXE first'
                         : 'Run Build config first',
                 waitDuration: const Duration(milliseconds: 400),
-                child: CupertinoButton.filled(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 10),
+                child: PushButton(
+                  controlSize: ControlSize.large,
                   onPressed: services.anyBusy
                       ? null
                       : services.allRunning
@@ -86,8 +87,7 @@ class BootStagePanel extends ConsumerWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              if (services.anyBusy)
-                const CupertinoActivityIndicator(radius: 9),
+              if (services.anyBusy) const ProgressCircle(radius: 9),
             ],
           ),
           const SizedBox(height: 16),
@@ -111,7 +111,7 @@ class _Header extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(right: 10, top: 2),
-          child: Icon(
+          child: MacosIcon(
             running
                 ? CupertinoIcons.antenna_radiowaves_left_right
                 : anyUp
@@ -119,10 +119,10 @@ class _Header extends StatelessWidget {
                     : CupertinoIcons.power,
             size: 22,
             color: running
-                ? CupertinoColors.activeGreen
+                ? MacosColors.systemGreenColor
                 : anyUp
-                    ? CupertinoColors.systemOrange
-                    : CupertinoColors.secondaryLabel,
+                    ? MacosColors.systemOrangeColor
+                    : MacosColors.secondaryLabelColor,
           ),
         ),
         Expanded(
@@ -145,7 +145,7 @@ class _Header extends StatelessWidget {
                 'Boot a target machine from the network to assign names in arrival order.',
                 style: TextStyle(
                   fontSize: 13,
-                  color: CupertinoColors.secondaryLabel,
+                  color: MacosColors.secondaryLabelColor,
                 ),
               ),
             ],
@@ -163,23 +163,24 @@ class _ErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textColor = MacosTheme.of(context).typography.body.color;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemRed.resolveFrom(context).withOpacity(0.12),
+        color: MacosColors.systemRedColor.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: CupertinoColors.systemRed.resolveFrom(context).withOpacity(0.4),
+          color: MacosColors.systemRedColor.withValues(alpha: 0.4),
           width: 0.5,
         ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
+          const MacosIcon(
             CupertinoIcons.exclamationmark_triangle_fill,
             size: 16,
-            color: CupertinoColors.systemRed.resolveFrom(context),
+            color: MacosColors.systemRedColor,
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -187,20 +188,24 @@ class _ErrorBanner extends StatelessWidget {
               message,
               style: TextStyle(
                 fontSize: 12,
-                color: CupertinoColors.label.resolveFrom(context),
+                color: textColor,
                 height: 1.35,
               ),
             ),
           ),
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            minSize: 20,
-            onPressed: onDismiss,
-            child: const Icon(
+          MacosIconButton(
+            icon: const MacosIcon(
               CupertinoIcons.xmark,
-              size: 13,
-              color: CupertinoColors.secondaryLabel,
+              size: 12,
+              color: MacosColors.secondaryLabelColor,
             ),
+            boxConstraints: const BoxConstraints(
+              minHeight: 20,
+              minWidth: 20,
+              maxHeight: 24,
+              maxWidth: 24,
+            ),
+            onPressed: onDismiss,
           ),
         ],
       ),
@@ -221,15 +226,19 @@ class _PrepRow extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6.resolveFrom(context),
+        color: MacosTheme.of(context).canvasColor,
         borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: MacosTheme.of(context).dividerColor,
+          width: 0.5,
+        ),
       ),
       child: Row(
         children: [
-          const Icon(
+          const MacosIcon(
             CupertinoIcons.wrench,
             size: 16,
-            color: CupertinoColors.secondaryLabel,
+            color: MacosColors.secondaryLabelColor,
           ),
           const SizedBox(width: 10),
           const Expanded(
@@ -245,7 +254,7 @@ class _PrepRow extends ConsumerWidget {
                   'One-time: extract GRUB + kernel, then stamp autoinstall config.',
                   style: TextStyle(
                     fontSize: 11,
-                    color: CupertinoColors.secondaryLabel,
+                    color: MacosColors.secondaryLabelColor,
                   ),
                 ),
               ],
@@ -296,39 +305,34 @@ class _PrepButton extends ConsumerWidget {
     final done = ref.watch(prepDoneProvider(task)).valueOrNull ?? false;
     final gated = disabledReason != null && !done;
     final enabled = !prep.isBusy && !gated;
-    final button = CupertinoButton(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: CupertinoColors.systemGrey5.resolveFrom(context),
-      borderRadius: BorderRadius.circular(6),
+
+    final button = PushButton(
+      controlSize: ControlSize.small,
+      secondary: !done,
       onPressed: enabled ? () => onRun(task) : null,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (running)
-            const CupertinoActivityIndicator(radius: 7)
+            const ProgressCircle(radius: 7)
           else if (done)
-            const Icon(
+            const MacosIcon(
               CupertinoIcons.checkmark_circle_fill,
               size: 13,
-              color: CupertinoColors.activeGreen,
+              color: MacosColors.systemGreenColor,
             )
           else
-            const Icon(
+            const MacosIcon(
               CupertinoIcons.play_arrow_solid,
               size: 12,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           const SizedBox(width: 6),
-          Text(
-            '$step. $label',
-            style: const TextStyle(
-              fontSize: 12,
-              color: CupertinoColors.label,
-            ),
-          ),
+          Text('$step. $label'),
         ],
       ),
     );
+
     if (gated) {
       return Tooltip(
         message: disabledReason!,
@@ -355,8 +359,12 @@ class _ServiceRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: CupertinoColors.systemGrey6.resolveFrom(context),
+        color: MacosTheme.of(context).canvasColor,
         borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: MacosTheme.of(context).dividerColor,
+          width: 0.5,
+        ),
       ),
       child: Row(
         children: [
@@ -376,8 +384,8 @@ class _ServiceRow extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     color: status.state == ServiceState.error
-                        ? CupertinoColors.systemRed
-                        : CupertinoColors.secondaryLabel,
+                        ? MacosColors.systemRedColor
+                        : MacosColors.secondaryLabelColor,
                   ),
                 ),
               ],
@@ -387,7 +395,7 @@ class _ServiceRow extends StatelessWidget {
             _stateText(status.state),
             style: const TextStyle(
               fontSize: 11,
-              color: CupertinoColors.tertiaryLabel,
+              color: MacosColors.tertiaryLabelColor,
             ),
           ),
         ],
@@ -397,10 +405,10 @@ class _ServiceRow extends StatelessWidget {
 
   Widget _dot(ServiceStatus status) {
     final color = switch (status.state) {
-      ServiceState.running => CupertinoColors.activeGreen,
-      ServiceState.starting || ServiceState.stopping => CupertinoColors.systemYellow,
-      ServiceState.error => CupertinoColors.systemRed,
-      ServiceState.stopped => CupertinoColors.systemGrey3,
+      ServiceState.running => MacosColors.systemGreenColor,
+      ServiceState.starting || ServiceState.stopping => MacosColors.systemYellowColor,
+      ServiceState.error => MacosColors.systemRedColor,
+      ServiceState.stopped => MacosColors.systemGrayColor,
     };
     return Container(
       width: 10,
@@ -456,28 +464,32 @@ class _ServiceLogState extends State<_ServiceLog> {
 
   @override
   Widget build(BuildContext context) {
-    final bg = CupertinoColors.systemGrey6.resolveFrom(context);
+    final bg = MacosTheme.of(context).canvasColor;
+    final divider = MacosTheme.of(context).dividerColor;
+    final textColor = MacosTheme.of(context).typography.body.color;
+
     if (widget.lines.isEmpty) {
       return Container(
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: divider, width: 0.5),
         ),
         alignment: Alignment.center,
         child: const Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
+            MacosIcon(
               CupertinoIcons.square_list,
               size: 22,
-              color: CupertinoColors.tertiaryLabel,
+              color: MacosColors.tertiaryLabelColor,
             ),
             SizedBox(height: 6),
             Text(
               'No service output yet.',
               style: TextStyle(
                 fontSize: 12,
-                color: CupertinoColors.tertiaryLabel,
+                color: MacosColors.tertiaryLabelColor,
               ),
             ),
           ],
@@ -488,7 +500,7 @@ class _ServiceLogState extends State<_ServiceLog> {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: CupertinoColors.separator, width: 0.5),
+        border: Border.all(color: divider, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -501,37 +513,41 @@ class _ServiceLogState extends State<_ServiceLog> {
                   '${widget.lines.length} line${widget.lines.length == 1 ? '' : 's'}',
                   style: const TextStyle(
                     fontSize: 11,
-                    color: CupertinoColors.tertiaryLabel,
+                    color: MacosColors.tertiaryLabelColor,
                   ),
                 ),
                 const Spacer(),
-                CupertinoButton(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
-                  onPressed: () => _copy(context),
-                  child: const Row(
+                MacosIconButton(
+                  icon: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
+                      MacosIcon(
                         CupertinoIcons.doc_on_clipboard,
                         size: 12,
-                        color: CupertinoColors.secondaryLabel,
+                        color: MacosColors.secondaryLabelColor,
                       ),
                       SizedBox(width: 4),
                       Text(
                         'Copy',
                         style: TextStyle(
                           fontSize: 11,
-                          color: CupertinoColors.secondaryLabel,
+                          color: MacosColors.secondaryLabelColor,
                         ),
                       ),
                     ],
                   ),
+                  boxConstraints: const BoxConstraints(
+                    minHeight: 22,
+                    minWidth: 22,
+                    maxHeight: 28,
+                    maxWidth: 80,
+                  ),
+                  onPressed: () => _copy(context),
                 ),
               ],
             ),
           ),
-          Container(height: 0.5, color: CupertinoColors.separator),
+          Container(height: 0.5, color: divider),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(12),
@@ -549,7 +565,7 @@ class _ServiceLogState extends State<_ServiceLog> {
                           style: const TextStyle(
                             fontFamilyFallback: monospaceFontFallback,
                             fontSize: 11,
-                            color: CupertinoColors.secondaryLabel,
+                            color: MacosColors.secondaryLabelColor,
                           ),
                         ),
                         TextSpan(
@@ -559,8 +575,8 @@ class _ServiceLogState extends State<_ServiceLog> {
                             fontSize: 11,
                             height: 1.3,
                             color: line.isError
-                                ? CupertinoColors.systemRed.resolveFrom(context)
-                                : CupertinoColors.label.resolveFrom(context),
+                                ? MacosColors.systemRedColor
+                                : textColor,
                           ),
                         ),
                       ]),

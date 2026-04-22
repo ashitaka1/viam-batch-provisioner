@@ -1,17 +1,20 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 import 'package:path/path.dart' as p;
 
 import '../../providers/environment_providers.dart';
 import '../../providers/provision_providers.dart';
 import '../../providers/queue_providers.dart';
+import '../../theme/theme.dart';
 import '../batch/sidebar_batch.dart';
 
-class Sidebar extends ConsumerWidget {
-  const Sidebar({super.key});
+class BatchSidebar extends ConsumerWidget {
+  const BatchSidebar({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -19,20 +22,17 @@ class Sidebar extends ConsumerWidget {
     final batch = ref.watch(currentBatchProvider);
     final hasEnv = activeEnv != null;
 
-    return Container(
-      color: CupertinoTheme.of(context).barBackgroundColor,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: batch != null
-                ? SidebarBatch(batch: batch)
-                : _EmptyState(hasEnv: hasEnv),
-          ),
-          if (batch != null)
-            _BatchActions(ref: ref, batchPrefix: batch.prefix),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: batch != null
+              ? SidebarBatch(batch: batch)
+              : _EmptyState(hasEnv: hasEnv),
+        ),
+        if (batch != null)
+          _BatchActions(ref: ref, batchPrefix: batch.prefix),
+      ],
     );
   }
 }
@@ -66,7 +66,6 @@ class _BatchActions extends StatelessWidget {
     await File(path).writeAsString(const JsonEncoder.withIndent('  ')
         .convert(reset));
 
-    // Remove MAC-keyed directories (leftover per-machine state)
     final dir = Directory(repo.machinesDir);
     if (await dir.exists()) {
       await for (final entry in dir.list()) {
@@ -83,7 +82,7 @@ class _BatchActions extends StatelessWidget {
       context,
       title: 'Clear batch?',
       message:
-          'Removes the queue and all staged machine credentials. This cannot be undone.\n\nType the batch name to confirm:',
+          'Removes the queue and all staged machine credentials. This cannot be undone.\nType the batch name to confirm.',
       expectedText: batchPrefix,
       destructiveLabel: 'Clear',
     );
@@ -111,22 +110,30 @@ class _BatchActions extends StatelessWidget {
     required String message,
     required String destructiveLabel,
   }) {
-    return showCupertinoDialog<bool>(
+    return showMacosAlertDialog<bool>(
       context: context,
-      builder: (ctx) => CupertinoAlertDialog(
+      builder: (ctx) => MacosAlertDialog(
+        appIcon: const MacosIcon(
+          CupertinoIcons.exclamationmark_triangle_fill,
+          size: 56,
+          color: MacosColors.systemYellowColor,
+        ),
         title: Text(title),
-        content: Text(message),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(destructiveLabel),
-          ),
-        ],
+        message: Text(
+          message,
+          textAlign: TextAlign.center,
+        ),
+        primaryButton: PushButton(
+          controlSize: ControlSize.large,
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(destructiveLabel),
+        ),
+        secondaryButton: PushButton(
+          controlSize: ControlSize.large,
+          secondary: true,
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
       ),
     );
   }
@@ -138,59 +145,40 @@ class _BatchActions extends StatelessWidget {
     required String expectedText,
     required String destructiveLabel,
   }) {
-    final controller = TextEditingController();
-    return showCupertinoDialog<bool>(
+    return showMacosSheet<bool>(
       context: context,
-      builder: (ctx) => _TypeToConfirmDialog(
+      builder: (ctx) => _TypeToConfirmSheet(
         title: title,
         message: message,
         expectedText: expectedText,
         destructiveLabel: destructiveLabel,
-        controller: controller,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final dividerColor = MacosTheme.of(context).dividerColor;
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
-        border: Border(
-          top: BorderSide(color: CupertinoColors.separator, width: 0.5),
-        ),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: dividerColor, width: 0.5)),
       ),
       child: Row(
         children: [
           Expanded(
-            child: CupertinoButton(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              color: CupertinoColors.systemGrey5,
-              borderRadius: BorderRadius.circular(8),
+            child: PushButton(
+              controlSize: ControlSize.large,
+              secondary: true,
               onPressed: () => _resetBatch(context),
-              child: const Text(
-                'Reset',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: CupertinoColors.label,
-                ),
-              ),
+              child: const Text('Reset'),
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: CupertinoButton(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              color: CupertinoColors.destructiveRed,
-              borderRadius: BorderRadius.circular(8),
+            child: DestructivePushButton(
               onPressed: () => _clearBatch(context),
-              child: const Text(
-                'Clear',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: CupertinoColors.white,
-                ),
-              ),
+              child: const Text('Clear'),
             ),
           ),
         ],
@@ -199,73 +187,118 @@ class _BatchActions extends StatelessWidget {
   }
 }
 
-class _TypeToConfirmDialog extends StatefulWidget {
-  const _TypeToConfirmDialog({
+class _TypeToConfirmSheet extends StatefulWidget {
+  const _TypeToConfirmSheet({
     required this.title,
     required this.message,
     required this.expectedText,
     required this.destructiveLabel,
-    required this.controller,
   });
   final String title;
   final String message;
   final String expectedText;
   final String destructiveLabel;
-  final TextEditingController controller;
 
   @override
-  State<_TypeToConfirmDialog> createState() => _TypeToConfirmDialogState();
+  State<_TypeToConfirmSheet> createState() => _TypeToConfirmSheetState();
 }
 
-class _TypeToConfirmDialogState extends State<_TypeToConfirmDialog> {
+class _TypeToConfirmSheetState extends State<_TypeToConfirmSheet> {
+  final _controller = TextEditingController();
+
   @override
   void initState() {
     super.initState();
-    widget.controller.addListener(_onChanged);
+    _controller.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
-    widget.controller.removeListener(_onChanged);
+    _controller.dispose();
     super.dispose();
   }
 
-  void _onChanged() => setState(() {});
-
   @override
   Widget build(BuildContext context) {
-    final matches = widget.controller.text.trim() == widget.expectedText;
-    return CupertinoAlertDialog(
-      title: Text(widget.title),
-      content: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 6),
-          Text(widget.message),
-          const SizedBox(height: 10),
-          CupertinoTextField(
-            controller: widget.controller,
-            autofocus: true,
-            placeholder: widget.expectedText,
-            autocorrect: false,
-            enableSuggestions: false,
-            onSubmitted: (_) {
-              if (matches) Navigator.pop(context, true);
-            },
+    final matches = _controller.text.trim() == widget.expectedText;
+    return MacosSheet(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const MacosIcon(
+                    CupertinoIcons.exclamationmark_triangle_fill,
+                    size: 36,
+                    color: MacosColors.systemYellowColor,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.title,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.message,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: MacosColors.secondaryLabelColor,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              MacosTextField(
+                controller: _controller,
+                autofocus: true,
+                placeholder: widget.expectedText,
+                autocorrect: false,
+                enableSuggestions: false,
+                onSubmitted: (_) {
+                  if (matches) Navigator.pop(context, true);
+                },
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  PushButton(
+                    controlSize: ControlSize.large,
+                    secondary: true,
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel'),
+                  ),
+                  const SizedBox(width: 8),
+                  DestructivePushButton(
+                    onPressed: matches
+                        ? () => Navigator.pop(context, true)
+                        : null,
+                    child: Text(widget.destructiveLabel),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
-      actions: [
-        CupertinoDialogAction(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        CupertinoDialogAction(
-          isDestructiveAction: true,
-          onPressed: matches ? () => Navigator.pop(context, true) : null,
-          child: Text(widget.destructiveLabel),
-        ),
-      ],
     );
   }
 }
@@ -287,7 +320,7 @@ class _EmptyState extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: CupertinoColors.secondaryLabel,
+                color: MacosColors.secondaryLabelColor,
               ),
             ),
             const SizedBox(height: 6),
@@ -298,7 +331,7 @@ class _EmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 11,
-                color: CupertinoColors.tertiaryLabel,
+                color: MacosColors.tertiaryLabelColor,
               ),
             ),
           ],

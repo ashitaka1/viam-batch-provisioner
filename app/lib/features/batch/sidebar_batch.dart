@@ -1,6 +1,8 @@
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart' show Tooltip;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:macos_ui/macos_ui.dart';
 
 import '../../models/batch.dart';
 import '../../providers/provision_providers.dart';
@@ -34,7 +36,12 @@ class SidebarBatch extends ConsumerWidget {
           ),
         const _Divider(),
         const _MachineListHeader(),
-        for (final entry in batch.entries) _MachineRow(name: entry.name, assigned: entry.assigned, mac: entry.mac),
+        for (final entry in batch.entries)
+          _MachineRow(
+            name: entry.name,
+            assigned: entry.assigned,
+            mac: entry.mac,
+          ),
       ],
     );
   }
@@ -62,14 +69,14 @@ class _BatchHeader extends StatelessWidget {
             '${batch.targetType.label}',
             style: const TextStyle(
               fontSize: 11,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
           Text(
             'Mode: ${batch.provisionMode}',
             style: const TextStyle(
               fontSize: 11,
-              color: CupertinoColors.secondaryLabel,
+              color: MacosColors.secondaryLabelColor,
             ),
           ),
         ],
@@ -96,15 +103,16 @@ class _StageRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final (icon, iconColor) = _stageIcon(stage, batch, provisionRunning);
     final enabled = _stageEnabled(stage, batch, provisionRunning);
-    final selectedBg = CupertinoTheme.of(context)
-        .primaryColor
-        .withValues(alpha: 0.12);
+    final textColor = MacosTheme.of(context).typography.body.color;
+    final selectedBg =
+        MacosColors.controlAccentColor.withValues(alpha: 0.12);
+
     final row = Container(
       color: isSelected ? selectedBg : null,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: iconColor),
+          MacosIcon(icon, size: 16, color: iconColor),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -113,8 +121,8 @@ class _StageRow extends ConsumerWidget {
                 fontSize: 13,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                 color: enabled
-                    ? CupertinoColors.label.resolveFrom(context)
-                    : CupertinoColors.tertiaryLabel.resolveFrom(context),
+                    ? textColor
+                    : MacosColors.tertiaryLabelColor,
               ),
             ),
           ),
@@ -126,10 +134,12 @@ class _StageRow extends ConsumerWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: enabled
-          ? () => ref.read(selectedStageIndexProvider.notifier).state = index
+          ? () =>
+              ref.read(selectedStageIndexProvider.notifier).state = index
           : null,
       child: Tooltip(
-        message: enabled ? '' : _disabledReason(stage, batch, provisionRunning),
+        message:
+            enabled ? '' : _disabledReason(stage, batch, provisionRunning),
         waitDuration: const Duration(milliseconds: 400),
         child: row,
       ),
@@ -141,10 +151,10 @@ class _StageRow extends ConsumerWidget {
     if (_stageComplete(stage, batch, provisionRunning)) {
       return (
         CupertinoIcons.checkmark_circle_fill,
-        CupertinoColors.activeGreen,
+        MacosColors.systemGreenColor,
       );
     }
-    return (CupertinoIcons.circle, CupertinoColors.systemGrey3);
+    return (CupertinoIcons.circle, MacosColors.systemGrayColor);
   }
 
   bool _stageComplete(BatchStage stage, Batch batch, bool provisionRunning) {
@@ -190,7 +200,7 @@ class _StageRow extends ConsumerWidget {
       text,
       style: const TextStyle(
         fontSize: 11,
-        color: CupertinoColors.secondaryLabel,
+        color: MacosColors.secondaryLabelColor,
         fontFeatures: [FontFeature.tabularFigures()],
       ),
     );
@@ -209,7 +219,7 @@ class _MachineListHeader extends StatelessWidget {
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: CupertinoColors.tertiaryLabel,
+          color: MacosColors.tertiaryLabelColor,
           letterSpacing: 0.5,
         ),
       ),
@@ -229,14 +239,14 @@ class _MachineRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
-          Icon(
+          MacosIcon(
             assigned
                 ? CupertinoIcons.checkmark_circle_fill
                 : CupertinoIcons.circle,
             size: 14,
             color: assigned
-                ? CupertinoColors.activeGreen
-                : CupertinoColors.systemGrey3,
+                ? MacosColors.systemGreenColor
+                : MacosColors.systemGrayColor,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -251,7 +261,7 @@ class _MachineRow extends StatelessWidget {
               mac!,
               style: const TextStyle(
                 fontSize: 10,
-                color: CupertinoColors.tertiaryLabel,
+                color: MacosColors.tertiaryLabelColor,
                 fontFamilyFallback: monospaceFontFallback,
               ),
             ),
@@ -268,7 +278,7 @@ class _Divider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 0.5,
-      color: CupertinoColors.separator,
+      color: MacosTheme.of(context).dividerColor,
       margin: const EdgeInsets.symmetric(vertical: 4),
     );
   }
