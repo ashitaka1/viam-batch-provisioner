@@ -47,14 +47,7 @@ class Toolbar extends ConsumerWidget {
 
           const Spacer(),
 
-          _serviceIndicator('HTTP', services.http,
-              tooltip: 'Embedded HTTP server (port 8234)'),
-          const SizedBox(width: 8),
-          _serviceIndicator('DHCP', services.dnsmasq,
-              tooltip: 'dnsmasq proxy DHCP + TFTP'),
-          const SizedBox(width: 8),
-          _serviceIndicator('Watch', services.watcher,
-              tooltip: 'PXE watcher — assigns names to MACs as machines boot'),
+          _ServicesMenu(services: services),
 
           const SizedBox(width: 12),
 
@@ -79,12 +72,9 @@ class Toolbar extends ConsumerWidget {
     );
   }
 
-  Widget _serviceIndicator(
-    String label,
-    ServiceStatus status, {
-    required String tooltip,
-  }) {
-    final color = switch (status.state) {
+}
+
+Color _serviceColor(ServiceState state) => switch (state) {
       ServiceState.running => CupertinoColors.activeGreen,
       ServiceState.starting ||
       ServiceState.stopping =>
@@ -92,35 +82,215 @@ class Toolbar extends ConsumerWidget {
       ServiceState.error => CupertinoColors.systemRed,
       ServiceState.stopped => CupertinoColors.systemGrey3,
     };
-    final stateLabel = switch (status.state) {
+
+String _serviceStateLabel(ServiceState state) => switch (state) {
       ServiceState.running => 'running',
       ServiceState.starting => 'starting',
       ServiceState.stopping => 'stopping',
       ServiceState.error => 'error',
       ServiceState.stopped => 'stopped',
     };
-    return Tooltip(
-      message: '$tooltip — $stateLabel',
-      waitDuration: const Duration(milliseconds: 500),
-      child: Row(
+
+class _ServicesMenu extends ConsumerWidget {
+  const _ServicesMenu({required this.services});
+
+  final ServicesStatus services;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final anyRunning = services.anyRunning;
+    final anyBusy = services.anyBusy;
+
+    return MenuAnchor(
+      alignmentOffset: const Offset(0, 4),
+      menuChildren: [
+        _MenuHeader(services: services),
+        Container(height: 0.5, color: CupertinoColors.separator),
+        MenuItemButton(
+          onPressed: anyBusy
+              ? null
+              : () {
+                  ref.read(servicesControllerProvider.notifier).startAll();
+                },
+          leadingIcon: const Icon(
+            CupertinoIcons.play_fill,
+            size: 13,
+            color: CupertinoColors.activeGreen,
+          ),
+          child: const Text(
+            'Start all',
+            style: TextStyle(fontSize: 13),
+          ),
+        ),
+        MenuItemButton(
+          onPressed: (!anyRunning || anyBusy)
+              ? null
+              : () {
+                  ref.read(servicesControllerProvider.notifier).stopAll();
+                },
+          leadingIcon: const Icon(
+            CupertinoIcons.stop_fill,
+            size: 13,
+            color: CupertinoColors.systemRed,
+          ),
+          child: const Text(
+            'Stop all',
+            style: TextStyle(fontSize: 13),
+          ),
+        ),
+      ],
+      builder: (context, controller, _) {
+        return Tooltip(
+          message:
+              'PXE services — needed for x86 network boot. Click for controls.',
+          waitDuration: const Duration(milliseconds: 500),
+          child: CupertinoButton(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            minSize: 0,
+            onPressed: () {
+              if (controller.isOpen) {
+                controller.close();
+              } else {
+                controller.open();
+              }
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _Dot(state: services.http.state),
+                const SizedBox(width: 4),
+                const Text(
+                  'HTTP',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: CupertinoColors.secondaryLabel,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _Dot(state: services.dnsmasq.state),
+                const SizedBox(width: 4),
+                const Text(
+                  'DHCP',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: CupertinoColors.secondaryLabel,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _Dot(state: services.watcher.state),
+                const SizedBox(width: 4),
+                const Text(
+                  'Watch',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: CupertinoColors.secondaryLabel,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _Dot extends StatelessWidget {
+  const _Dot({required this.state});
+  final ServiceState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: _serviceColor(state),
+      ),
+    );
+  }
+}
+
+class _MenuHeader extends StatelessWidget {
+  const _MenuHeader({required this.services});
+  final ServicesStatus services;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+          const Text(
+            'PXE services',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: CupertinoColors.secondaryLabel,
+            ),
           ),
-          const SizedBox(width: 4),
-          Text(
+          const SizedBox(height: 6),
+          _serviceRow(
+            'HTTP',
+            services.http,
+            subtitle: 'Embedded server on :8234',
+          ),
+          const SizedBox(height: 3),
+          _serviceRow(
+            'DHCP',
+            services.dnsmasq,
+            subtitle: 'dnsmasq proxy DHCP + TFTP',
+          ),
+          const SizedBox(height: 3),
+          _serviceRow(
+            'Watch',
+            services.watcher,
+            subtitle: 'Assigns names to MACs',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _serviceRow(
+    String label,
+    ServiceStatus status, {
+    required String subtitle,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Dot(state: status.state),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 52,
+          child: Text(
             label,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ),
+        SizedBox(
+          width: 60,
+          child: Text(
+            _serviceStateLabel(status.state),
             style: const TextStyle(
               fontSize: 11,
               color: CupertinoColors.secondaryLabel,
             ),
           ),
-        ],
-      ),
+        ),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            fontSize: 11,
+            color: CupertinoColors.tertiaryLabel,
+          ),
+        ),
+      ],
     );
   }
 }
