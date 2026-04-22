@@ -137,7 +137,7 @@ echo "Authenticating with Viam..."
 viam login api-key --key-id="$VIAM_API_KEY_ID" --key="$VIAM_API_KEY"
 
 # Resolve org + location names so the operator knows where machines will land
-LABELS=$("$PYTHON" "${REPO_ROOT}/scripts/resolve-labels.py" --org-id="$ORG" --location-id="$LOCATION" 2>/dev/null || true)
+LABELS=$("$PYTHON" "${REPO_ROOT}/cli/resolve-labels.py" --org-id="$ORG" --location-id="$LOCATION" 2>/dev/null || true)
 ORG_NAME=$(echo "$LABELS" | sed -n 's/^ORG_NAME=//p')
 LOC_NAME=$(echo "$LABELS" | sed -n 's/^LOCATION_NAME=//p')
 echo ""
