@@ -9,6 +9,7 @@ import '../core/platform_utils.dart';
 import '../core/process_runner.dart';
 import '../core/repo_root.dart';
 import '../models/service_status.dart';
+import 'preferences_providers.dart';
 
 class ServiceLogLine {
   const ServiceLogLine(this.service, this.line, {this.isError = false});
@@ -18,9 +19,11 @@ class ServiceLogLine {
 }
 
 class ServicesController extends StateNotifier<ServicesStatus> {
-  ServicesController(this._repoRoot) : super(const ServicesStatus());
+  ServicesController(this._repoRoot, {required this.getWatcherInterface})
+      : super(const ServicesStatus());
 
   final String _repoRoot;
+  final String? Function() getWatcherInterface;
   EmbeddedHttpServer? _httpServer;
   StreamSubscription<ProcessEvent>? _dnsmasqSub;
   StreamSubscription<ProcessEvent>? _watcherSub;
@@ -163,9 +166,13 @@ class ServicesController extends StateNotifier<ServicesStatus> {
     );
     final python = p.join(_repoRoot, '.venv', 'bin', 'python3');
     final script = p.join(_repoRoot, 'pxe-watcher', 'watcher.py');
+    final iface = getWatcherInterface();
     _watcherSub = startPrivileged(
       executable: python,
-      arguments: [script],
+      arguments: [
+        script,
+        if (iface != null) ...['--interface', iface],
+      ],
       workingDirectory: _repoRoot,
     ).listen((event) {
       if (event is ProcessLine) {
@@ -215,7 +222,10 @@ class ServicesController extends StateNotifier<ServicesStatus> {
 
 final servicesControllerProvider =
     StateNotifierProvider<ServicesController, ServicesStatus>((ref) {
-  return ServicesController(ref.watch(repoRootProvider));
+  return ServicesController(
+    ref.watch(repoRootProvider),
+    getWatcherInterface: () => ref.read(selectedNetworkInterfaceProvider),
+  );
 });
 
 final serviceLogProvider = StreamProvider<List<ServiceLogLine>>((ref) async* {

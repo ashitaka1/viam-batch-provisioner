@@ -1,4 +1,5 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show MenuAnchor, MenuItemButton;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/environment_providers.dart';
@@ -151,6 +152,7 @@ class _NetworkSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final interfaces = ref.watch(networkInterfacesProvider);
     final defaultIface = ref.watch(defaultNetworkInterfaceProvider);
+    final selected = ref.watch(selectedNetworkInterfaceProvider);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: Column(
@@ -164,17 +166,25 @@ class _NetworkSection extends ConsumerWidget {
               color: CupertinoColors.secondaryLabel,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
+          const Text(
+            'Interface for PXE watcher (sniffs DHCP to assign machine names).',
+            style: TextStyle(
+              fontSize: 11,
+              color: CupertinoColors.tertiaryLabel,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 8),
           interfaces.when(
-            data: (list) => Text(
-              list.isEmpty
-                  ? 'No interfaces detected'
-                  : list.join(' · '),
-              style: const TextStyle(
-                fontSize: 11,
-                fontFamilyFallback: monospaceFontFallback,
-                color: CupertinoColors.secondaryLabel,
-              ),
+            data: (list) => _InterfacePicker(
+              interfaces: list,
+              selected: selected,
+              autoDetected: defaultIface.valueOrNull,
+              onChanged: (value) {
+                ref.read(selectedNetworkInterfaceProvider.notifier).state =
+                    value;
+              },
             ),
             loading: () => const CupertinoActivityIndicator(radius: 7),
             error: (e, _) => Text(
@@ -185,22 +195,100 @@ class _NetworkSection extends ConsumerWidget {
               ),
             ),
           ),
-          const SizedBox(height: 4),
-          defaultIface.when(
-            data: (iface) => Text(
-              iface == null
-                  ? 'No ethernet / thunderbolt interface detected'
-                  : 'Default: $iface',
-              style: const TextStyle(
-                fontSize: 11,
-                color: CupertinoColors.tertiaryLabel,
-              ),
-            ),
-            loading: () => const SizedBox.shrink(),
-            error: (_, __) => const SizedBox.shrink(),
-          ),
         ],
       ),
+    );
+  }
+}
+
+class _InterfacePicker extends StatelessWidget {
+  const _InterfacePicker({
+    required this.interfaces,
+    required this.selected,
+    required this.autoDetected,
+    required this.onChanged,
+  });
+
+  final List<String> interfaces;
+  final String? selected;
+  final String? autoDetected;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = selected ??
+        (autoDetected != null
+            ? 'Auto-detect ($autoDetected)'
+            : 'Auto-detect');
+
+    return MenuAnchor(
+      alignmentOffset: const Offset(0, 4),
+      menuChildren: [
+        MenuItemButton(
+          leadingIcon: Icon(
+            selected == null ? CupertinoIcons.checkmark : null,
+            size: 13,
+            color: CupertinoColors.activeBlue,
+          ),
+          onPressed: selected == null ? null : () => onChanged(null),
+          child: Text(
+            autoDetected != null
+                ? 'Auto-detect ($autoDetected)'
+                : 'Auto-detect',
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+        for (final name in interfaces)
+          MenuItemButton(
+            leadingIcon: Icon(
+              name == selected ? CupertinoIcons.checkmark : null,
+              size: 13,
+              color: CupertinoColors.activeBlue,
+            ),
+            onPressed: name == selected ? null : () => onChanged(name),
+            child: Text(
+              name,
+              style: const TextStyle(
+                fontSize: 13,
+                fontFamilyFallback: monospaceFontFallback,
+              ),
+            ),
+          ),
+      ],
+      builder: (context, controller, _) {
+        return CupertinoButton(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          color: CupertinoColors.tertiarySystemFill.resolveFrom(context),
+          borderRadius: BorderRadius.circular(6),
+          onPressed: interfaces.isEmpty
+              ? null
+              : () {
+                  if (controller.isOpen) {
+                    controller.close();
+                  } else {
+                    controller.open();
+                  }
+                },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: CupertinoTheme.of(context).textTheme.textStyle.color,
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(
+                CupertinoIcons.chevron_up_chevron_down,
+                size: 10,
+                color: CupertinoColors.secondaryLabel,
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

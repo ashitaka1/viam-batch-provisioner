@@ -31,3 +31,6 @@ final networkInterfacesProvider = FutureProvider<List<String>>((ref) async {
 final defaultNetworkInterfaceProvider = FutureProvider<String?>((ref) async {
   return defaultEthernetInterface();
 });
+
+/// User-selected interface for the PXE watcher. `null` means auto-detect.
+final selectedNetworkInterfaceProvider = StateProvider<String?>((ref) => null);
