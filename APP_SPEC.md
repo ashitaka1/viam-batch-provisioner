@@ -1,6 +1,6 @@
 # Flutter App Spec
 
-A macOS desktop GUI for the Viam Lab Provisioner, coexisting with the CLI.
+A macOS desktop GUI for the Viam Batch Provisioner, coexisting with the CLI.
 Both read and write the same files on disk, so either can be used
 interchangeably. No backend server; the app shells out to the same scripts
 under `cli/` and watches the filesystem directly.

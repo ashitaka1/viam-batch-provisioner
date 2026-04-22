@@ -1,5 +1,5 @@
 name: viam_provisioner
-description: Desktop GUI for Viam Lab Provisioner
+description: Desktop GUI for Viam Batch Provisioner
 publish_to: 'none'
 version: 0.1.0+1
 
