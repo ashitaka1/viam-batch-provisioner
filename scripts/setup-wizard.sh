@@ -7,6 +7,41 @@ SITE_CONFIG="${REPO_ROOT}/config/site.env"
 
 mkdir -p "$ENV_DIR"
 
+# If the active environment is changing, the prior env's queue is stale —
+# different prefix, possibly different mode/credentials. Offer to wipe it
+# before the symlink swap so `just provision` doesn't trip over the guard
+# in provision-batch.sh complaining about leftover unassigned machines.
+maybe_clean_queue_on_env_switch() {
+    local new_env_name="$1"
+    [[ -L "$SITE_CONFIG" ]] || return 0
+    local current
+    current=$(readlink "$SITE_CONFIG")
+    local current_name
+    current_name=$(basename "$current" .env)
+    [[ "$current_name" != "$new_env_name" ]] || return 0
+
+    local queue_file="${REPO_ROOT}/http-server/machines/queue.json"
+    [[ -f "$queue_file" ]] || return 0
+    local unassigned
+    unassigned=$(python3 -c "import json; q=json.load(open('$queue_file')); print(sum(1 for s in q if not s.get('assigned')))" 2>/dev/null || echo 0)
+    [[ "$unassigned" -gt 0 ]] || return 0
+
+    echo "Switching environments: ${current_name} → ${new_env_name}"
+    echo "  Previous queue has ${unassigned} unassigned machine(s)."
+    read -p "  Wipe queue? (y/n) [y]: " wipe
+    wipe="${wipe:-y}"
+    if [[ "$wipe" == "y" ]]; then
+        rm -rf "${REPO_ROOT}/http-server/machines"/[0-9a-f][0-9a-f]:* 2>/dev/null || true
+        rm -rf "${REPO_ROOT}/http-server/machines"/slot-* 2>/dev/null || true
+        rm -f "$queue_file"
+        rm -rf "${REPO_ROOT}/netboot/grub/provisioned/" 2>/dev/null || true
+        echo "  Queue cleaned."
+    else
+        echo "  Keeping previous queue. 'just provision' will complain until you 'just clean'."
+    fi
+    echo ""
+}
+
 # Set up .venv with viam-sdk if the active environment is in full mode and
 # the venv is missing. Called from both the new-env and existing-env paths
 # so re-activating an env on a fresh machine still gets a working venv.
@@ -68,6 +103,7 @@ if [[ ${#EXISTING[@]} -gt 0 ]]; then
         if [[ $IDX -ge 0 && $IDX -lt ${#EXISTING[@]} ]]; then
             SELECTED="${EXISTING[$IDX]}"
             ENV_NAME=$(basename "$SELECTED" .env)
+            maybe_clean_queue_on_env_switch "$ENV_NAME"
             ln -sf "environments/${ENV_NAME}.env" "$SITE_CONFIG"
             echo ""
             echo "Activated: ${ENV_NAME}"
@@ -239,6 +275,7 @@ TAILSCALE_AUTH_KEY=${TAILSCALE_AUTH_KEY}
 EOF
 
 # Symlink as active environment
+maybe_clean_queue_on_env_switch "$ENV_NAME"
 ln -sf "environments/${ENV_NAME}.env" "$SITE_CONFIG"
 
 echo "Saved: config/environments/${ENV_NAME}.env"
