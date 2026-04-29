@@ -64,13 +64,15 @@ def assign_machine(queue_dir: Path, queue: list[dict], mac: str) -> dict | None:
     hostname_file.write_text(name)
     _chown_to_invoker(hostname_file)
 
-    # Copy viam.json from the slot's staged credentials
-    slot_dir = queue_dir / slot["slot_id"]
-    viam_json_src = slot_dir / "viam.json"
-    if viam_json_src.exists():
-        viam_json_dst = machine_dir / "viam.json"
-        viam_json_dst.write_text(viam_json_src.read_text())
-        _chown_to_invoker(viam_json_dst)
+    # Copy viam.json from the slot's staged credentials (full mode only —
+    # os-only/agent queues have no slot_id and no per-slot credentials).
+    slot_id = slot.get("slot_id")
+    if slot_id:
+        viam_json_src = queue_dir / slot_id / "viam.json"
+        if viam_json_src.exists():
+            viam_json_dst = machine_dir / "viam.json"
+            viam_json_dst.write_text(viam_json_src.read_text())
+            _chown_to_invoker(viam_json_dst)
 
     # Write machine info
     info = {
@@ -82,14 +84,16 @@ def assign_machine(queue_dir: Path, queue: list[dict], mac: str) -> dict | None:
     info_file.write_text(json.dumps(info, indent=2))
     _chown_to_invoker(info_file)
 
-    # Mark as assigned in queue.json
+    # Mark as assigned in queue.json. Match on name — it's 1:1 with the
+    # slot in both full mode (which also has slot_id) and os-only/agent
+    # mode (which doesn't), so name is the queue-wide identity key.
     slot["assigned"] = True
     slot["mac"] = mac
     queue_file = queue_dir / "queue.json"
     with open(queue_file) as f:
         all_slots = json.load(f)
     for s in all_slots:
-        if s["slot_id"] == slot["slot_id"]:
+        if s["name"] == slot["name"]:
             s["assigned"] = True
             s["mac"] = mac
             break
