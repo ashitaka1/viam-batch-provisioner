@@ -7,6 +7,33 @@ SITE_CONFIG="${REPO_ROOT}/config/site.env"
 
 mkdir -p "$ENV_DIR"
 
+# Set up .venv with viam-sdk if the active environment is in full mode and
+# the venv is missing. Called from both the new-env and existing-env paths
+# so re-activating an env on a fresh machine still gets a working venv.
+ensure_venv_for_full_mode() {
+    local env_file="$1"
+    local mode
+    mode=$(grep '^PROVISION_MODE=' "$env_file" 2>/dev/null | cut -d= -f2)
+    [[ "$mode" == "full" ]] || return 0
+    [[ -x "${REPO_ROOT}/.venv/bin/python3" ]] && return 0
+
+    echo "Python venv:"
+    echo "  Full mode needs a Python venv with viam-sdk to fetch credentials."
+    echo "  Will run: python3 -m venv .venv && .venv/bin/pip install viam-sdk"
+    echo ""
+    read -p "  Set it up now? (y/n) [y]: " setup_venv
+    setup_venv="${setup_venv:-y}"
+    if [[ "$setup_venv" == "y" ]]; then
+        python3 -m venv "${REPO_ROOT}/.venv"
+        echo "  Installing viam-sdk (this takes ~30s)..."
+        "${REPO_ROOT}/.venv/bin/pip" install --quiet --disable-pip-version-check viam-sdk
+        echo "  Done."
+    else
+        echo "  Skipped. Run it yourself before 'just provision'."
+    fi
+    echo ""
+}
+
 # Verify host tools before prompting — saves the user from filling out
 # the wizard only to hit a missing-tool error two commands later.
 if ! "${REPO_ROOT}/scripts/check-prereqs.sh"; then
@@ -46,6 +73,7 @@ if [[ ${#EXISTING[@]} -gt 0 ]]; then
             echo "Activated: ${ENV_NAME}"
             echo "  config/site.env → config/environments/${ENV_NAME}.env"
             echo ""
+            ensure_venv_for_full_mode "$SELECTED"
             echo "Provision with: just provision <prefix> <count>"
             exit 0
         fi
@@ -171,26 +199,6 @@ if [[ "$PROVISION_MODE" == "full" ]]; then
 fi
 echo ""
 
-# --- Python venv (full mode only) ---
-
-if [[ "$PROVISION_MODE" == "full" && ! -x "${REPO_ROOT}/.venv/bin/python3" ]]; then
-    echo "Python venv:"
-    echo "  Full mode needs a Python venv with viam-sdk to fetch credentials."
-    echo "  Will run: python3 -m venv .venv && .venv/bin/pip install viam-sdk"
-    echo ""
-    read -p "  Set it up now? (y/n) [y]: " SETUP_VENV
-    SETUP_VENV="${SETUP_VENV:-y}"
-    if [[ "$SETUP_VENV" == "y" ]]; then
-        python3 -m venv "${REPO_ROOT}/.venv"
-        echo "  Installing viam-sdk (this takes ~30s)..."
-        "${REPO_ROOT}/.venv/bin/pip" install --quiet --disable-pip-version-check viam-sdk
-        echo "  Done."
-    else
-        echo "  Skipped. Run it yourself before 'just provision'."
-    fi
-    echo ""
-fi
-
 # --- Tailscale ---
 
 echo "Tailscale (optional):"
@@ -236,6 +244,9 @@ ln -sf "environments/${ENV_NAME}.env" "$SITE_CONFIG"
 echo "Saved: config/environments/${ENV_NAME}.env"
 echo "Active: config/site.env → config/environments/${ENV_NAME}.env"
 echo ""
+
+ensure_venv_for_full_mode "$ENV_FILE"
+
 echo "=== Next steps ==="
 echo "  1. just provision <prefix> <count>"
 echo "  2. just serve            (PXE: starts all services + watcher)"
