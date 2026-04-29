@@ -29,7 +29,10 @@ Plug in a machine, power it on, and walk away. It gets an OS, a hostname, SSH ac
 
 For Viam `full` mode:
 - Viam CLI (`brew install viam`)
-- Python venv with Viam SDK: `python3 -m venv .venv && .venv/bin/pip install viam-sdk`
+
+Run `just doctor` at any time to verify all of the above are installed. The
+setup wizard runs the same check before prompting, and creates the Python
+venv with `viam-sdk` for you when you choose `full` mode.
 
 ## Quick start
 
@@ -121,6 +124,7 @@ The environment holds stable settings (credentials, WiFi, SSH key, timezone). Pe
 
 | Command | Description |
 |---------|-------------|
+| `just doctor` | Verify host tools (dnsmasq, p7zip, docker, viam CLI) |
 | `just setup-wizard` | Interactive setup — create/switch environments |
 | `just provision <prefix> <count>` | Generate queue or create Viam machines |
 | `just serve` | Start all PXE services + watcher (Ctrl-C stops all) |

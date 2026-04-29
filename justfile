@@ -1,5 +1,9 @@
 # PXE/SD provisioning commands
 
+# Verify host tools (p7zip, dnsmasq, docker, python3, viam CLI) are installed
+doctor:
+    ./scripts/check-prereqs.sh --full
+
 # Interactive setup — creates config/site.env
 setup-wizard:
     ./scripts/setup-wizard.sh
@@ -22,7 +26,9 @@ serve:
     echo "Starting HTTP server..."
     docker compose up -d
     echo "Starting dnsmasq (DHCP proxy + TFTP)..."
-    sudo dnsmasq --conf-file=netboot/dnsmasq.conf --tftp-root={{justfile_directory()}}/netboot --log-facility={{justfile_directory()}}/dnsmasq.log
+    # --user=root: dnsmasq's default 'nobody' user can't traverse macOS home
+    # directories, so TFTP fails with "Permission denied" reading netboot/.
+    sudo dnsmasq --user=root --conf-file=netboot/dnsmasq.conf --tftp-root={{justfile_directory()}}/netboot --log-facility={{justfile_directory()}}/dnsmasq.log
     # Tail HTTP logs + create PXE guard files when hostname is fetched
     {{justfile_directory()}}/scripts/tail-http-logs.sh {{justfile_directory()}}/netboot/grub/provisioned &
     HTTP_LOG_PID=$!
@@ -38,13 +44,15 @@ stop:
     sudo killall dnsmasq 2>/dev/null && echo "  dnsmasq stopped" || echo "  dnsmasq not running"
     docker compose down 2>/dev/null && echo "  Docker stopped" || echo "  Docker not running"
 
+# --- Debug helpers (individual services; `just serve` runs them together) ---
+
 # Start PXE watcher only (assigns names to MACs as machines boot)
 watch:
     sudo .venv/bin/python3 pxe-watcher/watcher.py
 
 # Start dnsmasq proxy DHCP + TFTP server only
 dhcp:
-    sudo dnsmasq --conf-file=netboot/dnsmasq.conf --tftp-root={{justfile_directory()}}/netboot --log-facility={{justfile_directory()}}/dnsmasq.log --no-daemon 2>&1 | grep -v '^dnsmasq-dhcp'
+    sudo dnsmasq --user=root --conf-file=netboot/dnsmasq.conf --tftp-root={{justfile_directory()}}/netboot --log-facility={{justfile_directory()}}/dnsmasq.log --no-daemon 2>&1 | grep -v '^dnsmasq-dhcp'
 
 # Start HTTP server only (Docker)
 up:
@@ -57,6 +65,8 @@ down:
 # Generate autoinstall user-data from template + secrets
 build-config:
     ./scripts/build-config.sh
+
+# --- Main flow targets resume below ---
 
 # Extract GRUB, kernel, initrd from Ubuntu ISO (one-time setup)
 setup:

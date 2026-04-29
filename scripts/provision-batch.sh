@@ -130,7 +130,7 @@ export VIAM_API_KEY_ID VIAM_API_KEY
 
 # Check dependencies
 command -v viam &>/dev/null || die "viam CLI not found. Install from https://docs.viam.com/dev/tools/cli/"
-[[ -x "$PYTHON" ]] || die "Python venv not found. Run: python3 -m venv .venv && .venv/bin/pip install viam-sdk"
+[[ -x "$PYTHON" ]] || die "Python venv not found. Re-run 'just setup-wizard' or set up manually: python3 -m venv .venv && .venv/bin/pip install viam-sdk"
 "$PYTHON" -c "import viam" 2>/dev/null || die "viam-sdk not installed. Run: .venv/bin/pip install viam-sdk"
 
 echo "Authenticating with Viam..."

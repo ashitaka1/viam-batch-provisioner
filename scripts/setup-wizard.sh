@@ -7,6 +7,15 @@ SITE_CONFIG="${REPO_ROOT}/config/site.env"
 
 mkdir -p "$ENV_DIR"
 
+# Verify host tools before prompting — saves the user from filling out
+# the wizard only to hit a missing-tool error two commands later.
+if ! "${REPO_ROOT}/scripts/check-prereqs.sh"; then
+    echo ""
+    echo "Install the missing tools above, then re-run: just setup-wizard"
+    exit 1
+fi
+echo ""
+
 echo "=== Viam Batch Provisioner Setup ==="
 echo ""
 
@@ -161,6 +170,26 @@ if [[ "$PROVISION_MODE" == "full" ]]; then
     read -p "  Location ID: " VIAM_LOCATION_ID
 fi
 echo ""
+
+# --- Python venv (full mode only) ---
+
+if [[ "$PROVISION_MODE" == "full" && ! -x "${REPO_ROOT}/.venv/bin/python3" ]]; then
+    echo "Python venv:"
+    echo "  Full mode needs a Python venv with viam-sdk to fetch credentials."
+    echo "  Will run: python3 -m venv .venv && .venv/bin/pip install viam-sdk"
+    echo ""
+    read -p "  Set it up now? (y/n) [y]: " SETUP_VENV
+    SETUP_VENV="${SETUP_VENV:-y}"
+    if [[ "$SETUP_VENV" == "y" ]]; then
+        python3 -m venv "${REPO_ROOT}/.venv"
+        echo "  Installing viam-sdk (this takes ~30s)..."
+        "${REPO_ROOT}/.venv/bin/pip" install --quiet --disable-pip-version-check viam-sdk
+        echo "  Done."
+    else
+        echo "  Skipped. Run it yourself before 'just provision'."
+    fi
+    echo ""
+fi
 
 # --- Tailscale ---
 

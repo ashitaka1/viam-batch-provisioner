@@ -9,12 +9,16 @@
 - `p7zip` (`brew install p7zip`) — for PXE server setup only
 - `dnsmasq` (`brew install dnsmasq`) — for PXE server setup only
 
+Run `just doctor` to verify everything's installed.
+
 ## Setup
 
 ```bash
 git clone <repo-url> && cd viam-batch-provisioner
 
-# Interactive setup — creates config/site.env with all your settings
+# Interactive setup — creates config/site.env with all your settings.
+# The wizard runs the prereq check and (in full mode) sets up the
+# Python venv with viam-sdk for you.
 just setup-wizard
 ```
 
@@ -44,26 +48,16 @@ just flash /dev/disk4 lab-pi-1
 ## Provisioning x86 Machines (PXE)
 
 ```bash
-# 1. Python venv (one-time)
-python3 -m venv .venv && .venv/bin/pip install viam-sdk
-
-# 2. Extract GRUB + kernel from Ubuntu ISO (one-time)
+# 1. Extract GRUB + kernel from Ubuntu ISO (one-time)
 just setup
 
-# 3. Generate autoinstall config
-just build-config
-
-# 4. Start services (separate terminals)
-just up      # HTTP server
-just dhcp    # DHCP proxy + TFTP
-
-# 5. Generate queue + credentials
+# 2. Generate queue + credentials
 just provision lab-meerkat 6
 
-# 6. Start watcher
-just watch
+# 3. Start all PXE services + watcher (Ctrl-C stops everything)
+just serve
 
-# 7. Power on machines (F12 for network boot)
+# 4. Power on machines (F12 for network boot)
 ```
 
 ## Provision Modes
@@ -86,17 +80,17 @@ Set in `config/site.env` (or via the setup wizard):
 
 | Command | Description |
 |---------|-------------|
+| `just doctor` | Verify host tools are installed |
 | `just setup-wizard` | Interactive setup — creates config/site.env |
 | `just provision <prefix> <count>` | Generate queue or create Viam machines |
+| `just serve` | Start all PXE services + watcher (Ctrl-C stops everything) |
+| `just stop` | Stop all PXE services |
 | `just flash-batch` | Flash all queued machines to SD cards |
 | `just flash <dev> <name>` | Flash a single SD card |
 | `just download-pi-image` | Download Raspberry Pi OS Lite |
-| `just up` | Start HTTP server (Docker) |
-| `just down` | Stop HTTP server |
-| `just dhcp` | Start dnsmasq proxy DHCP + TFTP |
-| `just watch` | Start PXE watcher |
-| `just build-config` | Generate PXE autoinstall config |
-| `just setup` | Extract GRUB + kernel from Ubuntu ISO |
+| `just setup` | Extract GRUB + kernel from Ubuntu ISO (one-time) |
 | `just status` | Show queue state + service status |
 | `just reset` | Re-use current queue (mark unassigned) |
 | `just clean` | Wipe all provisioning state |
+
+Debugging helpers (run individual services for iteration): `just up`, `just down`, `just dhcp`, `just watch`, `just build-config`.

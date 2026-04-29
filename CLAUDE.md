@@ -53,10 +53,8 @@ just flash-batch        # flash all SD cards with swap prompts
 
 # x86 PXE provisioning
 just setup              # extract GRUB + kernel from Ubuntu ISO (one-time)
-just build-config       # generate autoinstall config
-just up && just dhcp    # start HTTP server + DHCP/TFTP
 just provision          # create Viam machines + stage credentials
-just watch              # start PXE watcher
+just serve              # start HTTP + DHCP/TFTP + watcher (Ctrl-C stops all)
 ```
 
 ## Target Machine Config

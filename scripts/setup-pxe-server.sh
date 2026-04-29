@@ -97,33 +97,11 @@ else
     echo "ISO already staged for HTTP."
 fi
 
-# --- Check config files ---
-
 echo ""
-echo "Checking config files..."
-MISSING=0
-for f in ssh_host_key.pub tailscale.key viam-credentials.env; do
-    if [[ -f "${REPO_ROOT}/config/${f}" ]]; then
-        echo "  ✓ config/${f}"
-    else
-        echo "  ✗ config/${f} — copy from ${f}.example and fill in"
-        MISSING=1
-    fi
-done
-
-# --- Python venv ---
-
-if [[ -x "${REPO_ROOT}/.venv/bin/python3" ]]; then
-    echo "  ✓ .venv (Python)"
+if [[ -f "${REPO_ROOT}/config/site.env" ]]; then
+    echo "PXE server ready."
+    echo "Next: just provision <prefix> <count> && just serve"
 else
-    echo "  ✗ .venv — run: python3 -m venv .venv && .venv/bin/pip install viam-sdk"
-    MISSING=1
+    echo "PXE server ready, but config/site.env is missing."
+    echo "Next: just setup-wizard"
 fi
-
-echo ""
-if [[ "${MISSING}" -eq 1 ]]; then
-    echo "Fix missing items above, then run: ./scripts/build-config.sh"
-else
-    echo "All set. Run: ./scripts/build-config.sh"
-fi
-echo "Then: make up && make dhcp"
