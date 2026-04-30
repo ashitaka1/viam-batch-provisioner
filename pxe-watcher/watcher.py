@@ -17,8 +17,15 @@ import re
 import signal
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# Wait this long after first PXE from a MAC before writing the GRUB guard.
+# Firmware retries DHCPDISCOVER several times before TFTP succeeds (observed
+# bursts of 3-5 retries within ~15s on MS-01). Writing the guard during that
+# window would abort the in-progress install. After 60s the install is well
+# into kernel boot and any new DHCPDISCOVER is a post-install reboot.
+REPEAT_PXE_THRESHOLD = timedelta(seconds=60)
 
 
 def load_queue(queue_dir: Path) -> list[dict]:
@@ -41,6 +48,30 @@ def _chown_to_invoker(path: Path):
     gid = int(os.environ.get("SUDO_GID", -1))
     if uid >= 0:
         os.chown(path, uid, gid)
+
+
+def _guard_dir(queue_dir: Path) -> Path:
+    """Locate the GRUB provisioned-guard directory relative to the queue dir."""
+    return queue_dir.parent.parent / "netboot" / "grub" / "provisioned"
+
+
+def write_guard(queue_dir: Path, mac: str) -> bool:
+    """Write a GRUB guard file so future PXE boots from this MAC skip install.
+
+    grub.cfg sources grub/provisioned/<MAC>.cfg; the file contains "exit",
+    so GRUB exits and UEFI falls through to disk boot. Idempotent.
+
+    Returns True if a new guard was written, False if one already existed.
+    """
+    guard_dir = _guard_dir(queue_dir)
+    guard_dir.mkdir(parents=True, exist_ok=True)
+    _chown_to_invoker(guard_dir)
+    guard_file = guard_dir / f"{mac}.cfg"
+    if guard_file.exists():
+        return False
+    guard_file.write_text("exit\n")
+    _chown_to_invoker(guard_file)
+    return True
 
 
 def assign_machine(queue_dir: Path, queue: list[dict], mac: str) -> dict | None:
@@ -128,15 +159,29 @@ def watch(interface: str, queue_dir: Path):
     """Sniff DHCP Discover packets via tcpdump and assign names."""
     queue_dir = queue_dir.resolve()
     queue = load_queue(queue_dir)
-    seen_macs: set[str] = set()
+    # mac -> timestamp of first PXE seen (used to distinguish firmware
+    # retries during initial PXE from post-install reboots).
+    first_seen: dict[str, datetime] = {}
 
-    # Load already-assigned MACs
+    # Load already-assigned MACs and their assigned_at timestamps,
+    # so a watcher restart after assignment still recognizes a
+    # post-install reboot from a known MAC.
     queue_file = queue_dir / "queue.json"
     if queue_file.exists():
         with open(queue_file) as f:
             for s in json.load(f):
-                if s.get("mac"):
-                    seen_macs.add(s["mac"])
+                mac = s.get("mac")
+                if not mac:
+                    continue
+                info_path = queue_dir / mac / "machine-info.json"
+                ts = datetime.now(timezone.utc)
+                if info_path.exists():
+                    try:
+                        info = json.loads(info_path.read_text())
+                        ts = datetime.fromisoformat(info["assigned_at"])
+                    except (json.JSONDecodeError, KeyError, ValueError):
+                        pass
+                first_seen[mac] = ts
 
     remaining = len(queue)
     print(f"PXE Watcher started on {interface}")
@@ -180,20 +225,33 @@ def watch(interface: str, queue_dir: Path):
             return
 
         mac = match.group(1).lower()
-        if mac in seen_macs:
+        now_utc = datetime.now(timezone.utc)
+        now_str = datetime.now().strftime("%H:%M:%S")
+
+        first = first_seen.get(mac)
+        if first is None:
+            # First sighting — assign a slot. Don't write a guard yet:
+            # GRUB on this same boot is about to source provisioned/<MAC>.cfg
+            # and would exit before kernel chainload.
+            first_seen[mac] = now_utc
+            info = assign_machine(queue_dir, queue, mac)
+            if info:
+                print(f"[{now_str}] New PXE client: MAC {mac} → assigned {info['name']}")
+                if not queue:
+                    print(f"[{now_str}] All machines assigned!")
+                    print_summary(queue_dir)
+            else:
+                print(f"[{now_str}] New PXE client: MAC {mac} → NO SLOTS REMAINING (ignored)")
             return
-        seen_macs.add(mac)
 
-        now = datetime.now().strftime("%H:%M:%S")
-        info = assign_machine(queue_dir, queue, mac)
-
-        if info:
-            print(f"[{now}] New PXE client: MAC {mac} → assigned {info['name']}")
-            if not queue:
-                print(f"[{now}] All machines assigned!")
-                print_summary(queue_dir)
-        else:
-            print(f"[{now}] New PXE client: MAC {mac} → NO SLOTS REMAINING (ignored)")
+        # Repeat sighting. Within the threshold it's a firmware DHCP retry
+        # during the initial PXE — ignore. After the threshold it's a
+        # post-install reboot, so install the GRUB guard to skip reinstall.
+        elapsed = now_utc - first
+        if elapsed < REPEAT_PXE_THRESHOLD:
+            return
+        if write_guard(queue_dir, mac):
+            print(f"[{now_str}] Repeat PXE: MAC {mac} ({int(elapsed.total_seconds())}s after first) → GRUB guard installed")
 
     # With -v, tcpdump prints multi-line output per packet.
     # New packets start with a timestamp (non-whitespace); continuation

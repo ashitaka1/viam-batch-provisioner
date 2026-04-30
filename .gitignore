@@ -22,6 +22,9 @@ netboot/initrd
 netboot/grubx64.efi
 netboot/grub/x86_64-efi/
 
+# Per-machine PXE guard files (written by pxe-watcher on post-install reboot)
+netboot/grub/provisioned/
+
 # Generated autoinstall config (contains stamped secrets)
 http-server/autoinstall/user-data
 
@@ -32,6 +35,8 @@ http-server/autoinstall/user-data
 
 # Python venv
 .venv/
+__pycache__/
+*.pyc
 
 # Logs
 dnsmasq.log

@@ -54,13 +54,20 @@ autoinstall:
     - curtin in-target -- systemctl disable NetworkManager-wait-online.service || true
     - curtin in-target -- systemctl disable systemd-networkd-wait-online.service || true
 
-    # Set boot order: disk first. Done as a first-boot service because
-    # the Ubuntu EFI boot entry may not exist yet during late-commands.
+    # Set boot order: disk first. Attempted in-target during install (so the
+    # post-install reboot already has the right order). If that fails — e.g.
+    # efivars not writable in the installer's chroot, or the Ubuntu entry
+    # isn't registered yet — the staged service runs the same script on
+    # first boot as a fallback.
     - |
       cat > /target/usr/local/bin/fix-boot-order.sh <<'BOOTSCRIPT'
       #!/bin/bash
       LOG=/var/log/provisioning.log
       BOOT_ORDER=$(efibootmgr | grep '^BootOrder:' | awk '{print $2}')
+      if [ -z "$BOOT_ORDER" ]; then
+        echo "$(date): fix-boot-order: no BootOrder set" >> $LOG
+        exit 1
+      fi
       DISK_ENTRIES=""
       NET_ENTRIES=""
       VERBOSE=$(efibootmgr -v)
@@ -71,18 +78,19 @@ autoinstall:
           DISK_ENTRIES="${DISK_ENTRIES:+$DISK_ENTRIES,}$entry"
         fi
       done
-      if [ -n "$DISK_ENTRIES" ]; then
-        NEW_ORDER="${DISK_ENTRIES}${NET_ENTRIES:+,$NET_ENTRIES}"
-        efibootmgr -o "$NEW_ORDER"
-        echo "Boot order set: $NEW_ORDER" >> $LOG
-      else
-        echo "WARNING: no non-network boot entries found" >> $LOG
+      if [ -z "$DISK_ENTRIES" ]; then
+        echo "$(date): fix-boot-order: no non-network boot entries" >> $LOG
+        exit 1
       fi
-      # Clean up
-      systemctl disable fix-boot-order.service
+      NEW_ORDER="${DISK_ENTRIES}${NET_ENTRIES:+,$NET_ENTRIES}"
+      if ! efibootmgr -o "$NEW_ORDER" >/dev/null; then
+        echo "$(date): fix-boot-order: efibootmgr -o failed" >> $LOG
+        exit 1
+      fi
+      echo "$(date): fix-boot-order: set $NEW_ORDER" >> $LOG
+      # Remove the fallback unit so it doesn't run on later boots.
       rm -f /etc/systemd/system/fix-boot-order.service
       rm -f /usr/local/bin/fix-boot-order.sh
-      systemctl daemon-reload
       BOOTSCRIPT
       chmod 755 /target/usr/local/bin/fix-boot-order.sh
       cat > /target/etc/systemd/system/fix-boot-order.service <<'BOOTUNIT'
@@ -99,6 +107,7 @@ autoinstall:
       WantedBy=multi-user.target
       BOOTUNIT
     - curtin in-target -- systemctl enable fix-boot-order.service
+    - curtin in-target -- /usr/local/bin/fix-boot-order.sh || true
 
     # Discover ethernet NICs and write netplan config
     # WiFi is handled by a first-boot service (firmware not available in installer)
