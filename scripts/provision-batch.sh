@@ -114,7 +114,10 @@ json.dump(q, sys.stdout)
     echo "  Machines: ${COUNT} (${PREFIX}-1 through ${PREFIX}-${COUNT})"
     echo "  Queue file: ${MACHINES_DIR}/queue.json"
     echo ""
-    echo "Next: just flash-batch (Pi SD) or just serve (PXE)"
+    echo "Next:"
+    echo "  Pi SD card:  just flash-batch"
+    echo "  x86 PXE:     just serve"
+    echo "  x86 USB:     just flash-usb-batch && just serve-usb"
     exit 0
 fi
 
@@ -244,4 +247,7 @@ echo "=== Provisioning Complete ==="
 echo "  Machines created: ${COUNT}"
 echo "  Queue: just status"
 echo ""
-echo "Next: just flash-batch (Pi SD) or just serve (PXE)"
+echo "Next:"
+echo "  Pi SD card:  just flash-batch"
+echo "  x86 PXE:     just serve"
+echo "  x86 USB:     just flash-usb-batch && just serve-usb"
