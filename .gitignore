@@ -6,6 +6,8 @@ config/*.env
 config/environments/
 config/ssh_host_key.pub
 config/ssh_host_key
+# Saved provisioning host address (written by flash-usb-batch, read by serve-usb)
+config/.server-address
 
 # Per-machine credentials (generated at provision time)
 http-server/machines/

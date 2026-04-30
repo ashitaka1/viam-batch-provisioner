@@ -4,9 +4,11 @@ Low-touch provisioning for x86 Linux machines (PXE) and Raspberry Pis (SD card).
 
 ## What it does
 
-Plug in a machine, power it on, turn on netboot in BIOS and walk away. It gets an OS, a hostname, SSH access, and (optionally) connects to Viam cloud and your Tailscale network. No USB drives, no interactive installers, no manual configuration on the target.
+Plug in a machine, power it on, network-boot or boot from a pre-flashed USB stick, and walk away. It gets an OS, a hostname, SSH access, and (optionally) connects to Viam cloud and your Tailscale network. No interactive installers, no manual configuration on the target.
 
-**x86 machines** (Meerkats, NUCs, Minisforum, etc.) use PXE network boot — the machine downloads and installs Ubuntu over the LAN.
+**x86 machines** (Meerkats, NUCs, Minisforum, etc.) install over the network. Two modes:
+- **PXE** — the target's UEFI ROM does network boot; the host runs a proxy DHCP + TFTP server. Best when one operator has the network to themselves.
+- **USB** — flash a per-machine boot stick whose GRUB config points at a fixed server IP. No DHCP/TFTP needed. Use this when multiple operators share a network or when the LAN's DHCP doesn't allow a proxy.
 
 **Raspberry Pis** use SD card flashing — you flash cards from your workstation and insert them.
 
@@ -66,6 +68,26 @@ just serve
 # Ctrl-C stops all services when finished.
 ```
 
+### Provisioning x86 machines (USB sticks)
+
+Use this when more than one person on the same network is provisioning at
+once, or when the LAN's DHCP server won't tolerate a proxy. Each stick is
+unique — its GRUB config has the host's IP and the target's hostname baked
+in, so two operators on the same subnet don't step on each other.
+
+```bash
+just provision my-machine 6     # generate queue (or create Viam machines in full mode)
+just flash-usb-batch            # pick interface, then plug in / wipe / write each stick
+just serve-usb                  # HTTP only — no DHCP, no TFTP, no watcher
+# Boot each target from its stick (UEFI USB boot). Done in ~15 min/machine.
+```
+
+The batch flasher picks the best server interface up front (default-route
+wired interface preferred), shows you the candidates, and asks you to
+confirm. It then walks one machine at a time: prompts you to plug in,
+auto-detects the new device, shows what'll be wiped, asks for `yes`, then
+writes the stick and labels it on disk.
+
 ## One-time BIOS setup (x86 only)
 
 Each x86 machine model needs a one-time BIOS configuration with a monitor attached:
@@ -86,6 +108,19 @@ Power on → UEFI PXE ROM → DHCP (dnsmasq proxy) → TFTP (GRUB) →
 Ubuntu kernel + initrd → ISO download over HTTP → Ubuntu autoinstall →
 late-commands fetch hostname + credentials → first boot with all services
 ```
+
+### USB boot chain (x86)
+
+```
+Power on → UEFI USB boot → GRUB on the stick → kernel + initrd from the stick →
+ISO download over HTTP (server IP baked into grub.cfg) → Ubuntu autoinstall →
+late-commands read viam_hostname=<name> from /proc/cmdline →
+fetch credentials from /machines/by-name/<name>/ → first boot
+```
+
+No DHCP proxy, no TFTP, no DHCP-watcher. The only LAN service is the
+HTTP server, which only the booted target talks to (and only at the IP
+baked into its own stick).
 
 ### SD card flow (Pi)
 
@@ -128,8 +163,11 @@ The environment holds stable settings (credentials, WiFi, SSH key, timezone). Pe
 | `just setup-wizard` | Interactive setup — create/switch environments |
 | `just provision <prefix> <count>` | Generate queue or create Viam machines |
 | `just serve` | Start all PXE services + watcher (Ctrl-C stops all) |
+| `just serve-usb` | Start HTTP server only (for USB-mode targets) |
 | `just flash <device> <name>` | Flash a single Pi SD card |
-| `just flash-batch` | Flash all queued machines with swap prompts |
+| `just flash-batch` | Flash all queued Pi SD cards with swap prompts |
+| `just flash-usb <device> <name>` | Flash a single x86 USB boot stick |
+| `just flash-usb-batch` | Flash one USB stick per queued x86 machine |
 | `just download-pi-image` | Download Raspberry Pi OS Lite |
 | `just setup` | Extract GRUB + kernel from Ubuntu ISO (one-time) |
 | `just status` | Show queue state + service status |

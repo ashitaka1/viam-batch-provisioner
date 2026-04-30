@@ -44,6 +44,16 @@ check python3 python3      "queue + credentials scripting"
 check 7z      p7zip        "ISO extraction (just setup)"
 check dnsmasq dnsmasq      "PXE DHCP proxy + TFTP (just serve)"
 
+# envsubst is needed by build-config.sh and flash-usb.sh (template stamping)
+check envsubst gettext     "template substitution (build-config / flash-usb)"
+
+# Tools used by the USB-mode flasher on Linux. macOS does this with diskutil
+# which is part of the OS; Linux needs parted + dosfstools to format sticks.
+if [[ "$OS" == "Linux" ]]; then
+    check parted     parted      "USB partitioning (just flash-usb)"
+    check mkfs.vfat  dosfstools  "FAT32 format for USB (just flash-usb)"
+fi
+
 # Required only when creating Viam machines
 if [[ "$CHECK_FULL_MODE" -eq 1 ]]; then
     echo ""
