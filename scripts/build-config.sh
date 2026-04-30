@@ -5,8 +5,24 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SITE_CONFIG="${REPO_ROOT}/config/site.env"
 TEMPLATE="${REPO_ROOT}/templates/user-data.tpl"
 OUTPUT="${REPO_ROOT}/http-server/autoinstall/user-data"
+PACKAGES_EXAMPLE="${REPO_ROOT}/config/packages.txt.example"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+# Strip comments and blank lines from a packages.txt-style file.
+read_packages() {
+    awk '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {print $1}' "$1"
+}
+
+# Resolve config/environments/<env>.packages.txt for the active env.
+# site.env is always a symlink under wizard-managed setups; if it isn't,
+# the operator put a plain file there and we can't infer an env name.
+resolve_env_packages_file() {
+    [[ -L "$SITE_CONFIG" ]] || die "$SITE_CONFIG must be a symlink (created by setup-wizard)"
+    local env_name
+    env_name=$(basename "$(readlink "$SITE_CONFIG")" .env)
+    echo "${REPO_ROOT}/config/environments/${env_name}.packages.txt"
+}
 
 # --- Load site config ---
 
@@ -34,6 +50,19 @@ fi
 
 # --- Generate user-data ---
 
+# Seed the active env's packages.txt from the example on first run,
+# so old envs (created before this feature) and fresh checkouts both work.
+PACKAGES_FILE=$(resolve_env_packages_file)
+if [[ ! -f "$PACKAGES_FILE" ]]; then
+    [[ -f "$PACKAGES_EXAMPLE" ]] || die "neither $PACKAGES_FILE nor $PACKAGES_EXAMPLE exists"
+    cp "$PACKAGES_EXAMPLE" "$PACKAGES_FILE"
+    echo "  Seeded $(basename "$PACKAGES_FILE") from packages.txt.example"
+fi
+
+# Render packages.txt as a YAML list with the indent that user-data.tpl
+# expects. envsubst preserves newlines in the substituted value.
+PACKAGES=$(read_packages "$PACKAGES_FILE" | sed 's/^/    - /')
+
 export SSH_PUBLIC_KEY PASSWORD_HASH PXE_SERVER
 export USERNAME="${USERNAME:-viam}"
 export TIMEZONE="${TIMEZONE:-America/New_York}"
@@ -41,8 +70,9 @@ export WIFI_SSID="${WIFI_SSID:-}"
 export WIFI_PASSWORD="${WIFI_PASSWORD:-}"
 export PROVISION_MODE="${PROVISION_MODE:-os-only}"
 export TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
+export PACKAGES
 
-envsubst '${SSH_PUBLIC_KEY} ${PASSWORD_HASH} ${PXE_SERVER} ${USERNAME} ${TIMEZONE} ${WIFI_SSID} ${WIFI_PASSWORD} ${PROVISION_MODE} ${TAILSCALE_AUTH_KEY}' \
+envsubst '${SSH_PUBLIC_KEY} ${PASSWORD_HASH} ${PXE_SERVER} ${USERNAME} ${TIMEZONE} ${WIFI_SSID} ${WIFI_PASSWORD} ${PROVISION_MODE} ${TAILSCALE_AUTH_KEY} ${PACKAGES}' \
     < "${TEMPLATE}" > "${OUTPUT}"
 
 # --- Stage Tailscale key for HTTP serving (if provided) ---

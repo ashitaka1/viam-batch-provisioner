@@ -282,11 +282,22 @@ echo "Saved: config/environments/${ENV_NAME}.env"
 echo "Active: config/site.env → config/environments/${ENV_NAME}.env"
 echo ""
 
+# Seed this env's packages list from the example. Skip if it already exists
+# (operator may have customized it; re-running the wizard shouldn't clobber).
+PACKAGES_FILE="${ENV_DIR}/${ENV_NAME}.packages.txt"
+PACKAGES_EXAMPLE="${REPO_ROOT}/config/packages.txt.example"
+if [[ ! -f "$PACKAGES_FILE" && -f "$PACKAGES_EXAMPLE" ]]; then
+    cp "$PACKAGES_EXAMPLE" "$PACKAGES_FILE"
+    echo "Seeded: config/environments/${ENV_NAME}.packages.txt (edit to customize)"
+    echo ""
+fi
+
 ensure_venv_for_full_mode "$ENV_FILE"
 
 echo "=== Next steps ==="
-echo "  1. just provision <prefix> <count>"
-echo "  2. Choose a target:"
+echo "  1. (Optional) Edit config/environments/${ENV_NAME}.packages.txt to customize installed packages"
+echo "  2. just provision <prefix> <count>"
+echo "  3. Choose a target:"
 echo "     just serve                              (x86 PXE: HTTP + DHCP/TFTP + watcher)"
 echo "     just flash-usb-batch && just serve-usb  (x86 USB sticks: HTTP only)"
 echo "     just flash-batch                        (Raspberry Pi SD cards)"

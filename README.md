@@ -186,7 +186,7 @@ Configurable via `config/site.env`:
 - Console font: Terminus 16x32 for readability
 
 Installed automatically:
-- openssh-server, avahi-daemon, curl, jq, net-tools, NetworkManager, mosh, speedtest-cli, unattended-upgrades
+- apt packages from `config/environments/<env>.packages.txt` (per-env list, seeded from `config/packages.txt.example` on first use; edit before `just provision` to customize)
 - Viam CLI + viam-agent (full/agent mode)
 - Tailscale (if auth key provided)
 

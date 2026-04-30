@@ -1,0 +1,23 @@
+# Default apt packages installed on every provisioned host.
+# Used by both x86 autoinstall and Raspberry Pi cloud-init.
+# One package per line. Comments (#) and blank lines are ignored.
+#
+# Each environment gets its own copy at config/environments/<env>.packages.txt
+# (gitignored), seeded from this file on first build-config or wizard run.
+# Edit the per-env file to customize that environment's package list.
+
+# Networking + remote access
+avahi-daemon
+avahi-utils
+network-manager
+openssh-server
+mosh
+
+# Tools
+curl
+jq
+net-tools
+speedtest-cli
+
+# Security
+unattended-upgrades

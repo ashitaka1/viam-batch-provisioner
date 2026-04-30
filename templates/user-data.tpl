@@ -22,17 +22,9 @@ autoinstall:
       name: lvm
       sizing-policy: all
 
+  # Edit config/environments/<env>.packages.txt to customize this list.
   packages:
-    - openssh-server
-    - avahi-daemon
-    - avahi-utils
-    - curl
-    - jq
-    - net-tools
-    - network-manager
-    - unattended-upgrades
-    - mosh
-    - speedtest-cli
+${PACKAGES}
 
   late-commands:
     # Set timezone

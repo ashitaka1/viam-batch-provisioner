@@ -49,8 +49,8 @@ write_files:
       apt-get install -y fonts-terminus >> $LOG 2>&1 || true
       dpkg-reconfigure -f noninteractive console-setup >> $LOG 2>&1 || true
 
-      # Packages
-      apt-get install -y avahi-daemon avahi-utils curl jq net-tools mosh speedtest-cli unattended-upgrades >> $LOG 2>&1
+      # Packages — list comes from config/environments/<env>.packages.txt at flash time
+      apt-get install -y PLACEHOLDER_PACKAGES >> $LOG 2>&1
       echo "Packages installed" >> $LOG
 
       # Viam (conditional)

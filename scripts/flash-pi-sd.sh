@@ -140,6 +140,19 @@ INSTALL_VIAM="false"
 INSTALL_TAILSCALE="false"
 [[ -n "${TAILSCALE_AUTH_KEY:-}" ]] && INSTALL_TAILSCALE="true"
 
+# Read the active env's package list. Same source of truth as build-config.sh.
+# Comments (#) and blank lines are stripped; remaining lines are joined with
+# spaces for the apt-get install argv on the target.
+[[ -L "$SITE_CONFIG" ]] || die "$SITE_CONFIG must be a symlink (created by setup-wizard)"
+ENV_NAME=$(basename "$(readlink "$SITE_CONFIG")" .env)
+PACKAGES_FILE="${REPO_ROOT}/config/environments/${ENV_NAME}.packages.txt"
+PACKAGES_EXAMPLE="${REPO_ROOT}/config/packages.txt.example"
+if [[ ! -f "$PACKAGES_FILE" && -f "$PACKAGES_EXAMPLE" ]]; then
+    cp "$PACKAGES_EXAMPLE" "$PACKAGES_FILE"
+    echo "  Seeded $(basename "$PACKAGES_FILE") from packages.txt.example"
+fi
+PACKAGES=$(awk '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {print $1}' "$PACKAGES_FILE" | tr '\n' ' ')
+
 # --- Generate cloud-init user-data ---
 
 echo "Writing cloud-init config..."
@@ -153,9 +166,10 @@ template = template.replace('PLACEHOLDER_USERNAME', sys.argv[5])
 template = template.replace('PLACEHOLDER_TIMEZONE', sys.argv[6])
 template = template.replace('PLACEHOLDER_INSTALL_VIAM', sys.argv[7])
 template = template.replace('PLACEHOLDER_INSTALL_TAILSCALE', sys.argv[8])
-open(sys.argv[9], 'w').write(template)
+template = template.replace('PLACEHOLDER_PACKAGES', sys.argv[9])
+open(sys.argv[10], 'w').write(template)
 " "$USERDATA_TPL" "$MACHINE_NAME" "$PASSWORD_HASH" "$SSH_PUBLIC_KEY" \
-  "$USERNAME" "$TIMEZONE" "$INSTALL_VIAM" "$INSTALL_TAILSCALE" \
+  "$USERNAME" "$TIMEZONE" "$INSTALL_VIAM" "$INSTALL_TAILSCALE" "$PACKAGES" \
   "${BOOT_MOUNT}/user-data"
 
 # --- Write viam.json (full mode only) ---

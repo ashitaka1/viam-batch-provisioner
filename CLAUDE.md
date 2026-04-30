@@ -82,6 +82,6 @@ All configurable via `config/site.env`:
 - SSH authorized key
 - Headless (`multi-user.target`)
 - Console font: Terminus 16x32
-- Packages: openssh-server, curl, jq, net-tools, NetworkManager, unattended-upgrades, mosh, speedtest-cli
+- Packages: from `config/environments/<env>.packages.txt` (seeded from `config/packages.txt.example`; per-env, gitignored)
 - Viam CLI + viam-agent (full/agent mode)
 - Tailscale auto-join (if auth key provided)
