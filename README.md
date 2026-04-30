@@ -1,10 +1,10 @@
 # Viam Batch Provisioner
 
-Zero-touch provisioning for x86 Linux machines (PXE) and Raspberry Pis (SD card). Installs Ubuntu or Raspberry Pi OS, configures user accounts, SSH, WiFi, and optionally deploys [Viam](https://viam.com) agent + credentials and [Tailscale](https://tailscale.com) VPN.
+Low-touch provisioning for x86 Linux machines (PXE) and Raspberry Pis (SD card). Installs Ubuntu or Raspberry Pi OS, configures user accounts, SSH, WiFi, and optionally deploys [Viam](https://viam.com) agent + credentials and [Tailscale](https://tailscale.com) VPN.
 
 ## What it does
 
-Plug in a machine, power it on, and walk away. It gets an OS, a hostname, SSH access, and (optionally) connects to Viam cloud and your Tailscale network. No USB drives, no interactive installers, no manual configuration on the target.
+Plug in a machine, power it on, turn on netboot in BIOS and walk away. It gets an OS, a hostname, SSH access, and (optionally) connects to Viam cloud and your Tailscale network. No USB drives, no interactive installers, no manual configuration on the target.
 
 **x86 machines** (Meerkats, NUCs, Minisforum, etc.) use PXE network boot — the machine downloads and installs Ubuntu over the LAN.
 
