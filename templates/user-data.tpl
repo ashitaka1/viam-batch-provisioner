@@ -137,14 +137,21 @@ autoinstall:
     - |
       cat > /target/etc/systemd/system/wifi-setup.service <<'WIFIUNIT'
       [Unit]
-      Description=Configure WiFi on first boot
+      Description=Configure WiFi on first boot (one-shot, self-removing)
       After=network-pre.target
       Before=network.target
-      ConditionPathExists=!/etc/netplan/99-wifi.yaml
 
       [Service]
       Type=oneshot
       ExecStart=/usr/local/bin/wifi-setup.sh
+      # netplan apply churns networkd, briefly removing/re-adding the IPv4
+      # address on other interfaces. Avahi watches RTNETLINK and ends up in
+      # a degraded mDNS state. A try-restart flushes that state.
+      ExecStartPost=-/bin/systemctl try-restart avahi-daemon.service
+      # Self-remove on success so the unit doesn't linger after first boot.
+      # The leading "-" makes systemd ignore failures of these lines.
+      ExecStartPost=-/bin/systemctl disable wifi-setup.service
+      ExecStartPost=-/bin/rm -f /etc/systemd/system/wifi-setup.service /usr/local/bin/wifi-setup.sh
       RemainAfterExit=true
 
       [Install]
@@ -152,9 +159,13 @@ autoinstall:
       WIFIUNIT
       cat > /target/usr/local/bin/wifi-setup.sh <<'WIFISCRIPT'
       #!/bin/bash
+      LOG=/var/log/provisioning.log
       WIFI_IFACE=$(ip -o link show | awk '$2 ~ /^wl/ {gsub(/:/, "", $2); print $2; exit}')
-      if [ -n "$WIFI_IFACE" ]; then
-        cat > /etc/netplan/99-wifi.yaml <<NETPLAN
+      if [ -z "$WIFI_IFACE" ]; then
+        echo "$(date): wifi-setup: no WiFi interface detected" >> $LOG
+        exit 0
+      fi
+      cat > /etc/netplan/99-wifi.yaml <<NETPLAN
       network:
         version: 2
         wifis:
@@ -164,11 +175,11 @@ autoinstall:
                 password: "${WIFI_PASSWORD}"
             dhcp4: true
       NETPLAN
-        netplan apply
-        echo "WiFi configured on $WIFI_IFACE" >> /var/log/provisioning.log
-      else
-        echo "No WiFi interface found" >> /var/log/provisioning.log
+      if ! netplan apply; then
+        echo "$(date): wifi-setup: netplan apply failed" >> $LOG
+        exit 1
       fi
+      echo "$(date): wifi-setup: configured on $WIFI_IFACE" >> $LOG
       WIFISCRIPT
       chmod 755 /target/usr/local/bin/wifi-setup.sh
     - curtin in-target -- systemctl enable wifi-setup.service
