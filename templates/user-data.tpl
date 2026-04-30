@@ -173,33 +173,45 @@ autoinstall:
       chmod 755 /target/usr/local/bin/wifi-setup.sh
     - curtin in-target -- systemctl enable wifi-setup.service
 
-    # Fetch per-machine identity from PXE server by MAC address.
-    # Tries all ethernet MACs since the PXE boot NIC may differ from
-    # the first interface with an IP (multi-NIC machines).
+    # Resolve per-machine identity. Two paths:
+    #   USB mode — hostname is baked into the kernel cmdline as
+    #   viam_hostname=<name>; credentials live at /machines/by-name/<name>/.
+    #   PXE mode — no name in cmdline; fall back to fetching by MAC, which
+    #   the pxe-watcher pre-stages at /machines/<mac>/ when the target boots.
     - |
       LOG=/target/var/log/provisioning.log
-      FOUND_MAC=""
-      for IFACE in $(ip -o link show | awk '$2 ~ /^(en|eth)/ {gsub(/:/, "", $2); print $2}'); do
-        MAC=$(ip link show "$IFACE" | awk '/ether/ {print $2}' | tr '[:upper:]' '[:lower:]')
-        echo "Trying MAC=$MAC ($IFACE)..." >> $LOG
-        if curl -sf http://${PXE_SERVER}/machines/${MAC}/hostname -o /tmp/assigned-hostname; then
-          FOUND_MAC="$MAC"
-          echo "Found identity via $IFACE MAC=$MAC" >> $LOG
-          break
-        fi
-      done
-      if [ -n "$FOUND_MAC" ]; then
-        HOSTNAME=$(cat /tmp/assigned-hostname)
+      HOSTNAME=""
+      CRED_PATH=""
+      CMDLINE_NAME=$(awk -v RS=' ' -F= '$1=="viam_hostname"{print $2}' /proc/cmdline | tr -d '\n')
+      if [ -n "$CMDLINE_NAME" ]; then
+        echo "USB mode: hostname '$CMDLINE_NAME' from kernel cmdline" >> $LOG
+        HOSTNAME="$CMDLINE_NAME"
+        CRED_PATH="machines/by-name/${CMDLINE_NAME}"
+      else
+        FOUND_MAC=""
+        for IFACE in $(ip -o link show | awk '$2 ~ /^(en|eth)/ {gsub(/:/, "", $2); print $2}'); do
+          MAC=$(ip link show "$IFACE" | awk '/ether/ {print $2}' | tr '[:upper:]' '[:lower:]')
+          echo "Trying MAC=$MAC ($IFACE)..." >> $LOG
+          if curl -sf http://${PXE_SERVER}/machines/${MAC}/hostname -o /tmp/assigned-hostname; then
+            FOUND_MAC="$MAC"
+            HOSTNAME=$(cat /tmp/assigned-hostname)
+            CRED_PATH="machines/${MAC}"
+            echo "PXE mode: hostname '$HOSTNAME' via $IFACE MAC=$MAC" >> $LOG
+            break
+          fi
+        done
+      fi
+      if [ -n "$HOSTNAME" ]; then
         echo "${HOSTNAME}" > /target/etc/hostname
         sed -i "s/127.0.1.1.*/127.0.1.1\t${HOSTNAME}/" /target/etc/hosts
         echo "Hostname set to ${HOSTNAME}" >> $LOG
-        if curl -sf http://${PXE_SERVER}/machines/${FOUND_MAC}/viam.json -o /target/etc/viam.json; then
-          echo "viam.json installed" >> $LOG
+        if curl -sf "http://${PXE_SERVER}/${CRED_PATH}/viam.json" -o /target/etc/viam.json; then
+          echo "viam.json installed from /${CRED_PATH}/" >> $LOG
         else
-          echo "FAILED to fetch viam.json" >> $LOG
+          echo "No viam.json at /${CRED_PATH}/ (skipping — agent/os-only mode)" >> $LOG
         fi
       else
-        echo "FAILED to fetch hostname — no MAC matched on server" >> $LOG
+        echo "FAILED to resolve hostname — no viam_hostname cmdline arg and no MAC matched on server" >> $LOG
       fi
 
     # Install Viam CLI

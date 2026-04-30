@@ -60,6 +60,34 @@ just serve
 # 4. Power on machines (F12 for network boot)
 ```
 
+## Provisioning x86 Machines (USB sticks)
+
+Use this when multiple people share the network, or when you can't run
+PXE/DHCP on the LAN. Each stick has a fixed server IP and the target's
+hostname baked into its bootloader, so two operators don't conflict.
+
+```bash
+# 1. Extract GRUB + kernel from Ubuntu ISO (one-time)
+just setup
+
+# 2. Generate queue + credentials
+just provision lab-meerkat 6
+
+# 3. Flash one USB stick per machine (interactive — picks interface,
+#    walks you through plug-in / wipe / write for each stick)
+just flash-usb-batch
+
+# 4. HTTP-only server (no DHCP/TFTP). Ctrl-C to stop.
+just serve-usb
+
+# 5. Boot each target from its stick (UEFI USB boot)
+```
+
+To flash a single stick (e.g., for testing):
+```bash
+just flash-usb /dev/disk5 lab-meerkat-1
+```
+
 ## Provision Modes
 
 Set in `config/site.env` (or via the setup wizard):
@@ -84,9 +112,12 @@ Set in `config/site.env` (or via the setup wizard):
 | `just setup-wizard` | Interactive setup — creates config/site.env |
 | `just provision <prefix> <count>` | Generate queue or create Viam machines |
 | `just serve` | Start all PXE services + watcher (Ctrl-C stops everything) |
+| `just serve-usb` | HTTP-only server for USB-flashed targets |
 | `just stop` | Stop all PXE services |
-| `just flash-batch` | Flash all queued machines to SD cards |
-| `just flash <dev> <name>` | Flash a single SD card |
+| `just flash-batch` | Flash all queued Pi SD cards |
+| `just flash <dev> <name>` | Flash a single Pi SD card |
+| `just flash-usb-batch` | Flash one x86 USB boot stick per queued machine |
+| `just flash-usb <dev> <name>` | Flash a single x86 USB boot stick |
 | `just download-pi-image` | Download Raspberry Pi OS Lite |
 | `just setup` | Extract GRUB + kernel from Ubuntu ISO (one-time) |
 | `just status` | Show queue state + service status |

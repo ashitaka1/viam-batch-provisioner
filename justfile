@@ -84,6 +84,39 @@ flash device name:
 flash-batch:
     ./scripts/flash-batch.sh
 
+# Flash a single x86 USB boot stick (talks to a fixed server, no PXE)
+flash-usb device name:
+    ./scripts/flash-usb.sh {{device}} {{name}}
+
+# Flash one USB boot stick per queued machine, with swap prompts
+flash-usb-batch:
+    ./scripts/flash-usb-batch.sh
+
+# Serve HTTP only (USB-mode targets — no DHCP/TFTP/watcher).
+# Reads the address baked into the sticks (config/.server-address).
+serve-usb:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SERVER_FILE="{{justfile_directory()}}/config/.server-address"
+    if [[ -f "$SERVER_FILE" ]]; then
+        export PXE_SERVER="$(cat "$SERVER_FILE")"
+        echo "Using server address from sticks: $PXE_SERVER"
+    else
+        echo "No saved server address. Run 'just flash-usb-batch' first, or"
+        echo "set PXE_SERVER manually before invoking this command."
+    fi
+    cleanup() {
+        echo ""
+        echo "Stopping HTTP server..."
+        docker compose down 2>/dev/null || true
+    }
+    trap cleanup EXIT
+    echo "Generating autoinstall config..."
+    ./scripts/build-config.sh
+    echo ""
+    echo "Starting HTTP server (Ctrl-C to stop)..."
+    docker compose up
+
 # Download Raspberry Pi OS Lite image
 download-pi-image:
     #!/usr/bin/env bash
