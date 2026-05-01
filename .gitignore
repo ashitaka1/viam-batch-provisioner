@@ -48,3 +48,6 @@ dnsmasq.log
 *.swp
 *~
 .mcp.json
+
+# Agents
+.claude/settings.local.json
