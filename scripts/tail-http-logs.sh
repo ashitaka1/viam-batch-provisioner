@@ -8,7 +8,7 @@ mkdir -p "$GUARD_DIR"
 # nginx combined access log: 192.168.65.1 - - [22/Apr/2026:13:24:58 -0400] "GET /path HTTP/1.1" 200 1234 "-" "agent" "-"
 ACCESS_RE='\[[0-9]{2}/[A-Za-z]{3}/[0-9]{4}:([0-9:]{8})[^]]*\] "([A-Z]+) ([^ ]+) [^"]+" ([0-9]+)'
 
-docker logs -f pxe-http 2>&1 | tr -d '\r' | while IFS= read -r line; do
+docker logs -f pxe-http 2>&1 | tr -u -d '\r' | while IFS= read -r line; do
     # Skip nginx startup noise (init scripts, worker/notice lines, entrypoint chatter)
     case "$line" in
         *.sh:*info:*|*worker*|*notice*|*entrypoint*|*"Configuration complete"*) continue ;;
