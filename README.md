@@ -172,6 +172,7 @@ The environment holds stable settings (credentials, WiFi, SSH key, timezone). Pe
 | `just clean` | Wipe all provisioning state |
 | `just reset` | Re-use current queue (mark unassigned) |
 | `just stop` | Stop all PXE services |
+| `just unguard <name-or-mac>` | Clear one machine's PXE guard so it can re-attempt install |
 
 ## Target machine config
 

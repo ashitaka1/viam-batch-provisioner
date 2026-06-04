@@ -132,6 +132,38 @@ download-pi-image:
         echo "Done: ${IMG%.xz}"
     fi
 
+# Clear a single machine's PXE guard so it can re-attempt install
+unguard slot:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    QUEUE_FILE=http-server/machines/queue.json
+    if [ ! -f "$QUEUE_FILE" ]; then
+        echo "No queue.json. Run 'just provision' first." >&2
+        exit 1
+    fi
+    MAC=$(.venv/bin/python3 -c "
+    import json, sys
+    target = '{{slot}}'
+    for s in json.load(open('$QUEUE_FILE')):
+        if s.get('name') == target or s.get('mac') == target:
+            mac = s.get('mac')
+            if not mac:
+                sys.exit(2)
+            print(mac); sys.exit(0)
+    sys.exit(1)
+    ") || {
+        rc=$?
+        case $rc in
+            1) echo "No slot matching '{{slot}}' (by name or MAC) in queue." >&2 ;;
+            2) echo "Slot '{{slot}}' has no assigned MAC yet." >&2 ;;
+        esac
+        exit 1
+    }
+    just stop
+    rm -f "netboot/grub/provisioned/$MAC.cfg"
+    rm -f "http-server/machines/$MAC/machine-info.json"
+    echo "Unguarded $MAC. Run 'just serve' and reboot the target."
+
 # Reset queue (mark all slots unassigned, re-use same batch)
 reset:
     #!/usr/bin/env bash
