@@ -32,8 +32,8 @@ source "$SITE_CONFIG"
 SSH_PUBLIC_KEY=$(cat "${SSH_PUBLIC_KEY_FILE/#\~/$HOME}" 2>/dev/null) \
     || die "SSH public key not found at ${SSH_PUBLIC_KEY_FILE}"
 
-PASSWORD_HASH=$(echo "$PASSWORD" | mkpasswd -m sha-512 --stdin 2>/dev/null) \
-    || PASSWORD_HASH=$(openssl passwd -6 "$PASSWORD")
+PASSWORD_HASH=$(printf '%s' "$PASSWORD" | "${REPO_ROOT}/scripts/hash-password.sh") \
+    || die "password hashing failed (see message above)"
 
 # --- PXE server address ---
 
