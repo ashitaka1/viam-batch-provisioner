@@ -22,11 +22,30 @@ case "$OS" in
     *)      INSTALLER="<your package manager> install" ;;
 esac
 
-MISSING=()
+# Homebrew installs some tools (notably dnsmasq) into sbin, which is often
+# absent from PATH even after `brew install` succeeds. Look there before
+# declaring a tool missing, or the check contradicts brew itself.
+have() {
+    local cmd="$1"
+    command -v "$cmd" &>/dev/null && return 0
+    if [[ "$OS" == "Darwin" ]]; then
+        local dir
+        for dir in /opt/homebrew/sbin /usr/local/sbin; do
+            [[ -x "$dir/$cmd" ]] && return 0
+        done
+    fi
+    return 1
+}
+
+MISSING=()           # required tools — a missing one fails the check
+OPTIONAL_MISSING=()  # mode-specific tools — reported but never fatal
 check() {
-    local cmd="$1" pkg="$2" purpose="$3"
-    if command -v "$cmd" &>/dev/null; then
+    local cmd="$1" pkg="$2" purpose="$3" tier="${4:-required}"
+    if have "$cmd"; then
         printf "  ✓ %-12s %s\n" "$cmd" "($purpose)"
+    elif [[ "$tier" == "optional" ]]; then
+        printf "  ⚠ %-12s %s — x86 only, install with: %s %s\n" "$cmd" "($purpose)" "$INSTALLER" "$pkg"
+        OPTIONAL_MISSING+=("$pkg")
     else
         printf "  ✗ %-12s %s — install: %s %s\n" "$cmd" "($purpose)" "$INSTALLER" "$pkg"
         MISSING+=("$pkg")
@@ -40,9 +59,10 @@ check just    just         "command runner"
 check docker  "Docker Desktop" "HTTP server (nginx) for ISO + autoinstall"
 check python3 python3      "queue + credentials scripting"
 
-# Required for PXE (x86) provisioning
-check 7z      p7zip        "ISO extraction (just setup)"
-check dnsmasq dnsmasq      "PXE DHCP proxy + TFTP (just serve)"
+# x86-only — Pi SD provisioning never touches these, so a missing one warns
+# rather than blocking the wizard or a Pi operator.
+check 7z      p7zip        "ISO extraction (just setup)"           optional
+check dnsmasq dnsmasq      "PXE DHCP proxy + TFTP (just serve)"    optional
 
 # envsubst is needed by build-config.sh and flash-usb.sh (template stamping)
 check envsubst gettext     "template substitution (build-config / flash-usb)"
@@ -62,11 +82,17 @@ if [[ "$CHECK_FULL_MODE" -eq 1 ]]; then
 fi
 
 echo ""
-if [[ ${#MISSING[@]} -eq 0 ]]; then
-    echo "All prerequisites satisfied."
-    exit 0
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    echo "Missing: ${MISSING[*]}"
+    echo "Install all at once: ${INSTALLER} ${MISSING[*]}"
+    exit 1
 fi
 
-echo "Missing: ${MISSING[*]}"
-echo "Install all at once: ${INSTALLER} ${MISSING[*]}"
-exit 1
+if [[ ${#OPTIONAL_MISSING[@]} -gt 0 ]]; then
+    echo "All required prerequisites satisfied."
+    echo "Skipping x86-only tools (not needed for Pi SD): ${OPTIONAL_MISSING[*]}"
+    echo "Install them before x86 provisioning: ${INSTALLER} ${OPTIONAL_MISSING[*]}"
+else
+    echo "All prerequisites satisfied."
+fi
+exit 0
