@@ -42,11 +42,11 @@ have() {
 MISSING=()           # required tools — a missing one fails the check
 OPTIONAL_MISSING=()  # mode-specific tools — reported but never fatal
 check() {
-    local cmd="$1" pkg="$2" purpose="$3" tier="${4:-required}"
+    local cmd="$1" pkg="$2" purpose="$3" tier="${4:-required}" scope="${5:-mode-specific}"
     if have "$cmd"; then
         printf "  ✓ %-12s %s\n" "$cmd" "($purpose)"
     elif [[ "$tier" == "optional" ]]; then
-        printf "  ⚠ %-12s %s — x86 only, install with: %s %s\n" "$cmd" "($purpose)" "$INSTALLER" "$pkg"
+        printf "  ⚠ %-12s %s — %s, install with: %s %s\n" "$cmd" "($purpose)" "$scope" "$INSTALLER" "$pkg"
         OPTIONAL_MISSING+=("$pkg")
     else
         printf "  ✗ %-12s %s — install: %s %s\n" "$cmd" "($purpose)" "$INSTALLER" "$pkg"
@@ -95,10 +95,11 @@ else
     MISSING+=("$HASHER_PKG")
 fi
 
-# x86-only — Pi SD provisioning never touches these, so a missing one warns
-# rather than blocking the wizard or a Pi operator.
-check 7z      p7zip        "ISO extraction (just setup)"           optional
-check dnsmasq dnsmasq      "PXE DHCP proxy + TFTP (just serve)"    optional
+# Mode-specific — a missing one warns rather than blocking an operator who
+# doesn't use that mode.
+check 7z      p7zip        "ISO extraction (just setup)"           optional "x86 only"
+check dnsmasq dnsmasq      "PXE DHCP proxy + TFTP (just serve)"    optional "x86 only"
+check xz      xz          "Pi image decompress (just flash / download-pi-image)" optional "Pi only"
 
 # envsubst is needed by build-config.sh and flash-usb.sh (template stamping)
 check envsubst gettext     "template substitution (build-config / flash-usb)"
@@ -132,9 +133,9 @@ fi
 [[ -n "$BREW_ISSUE" ]] && exit 1
 
 if [[ ${#OPTIONAL_MISSING[@]} -gt 0 ]]; then
-    echo "All required prerequisites satisfied."
-    echo "Skipping x86-only tools (not needed for Pi SD): ${OPTIONAL_MISSING[*]}"
-    echo "Install them before x86 provisioning: ${INSTALLER} ${OPTIONAL_MISSING[*]}"
+    echo "All cross-mode prerequisites satisfied."
+    echo "Mode-specific tools missing (see ⚠ above for which mode): ${OPTIONAL_MISSING[*]}"
+    echo "Install the ones for your mode: ${INSTALLER} ${OPTIONAL_MISSING[*]}"
 else
     echo "All prerequisites satisfied."
 fi
