@@ -120,7 +120,9 @@ serve-usb:
 # Download Raspberry Pi OS Lite image
 download-pi-image:
     #!/usr/bin/env bash
-    if ls {{justfile_directory()}}/*raspios*.img {{justfile_directory()}}/pi-os.img 2>/dev/null | head -1 > /dev/null; then
+    shopt -s nullglob
+    existing=("{{justfile_directory()}}"/*raspios*.img)
+    if (( ${#existing[@]} )) || [[ -f "{{justfile_directory()}}/pi-os.img" ]]; then
         echo "Pi OS image already present."
     else
         echo "Downloading Raspberry Pi OS Lite (64-bit)..."
