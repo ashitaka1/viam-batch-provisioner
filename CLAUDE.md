@@ -2,6 +2,10 @@
 
 Zero-touch provisioning for x86 Linux machines (PXE or USB stick) and Raspberry Pis (SD card) as Viam robotics hosts.
 
+## v2 Direction
+
+A client-server rewrite (Swift server + SwiftUI client apps, REST + SSE from an OpenAPI contract) is planned in `docs/architecture-v2.md`, including phasing and open questions. Read it before starting new feature work. The existing bash/Python tooling below remains the working system until v2 replaces it — don't break it.
+
 ## Configuration
 
 All site-specific settings live in `config/site.env` (gitignored). Run `just setup-wizard` to create it interactively. Settings include: machine prefix/count, username/password, WiFi, SSH key, Viam Cloud credentials (optional), Tailscale (optional).
