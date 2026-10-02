@@ -212,17 +212,8 @@ fi
 
 QUEUE_FILE="${MACHINES_DIR}/queue.json"
 if [[ -f "$QUEUE_FILE" ]]; then
-    python3 - "$QUEUE_FILE" "$MACHINE_NAME" <<'PY'
-import json, sys
-qf, name = sys.argv[1], sys.argv[2]
-q = json.load(open(qf))
-for s in q:
-    if s["name"] == name:
-        s["assigned"] = True
-        s["flashed_via"] = "usb"
-        break
-json.dump(q, open(qf, "w"), indent=2)
-PY
+    python3 "${REPO_ROOT}/pxe-watcher/queue_store.py" mark-assigned \
+        --name "$MACHINE_NAME" --via usb --queue-dir "$MACHINES_DIR" || true
 fi
 
 # --- Unmount ---

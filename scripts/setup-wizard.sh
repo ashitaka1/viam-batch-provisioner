@@ -9,8 +9,8 @@ mkdir -p "$ENV_DIR"
 
 # If the active environment is changing, the prior env's queue is stale —
 # different prefix, possibly different mode/credentials. Offer to wipe it
-# before the symlink swap so `just provision` doesn't trip over the guard
-# in provision-batch.sh complaining about leftover unassigned machines.
+# before the symlink swap so the old env's unassigned names don't get
+# handed to machines booting under the new one.
 maybe_clean_queue_on_env_switch() {
     local new_env_name="$1"
     [[ -L "$SITE_CONFIG" ]] || return 0
@@ -37,7 +37,7 @@ maybe_clean_queue_on_env_switch() {
         rm -rf "${REPO_ROOT}/netboot/grub/provisioned/" 2>/dev/null || true
         echo "  Queue cleaned."
     else
-        echo "  Keeping previous queue. 'just provision' will complain until you 'just clean'."
+        echo "  Keeping previous queue. 'just provision' will append to it; 'just clean' wipes it."
     fi
     echo ""
 }

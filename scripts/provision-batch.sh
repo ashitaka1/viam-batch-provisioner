@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MACHINES_DIR="${REPO_ROOT}/http-server/machines"
 FETCH_CREDS="${REPO_ROOT}/scripts/fetch-credentials.py"
 PYTHON="${REPO_ROOT}/.venv/bin/python3"
+QUEUE_STORE="${REPO_ROOT}/pxe-watcher/queue_store.py"
 SITE_CONFIG="${REPO_ROOT}/config/site.env"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -61,34 +62,14 @@ PROVISION_MODE="${PROVISION_MODE:-os-only}"
 [[ -n "$COUNT" ]]  || die "--count or COUNT in config is required"
 [[ -n "$PREFIX" ]] || die "--prefix or PREFIX in config is required"
 
-# --- Check for existing batch state ---
+# --- Existing queue: new machines are appended ---
 
+mkdir -p "$MACHINES_DIR"
 QUEUE_FILE="${MACHINES_DIR}/queue.json"
 if [[ -f "$QUEUE_FILE" ]]; then
-    UNASSIGNED=$(python3 -c "
-import json
-q = json.load(open('$QUEUE_FILE'))
-print(sum(1 for s in q if not s.get('assigned')))
-")
-    if [[ "$UNASSIGNED" -gt 0 ]]; then
-        echo "ERROR: Existing queue has ${UNASSIGNED} unassigned machine(s):" >&2
-        python3 -c "
-import json
-q = json.load(open('$QUEUE_FILE'))
-for s in q:
-    status = '✓ assigned' if s.get('assigned') else '○ waiting'
-    print(f\"  {status}  {s['name']}\")
-" >&2
-        echo "" >&2
-        echo "Options:" >&2
-        echo "  just clean    — wipe queue and start fresh" >&2
-        echo "  just reset    — mark all as unassigned (re-flash same batch)" >&2
-        exit 1
-    fi
-    echo "Cleaning up previous batch..."
-    rm -rf "${MACHINES_DIR}"/slot-*
-    rm -rf "${MACHINES_DIR}"/[0-9a-f][0-9a-f]:* 2>/dev/null || true
-    rm -f "$QUEUE_FILE"
+    read -r UNASSIGNED TOTAL < <(python3 "$QUEUE_STORE" summary --queue-dir "$MACHINES_DIR")
+    echo "Existing queue: ${UNASSIGNED} waiting / ${TOTAL} total — new machines will be appended ('just clean' to start over)."
+    echo ""
 fi
 
 # --- OS-only / agent mode: just generate names ---
@@ -97,26 +78,23 @@ if [[ "$PROVISION_MODE" != "full" ]]; then
     echo "Mode: ${PROVISION_MODE} (no Viam cloud provisioning)"
     echo ""
 
-    mkdir -p "$MACHINES_DIR"
-    QUEUE="[]"
-    for i in $(seq 1 "$COUNT"); do
-        NAME="${PREFIX}-${i}"
-        QUEUE=$(python3 -c "
+    START=$(python3 "$QUEUE_STORE" next-index --prefix "$PREFIX" --queue-dir "$MACHINES_DIR")
+    END=$((START + COUNT - 1))
+    ENTRIES=$(python3 -c "
 import json, sys
-q = json.load(sys.stdin)
-q.append({'name': '${NAME}', 'assigned': False})
-json.dump(q, sys.stdout)
-" <<< "$QUEUE")
-    done
-    echo "$QUEUE" | python3 -m json.tool > "${MACHINES_DIR}/queue.json"
+prefix, start, end = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+json.dump([{'name': f'{prefix}-{i}', 'assigned': False} for i in range(start, end + 1)], sys.stdout)
+" "$PREFIX" "$START" "$END")
+    python3 "$QUEUE_STORE" append --queue-dir "$MACHINES_DIR" <<< "$ENTRIES"
 
+    echo ""
     echo "=== Queue Ready ==="
-    echo "  Machines: ${COUNT} (${PREFIX}-1 through ${PREFIX}-${COUNT})"
-    echo "  Queue file: ${MACHINES_DIR}/queue.json"
+    echo "  Added: ${COUNT} (${PREFIX}-${START} through ${PREFIX}-${END})"
+    echo "  Queue file: ${QUEUE_FILE}"
     echo ""
     echo "Next:"
     echo "  Pi SD card:  just flash-batch"
-    echo "  x86 PXE:     just serve"
+    echo "  x86 PXE:     just serve        (or just serve-daemon for an always-on server)"
     echo "  x86 USB:     just flash-usb-batch && just serve-usb"
     exit 0
 fi
@@ -144,17 +122,6 @@ LABELS=$("$PYTHON" "${REPO_ROOT}/scripts/resolve-labels.py" --org-id="$ORG" --lo
 ORG_NAME=$(echo "$LABELS" | sed -n 's/^ORG_NAME=//p')
 LOC_NAME=$(echo "$LABELS" | sed -n 's/^LOCATION_NAME=//p')
 echo ""
-echo "About to create ${COUNT} machine(s):"
-echo "  Org:      ${ORG_NAME:-<unresolved>}   (${ORG})"
-echo "  Location: ${LOC_NAME:-<unresolved>}   (${LOCATION})"
-echo "  Names:    ${PREFIX}-1 .. ${PREFIX}-${COUNT}"
-echo ""
-read -p "Continue? [Y/n] " CONFIRM
-case "${CONFIRM:-y}" in
-    y|Y|yes|YES|"") ;;
-    *) echo "Aborted."; exit 1 ;;
-esac
-echo ""
 
 # Find available machine numbers (fills gaps first)
 echo "Listing existing machines with prefix '${PREFIX}'..."
@@ -181,27 +148,57 @@ for (( n=1; n<=HIGHEST; n++ )); do
     [[ "$FOUND" -eq 0 ]] && AVAILABLE+=("$n")
 done
 
+# A number is taken if it is already queued locally, even when Viam has no
+# machine for it (a stale slot from a failed run).
+number_taken() {
+    python3 "$QUEUE_STORE" has-name --name "${PREFIX}-$1" --queue-dir "$MACHINES_DIR" \
+        || [[ -d "${MACHINES_DIR}/slot-${PREFIX}-$1" ]]
+}
+
+FILTERED=()
+for n in "${AVAILABLE[@]:-}"; do
+    [[ -n "$n" ]] || continue
+    if number_taken "$n"; then
+        echo "  skip ${PREFIX}-${n}: already in queue"
+    else
+        FILTERED+=("$n")
+    fi
+done
+AVAILABLE=()
+[[ ${#FILTERED[@]} -gt 0 ]] && AVAILABLE=("${FILTERED[@]}")
+
 NEXT=$((HIGHEST + 1))
 while [[ ${#AVAILABLE[@]} -lt $COUNT ]]; do
-    AVAILABLE+=("$NEXT")
+    if ! number_taken "$NEXT"; then
+        AVAILABLE+=("$NEXT")
+    fi
     NEXT=$((NEXT + 1))
 done
 AVAILABLE=("${AVAILABLE[@]:0:$COUNT}")
 
-echo "  Existing: ${#EXISTING_NUMS[@]} machines"
-echo "  Will create: ${AVAILABLE[*]} (${COUNT} total)"
+echo "  Existing in Viam: ${#EXISTING_NUMS[@]} machines"
+echo ""
+echo "About to create ${COUNT} machine(s):"
+echo "  Org:      ${ORG_NAME:-<unresolved>}   (${ORG})"
+echo "  Location: ${LOC_NAME:-<unresolved>}   (${LOCATION})"
+echo "  Names:    $(printf "${PREFIX}-%s " "${AVAILABLE[@]}")"
+echo ""
+read -p "Continue? [Y/n] " CONFIRM
+case "${CONFIRM:-y}" in
+    y|Y|yes|YES|"") ;;
+    *) echo "Aborted."; exit 1 ;;
+esac
+echo ""
 
 # Create machines and stage credentials
-mkdir -p "$MACHINES_DIR"
 QUEUE="[]"
 
-echo ""
 echo "Creating $COUNT machines..."
 echo ""
 
 for i in "${AVAILABLE[@]}"; do
     NAME="${PREFIX}-${i}"
-    SLOT_ID="slot-${i}"
+    SLOT_ID="slot-${NAME}"
     SLOT_DIR="${MACHINES_DIR}/${SLOT_ID}"
 
     echo -n "  ${NAME}... "
@@ -240,7 +237,8 @@ json.dump(q, sys.stdout)
     echo "OK (machine: ${MACHINE_ID}, part: ${PART_ID})"
 done
 
-echo "$QUEUE" | "$PYTHON" -m json.tool > "${MACHINES_DIR}/queue.json"
+echo ""
+python3 "$QUEUE_STORE" append --queue-dir "$MACHINES_DIR" <<< "$QUEUE"
 
 echo ""
 echo "=== Provisioning Complete ==="
