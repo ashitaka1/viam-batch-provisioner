@@ -14,3 +14,4 @@ services:
       - ./http-server/machines:/srv/machines:ro
       - ./http-server/scripts:/srv/scripts:ro
       - ./http-server/config:/srv/config:ro
+      - ./logs:/var/log/pxe

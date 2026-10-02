@@ -8,6 +8,8 @@ config/ssh_host_key.pub
 config/ssh_host_key
 # Saved provisioning host address (written by flash-usb-batch, read by serve-usb)
 config/.server-address
+# Rendered launchd plists (written by scripts/daemon.sh install)
+config/launchd/
 
 # Per-machine credentials (generated at provision time)
 http-server/machines/
@@ -24,7 +26,7 @@ netboot/initrd
 netboot/grubx64.efi
 netboot/grub/x86_64-efi/
 
-# Per-machine PXE guard files (written by pxe-watcher on post-install reboot)
+# Per-machine PXE guard files (written by pxe-watcher)
 netboot/grub/provisioned/
 
 # Generated autoinstall config (contains stamped secrets)
@@ -40,8 +42,8 @@ http-server/autoinstall/user-data
 __pycache__/
 *.pyc
 
-# Logs
-dnsmasq.log
+# Logs (dnsmasq, watcher, nginx access log)
+logs/
 
 # OS / editor
 .DS_Store

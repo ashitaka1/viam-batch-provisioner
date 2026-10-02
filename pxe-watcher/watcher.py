@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
 PXE Watcher — listens for DHCP Discover packets on the provisioning network,
-assigns machine names to MACs in arrival order, and stages per-machine
-credential files for the HTTP server.
+assigns machine names to MACs in arrival order, stages per-machine credential
+files for the HTTP server, and writes GRUB guards once a machine is installed.
 
 Usage:
-    sudo ./watcher.py --interface eth0 --queue-dir ../http-server/machines
+    sudo ./watcher.py --interface en0 --queue-dir ../http-server/machines
 
-Requires: tcpdump (installed on most Linux systems)
+The watcher holds no state in memory. The queue is read from queue.json on
+every PXE event and a MAC's assignment time comes from its machine-info.json,
+so `just provision`, `just reset` and `just clean` take effect on a running
+daemon.
+
+Requires: tcpdump
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -17,8 +24,14 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Callable, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import queue_store  # noqa: E402
 
 # Wait this long after first PXE from a MAC before writing the GRUB guard.
 # Firmware retries DHCPDISCOVER several times before TFTP succeeds (observed
@@ -27,27 +40,15 @@ from pathlib import Path
 # into kernel boot and any new DHCPDISCOVER is a post-install reboot.
 REPEAT_PXE_THRESHOLD = timedelta(seconds=60)
 
+MAC_RE = r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}"
 
-def load_queue(queue_dir: Path) -> list[dict]:
-    """Load the provisioning queue — slot dirs containing viam.json but no mac-assigned marker."""
-    slots = []
-    queue_file = queue_dir / "queue.json"
-    if not queue_file.exists():
-        return slots
+# nginx combined format; the request field is the first quoted string.
+HOSTNAME_FETCH_RE = re.compile(
+    rf'^\S+ \S+ \S+ \[[^\]]*\] "GET /machines/({MAC_RE})/hostname HTTP/[0-9.]+" 200 ',
+    re.IGNORECASE,
+)
 
-    with open(queue_file) as f:
-        slots = json.load(f)
-
-    # Filter to unassigned slots
-    return [s for s in slots if not s.get("assigned")]
-
-
-def _chown_to_invoker(path: Path):
-    """Set ownership to the user who invoked sudo, not root."""
-    uid = int(os.environ.get("SUDO_UID", -1))
-    gid = int(os.environ.get("SUDO_GID", -1))
-    if uid >= 0:
-        os.chown(path, uid, gid)
+_guard_lock = threading.Lock()
 
 
 def _guard_dir(queue_dir: Path) -> Path:
@@ -63,149 +64,294 @@ def write_guard(queue_dir: Path, mac: str) -> bool:
 
     Returns True if a new guard was written, False if one already existed.
     """
-    guard_dir = _guard_dir(queue_dir)
-    guard_dir.mkdir(parents=True, exist_ok=True)
-    _chown_to_invoker(guard_dir)
-    guard_file = guard_dir / f"{mac}.cfg"
-    if guard_file.exists():
-        return False
-    guard_file.write_text("exit\n")
-    _chown_to_invoker(guard_file)
-    return True
+    with _guard_lock:
+        guard_dir = _guard_dir(queue_dir)
+        guard_dir.mkdir(parents=True, exist_ok=True)
+        queue_store.chown_like(guard_dir, queue_dir)
+        guard_file = guard_dir / f"{mac}.cfg"
+        if guard_file.exists():
+            return False
+        guard_file.write_text("exit\n")
+        queue_store.chown_like(guard_file, queue_dir)
+        return True
 
 
-def assign_machine(queue_dir: Path, queue: list[dict], mac: str) -> dict | None:
+def assigned_at(queue_dir: Path, mac: str) -> Optional[datetime]:
+    """When this MAC was assigned, from its machine-info.json; None if never."""
+    info_path = queue_dir / mac / "machine-info.json"
+    if not info_path.exists():
+        return None
+    try:
+        info = json.loads(info_path.read_text())
+        return datetime.fromisoformat(info["assigned_at"])
+    except (json.JSONDecodeError, KeyError, ValueError, OSError):
+        # The directory exists but is unreadable; treat the moment we noticed
+        # as the assignment time rather than reassigning a known machine.
+        return datetime.now(timezone.utc)
+
+
+def assign_machine(queue_dir: Path, mac: str, now: Optional[datetime] = None) -> Optional[dict]:
     """Assign the next queued name to a MAC address.
 
-    Creates the MAC-keyed directory with hostname and viam.json,
-    and marks the slot as assigned in queue.json.
+    Creates the MAC-keyed directory with hostname, viam.json (full mode)
+    and machine-info.json, and marks the entry assigned in queue.json.
     """
-    if not queue:
+    slot = queue_store.assign_next(queue_dir, mac)
+    if slot is None:
         return None
 
-    slot = queue.pop(0)
     name = slot["name"]
     machine_dir = queue_dir / mac
-
     machine_dir.mkdir(parents=True, exist_ok=True)
-    _chown_to_invoker(machine_dir)
+    queue_store.chown_like(machine_dir, queue_dir)
 
-    # Write hostname
     hostname_file = machine_dir / "hostname"
     hostname_file.write_text(name)
-    _chown_to_invoker(hostname_file)
+    queue_store.chown_like(hostname_file, queue_dir)
 
-    # Copy viam.json from the slot's staged credentials (full mode only —
-    # os-only/agent queues have no slot_id and no per-slot credentials).
+    # os-only/agent queues have no slot_id and no per-slot credentials.
     slot_id = slot.get("slot_id")
     if slot_id:
         viam_json_src = queue_dir / slot_id / "viam.json"
         if viam_json_src.exists():
             viam_json_dst = machine_dir / "viam.json"
             viam_json_dst.write_text(viam_json_src.read_text())
-            _chown_to_invoker(viam_json_dst)
+            queue_store.chown_like(viam_json_dst, queue_dir)
 
-    # Write machine info
     info = {
         "name": name,
         "mac": mac,
-        "assigned_at": datetime.now(timezone.utc).isoformat(),
+        "assigned_at": (now or datetime.now(timezone.utc)).isoformat(),
     }
     info_file = machine_dir / "machine-info.json"
     info_file.write_text(json.dumps(info, indent=2))
-    _chown_to_invoker(info_file)
-
-    # Mark as assigned in queue.json. Match on name — it's 1:1 with the
-    # slot in both full mode (which also has slot_id) and os-only/agent
-    # mode (which doesn't), so name is the queue-wide identity key.
-    slot["assigned"] = True
-    slot["mac"] = mac
-    queue_file = queue_dir / "queue.json"
-    with open(queue_file) as f:
-        all_slots = json.load(f)
-    for s in all_slots:
-        if s["name"] == slot["name"]:
-            s["assigned"] = True
-            s["mac"] = mac
-            break
-    with open(queue_file, "w") as f:
-        json.dump(all_slots, f, indent=2)
-
+    queue_store.chown_like(info_file, queue_dir)
     return info
+
+
+class PxeTracker:
+    """Decides what a PXE sighting or a hostname fetch means for a MAC.
+
+    on_pxe returns one of "assigned", "no-slot", "retry", "guard",
+    "guard-exists".
+    """
+
+    NO_SLOT_LOG_INTERVAL = timedelta(minutes=5)
+
+    def __init__(self, queue_dir: Path, *, now: Optional[Callable[[], datetime]] = None, log: Callable[..., None] = print):
+        self.queue_dir = queue_dir.resolve()
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.log = log
+        # Only throttles the "no slot" log line; carries no assignment state.
+        self._no_slot_logged: dict[str, datetime] = {}
+
+    def _stamp(self) -> str:
+        return datetime.now().strftime("%H:%M:%S")
+
+    def on_pxe(self, mac: str) -> str:
+        current = self.now()
+        first = assigned_at(self.queue_dir, mac)
+        if first is None:
+            info = assign_machine(self.queue_dir, mac, now=current)
+            if info is None:
+                last = self._no_slot_logged.get(mac)
+                if last is None or current - last >= self.NO_SLOT_LOG_INTERVAL:
+                    self._no_slot_logged[mac] = current
+                    self.log(f"[{self._stamp()}] New PXE client: MAC {mac} → NO SLOTS (will assign once provisioned)")
+                return "no-slot"
+            self._no_slot_logged.pop(mac, None)
+            self.log(f"[{self._stamp()}] New PXE client: MAC {mac} → assigned {info['name']}")
+            unassigned, _total = queue_store.summary(self.queue_dir)
+            if unassigned == 0:
+                self.log(f"[{self._stamp()}] Queue empty — run `just provision` to add machines")
+            else:
+                self.log(f"[{self._stamp()}] {unassigned} machine(s) still waiting")
+            return "assigned"
+
+        # Within the threshold it's a firmware DHCP retry during the initial
+        # PXE. After it, a post-install reboot: install the GRUB guard.
+        elapsed = current - first
+        if elapsed < REPEAT_PXE_THRESHOLD:
+            return "retry"
+        if write_guard(self.queue_dir, mac):
+            self.log(f"[{self._stamp()}] Repeat PXE: MAC {mac} ({int(elapsed.total_seconds())}s after first) → GRUB guard installed")
+            return "guard"
+        return "guard-exists"
+
+    def on_hostname_fetch(self, mac: str) -> bool:
+        """The installer fetched its hostname: the install reached late-commands."""
+        wrote = write_guard(self.queue_dir, mac)
+        if wrote:
+            self.log(f"[{self._stamp()}] Hostname fetched by MAC {mac} → GRUB guard installed")
+        return wrote
+
+
+def parse_hostname_fetch(line: str) -> Optional[str]:
+    """MAC from a successful hostname fetch in an nginx access-log line, else None."""
+    m = HOSTNAME_FETCH_RE.match(line)
+    return m.group(1).lower() if m else None
+
+
+class LogTailer(threading.Thread):
+    """Follow a log file like `tail -F`, delivering complete lines to on_line.
+
+    start() opens the file and seeks to its end before the thread runs, so
+    history is never replayed. Truncation (size shrinks below the read
+    offset) and replacement (inode changes) reopen the file from the start;
+    a missing file is waited for and then read from the start.
+    """
+
+    def __init__(self, path: Path, on_line: Callable[[str], None], stop_event: Optional[threading.Event] = None, poll: float = 0.5):
+        super().__init__(name="log-tailer", daemon=True)
+        self.path = Path(path)
+        self.on_line = on_line
+        self.poll = poll
+        self.stop_event = stop_event or threading.Event()
+        self.ready = threading.Event()
+        self._fh = None
+        self._ino = None
+        self._pos = 0
+        self._pending = b""
+
+    def _open(self, from_end: bool) -> bool:
+        try:
+            fh = open(self.path, "rb")
+        except FileNotFoundError:
+            return False
+        if from_end:
+            fh.seek(0, os.SEEK_END)
+        self._fh = fh
+        self._ino = os.fstat(fh.fileno()).st_ino
+        self._pos = fh.tell()
+        self._pending = b""
+        return True
+
+    def _close(self) -> None:
+        if self._fh is not None:
+            self._fh.close()
+        self._fh = None
+        self._ino = None
+
+    def _rotated(self) -> bool:
+        try:
+            st = os.stat(self.path)
+        except FileNotFoundError:
+            return True
+        return st.st_ino != self._ino or st.st_size < self._pos
+
+    def start(self) -> None:
+        self._open(from_end=True)
+        super().start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+
+    def run(self) -> None:
+        self.ready.set()
+        while not self.stop_event.is_set():
+            if self._fh is None:
+                if not self._open(from_end=False):
+                    self.stop_event.wait(self.poll)
+                    continue
+            chunk = self._fh.readline()
+            if chunk:
+                self._pos += len(chunk)
+                self._pending += chunk
+                if self._pending.endswith(b"\n"):
+                    line = self._pending[:-1].decode("utf-8", errors="replace")
+                    self._pending = b""
+                    self.on_line(line)
+                continue
+            if self._rotated():
+                self._close()
+                continue
+            self.stop_event.wait(self.poll)
+        self._close()
 
 
 def print_summary(queue_dir: Path):
     """Print the full MAC → name mapping table."""
-    queue_file = queue_dir / "queue.json"
-    if not queue_file.exists():
+    try:
+        entries = queue_store.read(queue_dir)
+    except (json.JSONDecodeError, OSError):
         return
-
-    with open(queue_file) as f:
-        slots = json.load(f)
-
-    assigned = [s for s in slots if s.get("assigned")]
+    assigned = [s for s in entries if s.get("assigned")]
     if not assigned:
         return
-
     print("\n--- Assignment Summary ---")
     print(f"{'Name':<25} {'MAC':<20}")
     print("-" * 45)
     for s in assigned:
-        print(f"{s['name']:<25} {s.get('mac', 'N/A'):<20}")
+        print(f"{s['name']:<25} {s.get('mac') or 'N/A':<20}")
     print("-" * 45)
 
 
-def watch(interface: str, queue_dir: Path):
-    """Sniff DHCP Discover packets via tcpdump and assign names."""
+def feed_packets(stream, handle_packet: Callable[[list[str]], None]) -> None:
+    """Split tcpdump -v output into packets. A packet starts at a line with no
+    leading whitespace; indented lines continue it."""
+    current: list[str] = []
+    for line in stream:
+        if line and not line[0].isspace():
+            if current:
+                handle_packet(current)
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        handle_packet(current)
+
+
+def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: Optional[str] = None):
+    """Sniff DHCP Discover packets via tcpdump (or replay a capture) and assign names."""
     queue_dir = queue_dir.resolve()
-    queue = load_queue(queue_dir)
-    # mac -> timestamp of first PXE seen (used to distinguish firmware
-    # retries during initial PXE from post-install reboots).
-    first_seen: dict[str, datetime] = {}
+    tracker = PxeTracker(queue_dir)
 
-    # Load already-assigned MACs and their assigned_at timestamps,
-    # so a watcher restart after assignment still recognizes a
-    # post-install reboot from a known MAC.
-    queue_file = queue_dir / "queue.json"
-    if queue_file.exists():
-        with open(queue_file) as f:
-            for s in json.load(f):
-                mac = s.get("mac")
-                if not mac:
-                    continue
-                info_path = queue_dir / mac / "machine-info.json"
-                ts = datetime.now(timezone.utc)
-                if info_path.exists():
-                    try:
-                        info = json.loads(info_path.read_text())
-                        ts = datetime.fromisoformat(info["assigned_at"])
-                    except (json.JSONDecodeError, KeyError, ValueError):
-                        pass
-                first_seen[mac] = ts
-
-    remaining = len(queue)
-    print(f"PXE Watcher started on {interface}")
+    try:
+        unassigned, total = queue_store.summary(queue_dir)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: {queue_dir / queue_store.QUEUE_FILE} is not valid JSON: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"PXE Watcher started on {interface or 'replay'}")
     print(f"  Queue directory: {queue_dir}")
-    print(f"  Machines waiting: {remaining}")
-    if remaining == 0:
-        print("  WARNING: No machines queued. Run provision-batch.sh first.")
+    print(f"  Access log:      {access_log}")
+    print(f"  Machines waiting: {unassigned} of {total}")
+    if unassigned == 0:
+        print("  No machines queued — run `just provision` to add some.")
     print("  Listening for PXE boot requests...\n")
 
-    # tcpdump with -v shows DHCP options (including Vendor-Class / PXEClient)
-    # so we can distinguish PXE boots from regular DHCP traffic.
-    cmd = [
-        "tcpdump", "-l", "-n", "-e", "-v",
-        "-i", interface,
-        "udp", "port", "67",
-    ]
+    def on_log_line(line: str) -> None:
+        mac = parse_hostname_fetch(line)
+        if mac:
+            tracker.on_hostname_fetch(mac)
+
+    tailer = LogTailer(access_log, on_log_line)
+    tailer.start()
 
     mac_pattern = re.compile(r"Request from ([0-9a-f:]{17})", re.IGNORECASE)
 
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-    )
+    def handle_packet(lines: list[str]):
+        packet_text = "\n".join(lines)
+        if "PXEClient" not in packet_text:
+            return
+        match = mac_pattern.search(packet_text)
+        if not match:
+            return
+        tracker.on_pxe(match.group(1).lower())
+
+    if replay is not None:
+        stream = sys.stdin if replay == "-" else open(replay)
+        feed_packets(stream, handle_packet)
+        tailer.stop()
+        print_summary(queue_dir)
+        return
+
+    # tcpdump with -v shows DHCP options (including Vendor-Class / PXEClient)
+    # so we can distinguish PXE boots from regular DHCP traffic.
+    cmd = ["tcpdump", "-l", "-n", "-e", "-v", "-i", interface, "udp", "port", "67"]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def shutdown(signum, frame):
+        tailer.stop()
         proc.terminate()
         print("\n")
         print_summary(queue_dir)
@@ -214,57 +360,12 @@ def watch(interface: str, queue_dir: Path):
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    def handle_packet(lines: list[str]):
-        """Process a complete tcpdump packet. Only acts on PXE DHCP Discovers."""
-        packet_text = "\n".join(lines)
-        if "PXEClient" not in packet_text:
-            return
-
-        match = mac_pattern.search(packet_text)
-        if not match:
-            return
-
-        mac = match.group(1).lower()
-        now_utc = datetime.now(timezone.utc)
-        now_str = datetime.now().strftime("%H:%M:%S")
-
-        first = first_seen.get(mac)
-        if first is None:
-            # First sighting — assign a slot. Don't write a guard yet:
-            # GRUB on this same boot is about to source provisioned/<MAC>.cfg
-            # and would exit before kernel chainload.
-            first_seen[mac] = now_utc
-            info = assign_machine(queue_dir, queue, mac)
-            if info:
-                print(f"[{now_str}] New PXE client: MAC {mac} → assigned {info['name']}")
-                if not queue:
-                    print(f"[{now_str}] All machines assigned!")
-                    print_summary(queue_dir)
-            else:
-                print(f"[{now_str}] New PXE client: MAC {mac} → NO SLOTS REMAINING (ignored)")
-            return
-
-        # Repeat sighting. Within the threshold it's a firmware DHCP retry
-        # during the initial PXE — ignore. After the threshold it's a
-        # post-install reboot, so install the GRUB guard to skip reinstall.
-        elapsed = now_utc - first
-        if elapsed < REPEAT_PXE_THRESHOLD:
-            return
-        if write_guard(queue_dir, mac):
-            print(f"[{now_str}] Repeat PXE: MAC {mac} ({int(elapsed.total_seconds())}s after first) → GRUB guard installed")
-
-    # With -v, tcpdump prints multi-line output per packet.
-    # New packets start with a timestamp (non-whitespace); continuation
-    # lines start with whitespace.
-    current_packet: list[str] = []
-
-    for line in proc.stdout:
-        if line and not line[0].isspace():
-            if current_packet:
-                handle_packet(current_packet)
-            current_packet = [line]
-        else:
-            current_packet.append(line)
+    feed_packets(proc.stdout, handle_packet)
+    rc = proc.wait()
+    err = proc.stderr.read().strip()
+    tailer.stop()
+    print(f"tcpdump exited rc={rc}{': ' + err if err else ''}", file=sys.stderr)
+    sys.exit(1)
 
 
 def detect_interface() -> str:
@@ -273,18 +374,12 @@ def detect_interface() -> str:
 
     try:
         if platform.system() == "Darwin":
-            result = subprocess.run(
-                ["route", "-n", "get", "default"],
-                capture_output=True, text=True,
-            )
+            result = subprocess.run(["route", "-n", "get", "default"], capture_output=True, text=True)
             for line in result.stdout.splitlines():
                 if "interface:" in line:
                     return line.split()[-1]
         else:
-            result = subprocess.run(
-                ["ip", "-o", "route", "show", "default"],
-                capture_output=True, text=True,
-            )
+            result = subprocess.run(["ip", "-o", "route", "show", "default"], capture_output=True, text=True)
             parts = result.stdout.split()
             if "dev" in parts:
                 return parts[parts.index("dev") + 1]
@@ -297,19 +392,26 @@ def detect_interface() -> str:
 
 
 def main():
+    repo = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description="Watch for PXE boot clients and assign machine names")
-    parser.add_argument(
-        "--interface", "-i",
-        default=None,
-        help="Network interface to listen on (default: auto-detect from default route)",
-    )
-    parser.add_argument(
-        "--queue-dir", "-q",
-        type=Path,
-        default=Path(__file__).resolve().parent.parent / "http-server" / "machines",
-        help="Directory containing queue.json and credential slots (default: ../http-server/machines)",
-    )
+    parser.add_argument("--interface", "-i", default=None,
+                        help="Network interface to listen on (default: auto-detect from default route)")
+    parser.add_argument("--queue-dir", "-q", type=Path, default=repo / "http-server" / "machines",
+                        help="Directory containing queue.json and credential slots (default: ../http-server/machines)")
+    parser.add_argument("--access-log", type=Path, default=repo / "logs" / "access.log",
+                        help="nginx access log to watch for hostname fetches (default: ../logs/access.log)")
+    parser.add_argument("--replay", metavar="FILE",
+                        help="Read tcpdump -v output from FILE (or - for stdin) instead of sniffing; no root needed")
     args = parser.parse_args()
+
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:
+        pass
+
+    if args.replay is not None:
+        watch(None, args.queue_dir, args.access_log, replay=args.replay)
+        return
 
     if os.geteuid() != 0:
         print("ERROR: Must run as root (tcpdump needs raw socket access)", file=sys.stderr)
@@ -317,7 +419,7 @@ def main():
         sys.exit(1)
 
     interface = args.interface or detect_interface()
-    watch(interface, args.queue_dir)
+    watch(interface, args.queue_dir, args.access_log)
 
 
 if __name__ == "__main__":
