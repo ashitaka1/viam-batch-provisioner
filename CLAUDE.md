@@ -6,6 +6,8 @@ Zero-touch provisioning for x86 Linux machines (PXE or USB stick) and Raspberry 
 
 A client-server rewrite (Swift server + SwiftUI client apps, REST + SSE from an OpenAPI contract) is planned in `docs/architecture-v2.md`, including phasing and open questions. Read it before starting new feature work. The existing bash/Python tooling below remains the working system until v2 replaces it — don't break it.
 
+Phase 1 (persistent server on the current stack) is implemented: stateless watcher, append-only queue via `queue_store.py`, launchd daemons. Phase 2 (OpenAPI contract + Python REST/SSE) is next.
+
 ## Configuration
 
 All site-specific settings live in `config/site.env` (gitignored). Run `just setup-wizard` to create it interactively. Settings include: machine prefix/count, username/password, WiFi, SSH key, Viam Cloud credentials (optional), Tailscale (optional).
