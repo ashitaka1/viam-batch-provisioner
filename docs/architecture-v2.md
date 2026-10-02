@@ -203,11 +203,12 @@ Make the existing Python/bash stack always-on. No Swift yet. Validates the "serv
 - launchd plists for dnsmasq, nginx (Docker), and watcher
 - New justfile recipes: serve-daemon, stop-daemon, daemon-status
 
-Starting points in the current code:
-- `pxe-watcher/watcher.py` `watch()` loads the queue once (`queue = load_queue(queue_dir)`) and pops from that in-memory list in `assign_machine()`. Hot-reload means reading unassigned slots from `queue.json` at assignment time instead.
-- `scripts/provision-batch.sh` "Check for existing batch state" block exits if any slot is unassigned, then deletes the old queue and slot dirs. Append mode replaces that with a merge; slot numbering in full mode must not collide with existing `slot-N` dirs.
-- `just serve` wraps everything in a foreground trap that tears down on exit; the daemon recipes need their own lifecycle instead.
-- PXE guards are written in two places: `watcher.py` `write_guard()` (repeat PXE after 60s) and `scripts/tail-http-logs.sh` (hostname fetched). A persistent setup needs whichever of these runs as a daemon — or both, deliberately.
+Implemented as:
+- `pxe-watcher/queue_store.py` is the only writer of `queue.json` (flock on `queue.lock`, temp file + rename, files chowned to the queue dir's owner). The watcher imports it; `provision-batch.sh`, `flash-usb.sh`, `just reset` and `just status` call its CLI.
+- The watcher keeps no in-memory state. `PxeTracker.on_pxe` reads the queue and the MAC's `machine-info.json` on each event, so provision/reset/clean take effect live. A MAC with no slot is not remembered and is assigned once the queue has an entry.
+- Guards come from one process. nginx writes `logs/access.log` (mounted outside `/srv`); the watcher's `LogTailer` thread follows it and writes the guard on a 200 hostname fetch, in addition to the repeat-PXE path. `tail-http-logs.sh` only pretty-prints.
+- `provision-batch.sh` appends. os-only numbering continues after the highest `<prefix>-N` in the queue; full mode skips numbers already queued and names slot dirs `slot-<name>`.
+- Two LaunchDaemons (`com.viam.provisioner.dnsmasq`, `com.viam.provisioner.watcher`) rendered from `templates/launchd/` by `scripts/daemon.sh`, with the interface baked in at install. nginx relies on `restart: unless-stopped` plus Docker Desktop launch-at-login; there is no nginx plist.
 
 ### Phase 2 — Contract + REST API + SSE (Python)
 

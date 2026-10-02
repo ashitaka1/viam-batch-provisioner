@@ -8,14 +8,23 @@ doctor:
 setup-wizard:
     ./scripts/setup-wizard.sh
 
+dnsmasq_args := "--user=root --conf-file=netboot/dnsmasq.conf --tftp-root=" + justfile_directory() + "/netboot --log-facility=" + justfile_directory() + "/logs/dnsmasq.log --pid-file=" + justfile_directory() + "/logs/dnsmasq.pid"
+
 # Start all PXE services, run watcher in foreground. Ctrl-C stops everything.
 serve:
     #!/usr/bin/env bash
     set -euo pipefail
+    if ./scripts/daemon.sh installed; then
+        echo "The always-on daemons are installed. Use 'just daemon-status', or 'just stop-daemon' before 'just serve'." >&2
+        exit 1
+    fi
+    mkdir -p logs
     cleanup() {
         echo ""
         echo "Shutting down..."
-        sudo killall dnsmasq 2>/dev/null && echo "  dnsmasq stopped" || true
+        if [[ -f logs/dnsmasq.pid ]]; then
+            sudo kill "$(cat logs/dnsmasq.pid)" 2>/dev/null && echo "  dnsmasq stopped" || true
+        fi
         docker compose down 2>/dev/null && echo "  Docker stopped" || true
         echo "Done."
     }
@@ -28,31 +37,79 @@ serve:
     echo "Starting dnsmasq (DHCP proxy + TFTP)..."
     # --user=root: dnsmasq's default 'nobody' user can't traverse macOS home
     # directories, so TFTP fails with "Permission denied" reading netboot/.
-    sudo dnsmasq --user=root --conf-file=netboot/dnsmasq.conf --tftp-root={{justfile_directory()}}/netboot --log-facility={{justfile_directory()}}/dnsmasq.log
-    # Tail HTTP logs + create PXE guard files when hostname is fetched
-    {{justfile_directory()}}/scripts/tail-http-logs.sh {{justfile_directory()}}/netboot/grub/provisioned &
-    HTTP_LOG_PID=$!
-    echo "Starting PXE watcher (Ctrl-C to stop all)..."
+    sudo dnsmasq {{dnsmasq_args}}
+    echo "Starting PXE watcher (Ctrl-C to stop all; HTTP requests: just logs)..."
     echo ""
-    sudo {{justfile_directory()}}/.venv/bin/python3 {{justfile_directory()}}/pxe-watcher/watcher.py
-    kill $HTTP_LOG_PID 2>/dev/null || true
+    sudo "$(command -v python3)" {{justfile_directory()}}/pxe-watcher/watcher.py
 
 # Stop all PXE services
 stop:
     #!/usr/bin/env bash
+    if ./scripts/daemon.sh installed; then
+        echo "The always-on daemons are installed; use 'just stop-daemon'." >&2
+        exit 1
+    fi
     echo "Stopping services..."
-    sudo killall dnsmasq 2>/dev/null && echo "  dnsmasq stopped" || echo "  dnsmasq not running"
+    if [[ -f logs/dnsmasq.pid ]] && sudo kill "$(cat logs/dnsmasq.pid)" 2>/dev/null; then
+        echo "  dnsmasq stopped"
+    else
+        echo "  dnsmasq not running"
+    fi
     docker compose down 2>/dev/null && echo "  Docker stopped" || echo "  Docker not running"
+
+# --- Always-on server (launchd) ---
+
+# Install dnsmasq + watcher as launchd daemons and start the HTTP server
+serve-daemon:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Generating autoinstall config..."
+    ./scripts/build-config.sh
+    mkdir -p logs
+    echo ""
+    echo "Starting HTTP server..."
+    docker compose up -d
+    echo ""
+    ./scripts/daemon.sh install
+    echo ""
+    just daemon-status
+
+# Remove the launchd daemons and stop the HTTP server
+stop-daemon:
+    #!/usr/bin/env bash
+    ./scripts/daemon.sh uninstall
+    docker compose down 2>/dev/null && echo "  Docker stopped" || echo "  Docker not running"
+
+# Show daemon, HTTP server and queue state
+daemon-status:
+    #!/usr/bin/env bash
+    echo "=== Daemons ==="
+    ./scripts/daemon.sh status
+    echo ""
+    echo "=== HTTP server ==="
+    docker compose ps --format 'table {{{{.Name}}}}\t{{{{.Status}}}}' 2>/dev/null || echo "  Docker not running"
+    echo ""
+    echo "=== Queue ==="
+    python3 pxe-watcher/queue_store.py list
+
+# Follow HTTP requests (nginx access log)
+logs:
+    ./scripts/tail-http-logs.sh
+
+# Run the unit tests
+test:
+    python3 -m unittest discover -s pxe-watcher -p 'test_*.py'
 
 # --- Debug helpers (individual services; `just serve` runs them together) ---
 
 # Start PXE watcher only (assigns names to MACs as machines boot)
 watch:
-    sudo .venv/bin/python3 pxe-watcher/watcher.py
+    sudo "$(command -v python3)" pxe-watcher/watcher.py
 
 # Start dnsmasq proxy DHCP + TFTP server only
 dhcp:
-    sudo dnsmasq --user=root --conf-file=netboot/dnsmasq.conf --tftp-root={{justfile_directory()}}/netboot --log-facility={{justfile_directory()}}/dnsmasq.log --no-daemon 2>&1 | grep -v '^dnsmasq-dhcp'
+    mkdir -p logs
+    sudo dnsmasq {{dnsmasq_args}} --no-daemon 2>&1 | grep -v '^dnsmasq-dhcp'
 
 # Start HTTP server only (Docker)
 up:
@@ -143,7 +200,7 @@ unguard slot:
         echo "No queue.json. Run 'just provision' first." >&2
         exit 1
     fi
-    MAC=$(.venv/bin/python3 -c "
+    MAC=$(python3 -c "
     import json, sys
     target = '{{slot}}'
     for s in json.load(open('$QUEUE_FILE')):
@@ -161,19 +218,29 @@ unguard slot:
         esac
         exit 1
     }
-    just stop
     rm -f "netboot/grub/provisioned/$MAC.cfg"
-    rm -f "http-server/machines/$MAC/machine-info.json"
-    echo "Unguarded $MAC. Run 'just serve' and reboot the target."
+    # Restart the repeat-PXE window so the watcher doesn't re-guard on the
+    # next boot. The machine-info file must stay: without it the watcher
+    # treats the MAC as new and assigns it another queue entry.
+    INFO="http-server/machines/$MAC/machine-info.json"
+    if [ -f "$INFO" ]; then
+        python3 -c "
+    import json, sys
+    from datetime import datetime, timezone
+    p = sys.argv[1]
+    info = json.load(open(p))
+    info['assigned_at'] = datetime.now(timezone.utc).isoformat()
+    json.dump(info, open(p, 'w'), indent=2)
+    " "$INFO"
+    fi
+    echo "Unguarded $MAC. Reboot the target; the running watcher picks it up."
 
 # Reset queue (mark all slots unassigned, re-use same batch)
 reset:
     #!/usr/bin/env bash
+    set -euo pipefail
     echo "Resetting queue (marking all slots as unassigned)..."
-    .venv/bin/python3 -c "import json; \
-      q=json.load(open('http-server/machines/queue.json')); \
-      [s.update({'assigned': False, 'mac': None}) for s in q]; \
-      json.dump(q, open('http-server/machines/queue.json', 'w'), indent=2)"
+    python3 pxe-watcher/queue_store.py reset
     echo "Cleaning MAC-keyed directories and PXE guards..."
     rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
     rm -rf netboot/grub/provisioned/
@@ -185,21 +252,23 @@ clean:
     echo "Removing all provisioning state..."
     rm -rf http-server/machines/[0-9a-f][0-9a-f]:*
     rm -rf http-server/machines/slot-*
-    rm -f http-server/machines/queue.json
+    rm -f http-server/machines/queue.json http-server/machines/queue.lock
     rm -rf netboot/grub/provisioned/
+    [[ -f logs/access.log ]] && : > logs/access.log || true
     echo "Clean. Run 'just provision' to start a new batch."
 
 # Show queue state and service status
 status:
     #!/usr/bin/env bash
     echo "=== Queue ==="
-    if [ -f http-server/machines/queue.json ]; then
-      python3 -c "import json; q=json.load(open('http-server/machines/queue.json')); \
-        [print(f\"  {'✓' if s.get('assigned') else '○'} {s['name']:<25} {s.get('mac', 'waiting...')}\") for s in q]"
-    else
-      echo "  No queue. Run 'just provision' first."
-    fi
+    python3 pxe-watcher/queue_store.py list
     echo ""
     echo "=== Services ==="
     docker compose ps --format 'table {{{{.Name}}}}\t{{{{.Status}}}}' 2>/dev/null || echo "  Docker not running"
-    pgrep -x dnsmasq >/dev/null 2>&1 && echo "  dnsmasq: running" || echo "  dnsmasq: stopped"
+    if ./scripts/daemon.sh installed; then
+      echo "  daemons: installed (just daemon-status)"
+    elif [[ -f logs/dnsmasq.pid ]] && kill -0 "$(cat logs/dnsmasq.pid)" 2>/dev/null; then
+      echo "  dnsmasq: running (just serve)"
+    else
+      echo "  dnsmasq: stopped"
+    fi

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.viam.provisioner.watcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>@PYTHON@</string>
+        <string>@REPO@/pxe-watcher/watcher.py</string>
+        <string>--interface</string>
+        <string>@IFACE@</string>
+        <string>--queue-dir</string>
+        <string>@REPO@/http-server/machines</string>
+        <string>--access-log</string>
+        <string>@REPO@/logs/access.log</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>@REPO@</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>PATH</key>
+        <string>/usr/sbin:/usr/bin:/bin:/sbin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>@REPO@/logs/watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>@REPO@/logs/watcher.log</string>
+</dict>
+</plist>

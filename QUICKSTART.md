@@ -56,9 +56,14 @@ just provision lab-meerkat 6
 
 # 3. Start all PXE services + watcher (Ctrl-C stops everything)
 just serve
+#    …or install them as always-on launchd daemons:
+# just serve-daemon
 
 # 4. Power on machines (F12 for network boot)
 ```
+
+`just provision` appends to the queue, so you can add machines while the
+server runs. `just clean` wipes it.
 
 ## Provisioning x86 Machines (USB sticks)
 
@@ -112,6 +117,9 @@ Set in `config/site.env` (or via the setup wizard):
 | `just setup-wizard` | Interactive setup — creates config/site.env |
 | `just provision <prefix> <count>` | Generate queue or create Viam machines |
 | `just serve` | Start all PXE services + watcher (Ctrl-C stops everything) |
+| `just serve-daemon` | Install PXE services as always-on launchd daemons |
+| `just stop-daemon` | Remove the daemons |
+| `just daemon-status` | Daemon, HTTP server and queue state |
 | `just serve-usb` | HTTP-only server for USB-flashed targets |
 | `just stop` | Stop all PXE services |
 | `just flash-batch` | Flash all queued Pi SD cards |

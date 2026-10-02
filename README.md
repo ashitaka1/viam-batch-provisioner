@@ -68,6 +68,21 @@ just serve
 # Ctrl-C stops all services.
 ```
 
+For a Mac that stays on as the lab's provisioning server, install the
+services as launchd daemons instead. They survive reboots, and `just
+provision` adds machines to the queue while they run:
+
+```bash
+just serve-daemon         # once: picks the interface, installs dnsmasq + watcher daemons
+just provision my-machine 6   # any time; appends to the queue
+just daemon-status
+just stop-daemon          # removes the daemons
+```
+
+The HTTP server runs in Docker with a restart policy, so set Docker Desktop
+to start at sign-in and keep the repo outside `~/Desktop`, `~/Documents`
+and `~/Downloads` (root daemons cannot read those without a TCC grant).
+
 ### Provisioning x86 machines (USB sticks)
 
 Each stick's GRUB config carries the host's server IP and the target's
@@ -134,8 +149,10 @@ Phase 2 service for packages + Viam + Tailscale
 |-----------|------|
 | **dnsmasq** (native) | Proxy DHCP for PXE discovery + TFTP for GRUB/kernel/initrd |
 | **nginx** (Docker) | HTTP server for Ubuntu ISO, autoinstall configs, credentials |
-| **pxe-watcher** | Sniffs DHCP for PXE clients, assigns hostnames by arrival order |
-| **provision-batch.sh** | Creates Viam machines + retrieves credentials (full mode) |
+| **pxe-watcher** | Sniffs DHCP for PXE clients, assigns hostnames by arrival order, writes GRUB guards (on hostname fetch or repeat PXE) |
+| **queue_store.py** | Sole writer of `queue.json`: locked, atomic append/assign used by the watcher and scripts |
+| **daemon.sh** | Installs dnsmasq + watcher as launchd daemons (`just serve-daemon`) |
+| **provision-batch.sh** | Creates Viam machines + retrieves credentials (full mode); appends to the queue |
 | **flash-pi-sd.sh** | Writes Pi OS to SD card with cloud-init config |
 | **setup-wizard.sh** | Interactive environment configuration |
 
@@ -159,8 +176,12 @@ The environment holds stable settings (credentials, WiFi, SSH key, timezone). Pe
 |---------|-------------|
 | `just doctor` | Verify host tools (dnsmasq, p7zip, docker, viam CLI) |
 | `just setup-wizard` | Interactive setup — create/switch environments |
-| `just provision <prefix> <count>` | Generate queue or create Viam machines |
+| `just provision <prefix> <count>` | Add `<count>` machines to the queue (creates them in Viam in full mode) |
 | `just serve` | Start all PXE services + watcher (Ctrl-C stops all) |
+| `just serve-daemon` | Install dnsmasq + watcher as launchd daemons; start HTTP server |
+| `just stop-daemon` | Remove the daemons and stop the HTTP server |
+| `just daemon-status` | Daemon, HTTP server and queue state |
+| `just logs` | Follow HTTP requests |
 | `just serve-usb` | Start HTTP server only (for USB-mode targets) |
 | `just flash <device> <name>` | Flash a single Pi SD card |
 | `just flash-batch` | Flash all queued Pi SD cards with swap prompts |
@@ -173,6 +194,7 @@ The environment holds stable settings (credentials, WiFi, SSH key, timezone). Pe
 | `just reset` | Re-use current queue (mark unassigned) |
 | `just stop` | Stop all PXE services |
 | `just unguard <name-or-mac>` | Clear one machine's PXE guard so it can re-attempt install |
+| `just test` | Run the unit tests |
 
 ## Target machine config
 

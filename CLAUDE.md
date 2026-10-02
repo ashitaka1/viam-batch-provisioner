@@ -33,8 +33,11 @@ UEFI USB boot → GRUB on stick → kernel + initrd from stick → installer dow
 
 - **dnsmasq** (native, not Docker) — proxy DHCP + TFTP for PXE boot
 - **nginx** (Docker) — HTTP server for ISO, autoinstall configs, credentials
-- **pxe-watcher** (host script) — assigns names to MACs as machines PXE boot
-- **provision-batch.sh** — creates Viam machines + fetches credentials (full mode), or generates names-only queue (os-only/agent mode)
+- **pxe-watcher** (host script, root) — assigns names to MACs as machines PXE boot; tails the nginx access log and writes GRUB guards on hostname fetch or repeat PXE
+- **pxe-watcher/queue_store.py** — sole writer of `queue.json` (flock + atomic replace); imported by the watcher, called as a CLI by the bash scripts
+- **scripts/daemon.sh** — renders `templates/launchd/*.plist.tpl` and installs dnsmasq + watcher as LaunchDaemons
+- **scripts/tail-http-logs.sh** — pretty-prints `logs/access.log` (`just logs`); writes nothing
+- **provision-batch.sh** — creates Viam machines + fetches credentials (full mode), or generates names-only queue (os-only/agent mode); appends to the existing queue
 - **flash-pi-sd.sh** / **flash-batch.sh** — SD card flashing for Pis
 - **flash-usb.sh** / **flash-usb-batch.sh** — x86 USB boot stick flashing (per-machine, fixed server)
 - **pick-server-iface.sh** — scores host network interfaces; used by USB flash + serve-usb
@@ -53,6 +56,11 @@ UEFI USB boot → GRUB on stick → kernel + initrd from stick → installer dow
 - **USB layout: single FAT32 ESP, GPT.** GRUB is installed at `/EFI/BOOT/BOOTX64.EFI` (UEFI fallback path) so the stick boots on any UEFI firmware without per-machine boot entries.
 - **Best-interface picker.** `pick-server-iface.sh` enumerates UP IPv4 interfaces, prefers the default-route one, then wired (`en*`/`eth*`/`enp*`) over wireless. Operator confirms the choice once per batch.
 - **Server address persisted between flash and serve.** `flash-usb-batch.sh` writes the chosen `IP:port` to `config/.server-address` (gitignored). `just serve-usb` reads it so `build-config.sh` stamps the same address into `user-data` that's baked into the sticks.
+- **The watcher holds no state in memory.** The queue is read from `queue.json` on every PXE event and a MAC's assignment time comes from its `machine-info.json`, so `just provision`, `just reset` and `just clean` take effect on a running daemon. A MAC that arrives with no slot is not remembered; it is assigned once the queue has an entry.
+- **Append-only queue.** `provision` adds `COUNT` machines after the highest existing `<prefix>-N`; names already queued are skipped. `just clean` is the only wipe. Full-mode slot dirs are `slot-<name>` so two prefixes never collide.
+- **One guard writer.** nginx writes its access log to `logs/access.log` (mounted at `/var/log/pxe`, outside the served `/srv` tree). The root watcher tails it and writes the guard on `GET /machines/<mac>/hostname` 200, and also on a repeat PXE more than 60s after assignment.
+- **Daemon files take the operator's ownership.** Everything the root watcher creates is chowned to the owner of `http-server/machines/`, so user-run scripts can still write the queue.
+- **launchd, not the venv.** Daemons run the watcher with a stable system or Homebrew `python3` (≥3.9; the code avoids 3.10-only syntax). The serving interface is baked into the plist at install because default-route detection fails at boot. dnsmasq is stopped by pid file, never `killall`.
 
 ## Operator Workflow
 
@@ -67,8 +75,17 @@ just flash-batch        # flash all SD cards with swap prompts
 
 # x86 PXE provisioning
 just setup              # extract GRUB + kernel from Ubuntu ISO (one-time)
-just provision          # create Viam machines + stage credentials
+just provision          # create Viam machines + stage credentials (appends to queue)
 just serve              # start HTTP + DHCP/TFTP + watcher (Ctrl-C stops all)
+
+# x86 PXE, always-on server (launchd)
+just serve-daemon       # once: install dnsmasq + watcher daemons, start HTTP
+just provision          # any time while the daemons run
+just daemon-status      # daemons, HTTP server, queue
+just stop-daemon
+
+# Tests
+just test               # python3 -m unittest discover -s pxe-watcher
 
 # x86 USB-stick provisioning (when sharing network with other operators)
 just setup              # one-time
