@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - macOS or Linux
-- Docker Desktop
+- Docker with the `compose` plugin (Docker Desktop, Colima, OrbStack, or Docker Engine)
 - Python 3
 - `just` (`brew install just`)
 - `p7zip` (`brew install p7zip`) — for PXE server setup only

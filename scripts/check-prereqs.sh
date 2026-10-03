@@ -81,7 +81,7 @@ fi
 
 # Required for everything
 check just    just         "command runner"
-check docker  "Docker Desktop" "HTTP server (nginx) for ISO + autoinstall"
+check docker  docker       "HTTP server (nginx) for ISO + autoinstall"
 check python3 python3      "queue + credentials scripting"
 
 # macOS ships only LibreSSL, which can't make a SHA-512 ($6$) hash. Probe with

@@ -208,7 +208,7 @@ Implemented as:
 - The watcher keeps no in-memory state. `PxeTracker.on_pxe` reads the queue and the MAC's `machine-info.json` on each event, so provision/reset/clean take effect live. A MAC with no slot is not remembered and is assigned once the queue has an entry.
 - Guards come from one process. nginx writes `logs/access.log` (mounted outside `/srv`); the watcher's `LogTailer` thread follows it and writes the guard on a 200 hostname fetch, in addition to the repeat-PXE path. `tail-http-logs.sh` only pretty-prints.
 - `provision-batch.sh` appends. os-only numbering continues after the highest `<prefix>-N` in the queue; full mode skips numbers already queued and names slot dirs `slot-<name>`.
-- Two LaunchDaemons (`com.viam.provisioner.dnsmasq`, `com.viam.provisioner.watcher`) rendered from `templates/launchd/` by `scripts/daemon.sh`, with the interface baked in at install. nginx relies on `restart: unless-stopped` plus Docker Desktop launch-at-login; there is no nginx plist.
+- Two LaunchDaemons (`com.viam.provisioner.dnsmasq`, `com.viam.provisioner.watcher`) rendered from `templates/launchd/` by `scripts/daemon.sh`, with the interface baked in at install. nginx relies on `restart: unless-stopped` plus a Docker engine that starts at login (Docker Desktop, Colima, OrbStack); there is no nginx plist.
 
 ### Phase 2 — Contract + REST API + SSE (Python)
 

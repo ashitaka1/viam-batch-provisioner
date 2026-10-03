@@ -23,7 +23,7 @@ Boots a target machine over the network (x86) or from a pre-flashed SD card (Pi)
 ## Prerequisites
 
 - macOS or Linux workstation
-- Docker Desktop
+- Docker with the `compose` plugin (Docker Desktop, or a CLI engine such as Colima or OrbStack)
 - Python 3
 - `just` — command runner (`brew install just`)
 - `dnsmasq` — for PXE boot (`brew install dnsmasq`)
@@ -79,9 +79,11 @@ just daemon-status
 just stop-daemon          # removes the daemons
 ```
 
-The HTTP server runs in Docker with a restart policy, so set Docker Desktop
-to start at sign-in and keep the repo outside `~/Desktop`, `~/Documents`
-and `~/Downloads` (root daemons cannot read those without a TCC grant).
+The HTTP server runs in Docker with a restart policy, so it returns after a
+reboot once the Docker engine is up: set Docker Desktop to start at sign-in,
+or `brew services start colima` for a CLI install. Keep the repo outside
+`~/Desktop`, `~/Documents` and `~/Downloads` (root daemons cannot read those
+without a TCC grant).
 
 ### Provisioning x86 machines (USB sticks)
 
