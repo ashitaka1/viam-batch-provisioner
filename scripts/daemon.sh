@@ -117,7 +117,7 @@ cmd_status() {
     fi
     local label out state pid
     for label in "${LABELS[@]}"; do
-        out="$(sudo launchctl print "system/${label}" 2>/dev/null || true)"
+        out="$(launchctl print "system/${label}" 2>/dev/null || true)"
         state="$(echo "$out" | awk -F'= ' '/^\tstate = /{print $2; exit}')"
         pid="$(echo "$out" | awk -F'= ' '/^\tpid = /{print $2; exit}')"
         printf '  %-32s %s%s\n' "$label" "${state:-not loaded}" "${pid:+ (pid ${pid})}"
