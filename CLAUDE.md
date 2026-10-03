@@ -6,7 +6,7 @@ Zero-touch provisioning for x86 Linux machines (PXE or USB stick) and Raspberry 
 
 A client-server rewrite (Swift server + SwiftUI client apps, REST + SSE from an OpenAPI contract) is planned in `docs/architecture-v2.md`, including phasing and open questions. Read it before starting new feature work. The existing bash/Python tooling below remains the working system until v2 replaces it — don't break it.
 
-Phase 1 (persistent server on the current stack) is implemented: stateless watcher, append-only queue via `queue_store.py`, launchd daemons. Phase 2 (OpenAPI contract + Python REST/SSE) is next.
+Phase 1 (persistent server on the current stack) is complete and validated live (2026-10-03): stateless watcher, append-only queue via `queue_store.py`, launchd daemons, proxy-DHCP range derived from the serving interface via `scripts/pxe-subnet.sh`. Phase 2 (OpenAPI contract + Python REST/SSE) is next.
 
 ## Configuration
 

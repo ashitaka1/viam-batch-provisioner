@@ -172,6 +172,8 @@ All site-specific settings live in `config/site.env` (created by `just setup-wiz
 
 The environment holds stable settings (credentials, WiFi, SSH key, timezone). Per-run details (hostname prefix, count) are passed as arguments to `just provision`.
 
+`just provision` appends: it adds `<count>` machines after the highest existing `<prefix>-N` in the queue and skips names already queued, so running it again extends the batch. Use `just clean` to start a new batch from scratch.
+
 For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set `PXE_PROXY_SUBNET` (CIDR, e.g. `10.1.0.0/20`) in `site.env` when the provisioning network differs from that interface's own subnet.
 
 ## Commands
@@ -194,8 +196,8 @@ For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set 
 | `just download-pi-image` | Download Raspberry Pi OS Lite |
 | `just setup` | Extract GRUB + kernel from Ubuntu ISO (one-time) |
 | `just status` | Show queue state + service status |
-| `just clean` | Wipe all provisioning state |
-| `just reset` | Re-use current queue (mark unassigned) |
+| `just clean` | Wipe the queue and all provisioning state |
+| `just reset` | Re-use current queue (mark unassigned, clear MAC assignments and PXE guards) |
 | `just stop` | Stop all PXE services |
 | `just unguard <name-or-mac>` | Clear one machine's PXE guard so it can re-attempt install |
 | `just test` | Run the unit tests |
