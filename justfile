@@ -87,7 +87,7 @@ daemon-status:
     ./scripts/daemon.sh status
     echo ""
     echo "=== HTTP server ==="
-    docker compose ps --format 'table {{{{.Name}}}}\t{{{{.Status}}}}' 2>/dev/null || echo "  Docker not running"
+    docker compose ps --format 'table {{{{.Name}}\t{{{{.Status}}' 2>/dev/null || echo "  Docker not running"
     echo ""
     echo "=== Queue ==="
     python3 pxe-watcher/queue_store.py list
@@ -264,7 +264,7 @@ status:
     python3 pxe-watcher/queue_store.py list
     echo ""
     echo "=== Services ==="
-    docker compose ps --format 'table {{{{.Name}}}}\t{{{{.Status}}}}' 2>/dev/null || echo "  Docker not running"
+    docker compose ps --format 'table {{{{.Name}}\t{{{{.Status}}' 2>/dev/null || echo "  Docker not running"
     if ./scripts/daemon.sh installed; then
       echo "  daemons: installed (just daemon-status)"
     elif [[ -f logs/dnsmasq.pid ]] && kill -0 "$(cat logs/dnsmasq.pid)" 2>/dev/null; then
