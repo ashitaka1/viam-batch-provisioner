@@ -43,6 +43,7 @@ UEFI USB boot → GRUB on stick → kernel + initrd from stick → installer dow
 - **flash-pi-sd.sh** / **flash-batch.sh** — SD card flashing for Pis
 - **flash-usb.sh** / **flash-usb-batch.sh** — x86 USB boot stick flashing (per-machine, fixed server)
 - **pick-server-iface.sh** — scores host network interfaces; used by USB flash + serve-usb
+- **pxe-subnet.sh** — prints the dnsmasq proxy-DHCP range for an interface, or for `PXE_PROXY_SUBNET` from `config/site.env`; used by `just serve` and `daemon.sh install`
 - **build-config.sh** — generates PXE autoinstall user-data from template
 - **setup-wizard.sh** — interactive config creation
 
@@ -50,6 +51,7 @@ UEFI USB boot → GRUB on stick → kernel + initrd from stick → installer dow
 
 - **GRUB, not netboot.xyz/iPXE.** GRUB handles network boot directly from the Ubuntu ISO's signed binary.
 - **dnsmasq runs natively.** Docker Desktop for Mac can't do host networking for broadcast DHCP/TFTP.
+- **Proxy-DHCP range follows the serving interface.** `dnsmasq.conf` carries no `dhcp-range`; `pxe-subnet.sh` derives `<network>,proxy,<netmask>` from the interface at `just serve` or daemon install time. `PXE_PROXY_SUBNET` (CIDR) in `site.env` overrides it.
 - **NIC names discovered at install time.** Dynamic detection, no hardcoded interface names.
 - **Provisioning key pattern.** Org-scoped API key fetches per-machine cloud credentials via Python SDK. The org key never touches target machines.
 - **Pi OS uses cloud-init.** Pi OS Trixie has native cloud-init on the boot partition (FAT32, mountable from macOS). Two-phase boot: offline config first, network-dependent setup via systemd service.

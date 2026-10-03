@@ -6,6 +6,7 @@
 #
 # Usage:
 #   scripts/daemon.sh install [--interface IFACE] [--python PATH]
+#       The proxy-DHCP range comes from scripts/pxe-subnet.sh for IFACE.
 #   scripts/daemon.sh uninstall
 #   scripts/daemon.sh status
 #   scripts/daemon.sh installed      # exit 0 if the plists are installed
@@ -43,6 +44,7 @@ render() {
         -e "s|@PYTHON@|${PYTHON}|g" \
         -e "s|@DNSMASQ@|${DNSMASQ}|g" \
         -e "s|@IFACE@|${IFACE}|g" \
+        -e "s|@DHCP_RANGE@|${DHCP_RANGE}|g" \
         "${TEMPLATE_DIR}/${label}.plist.tpl" > "${RENDER_DIR}/${label}.plist"
 }
 
@@ -80,6 +82,7 @@ cmd_install() {
     fi
     [[ -n "$iface" ]] || die "No interface selected"
     IFACE="$iface"
+    DHCP_RANGE="$("${REPO_ROOT}/scripts/pxe-subnet.sh" "$IFACE")"
 
     mkdir -p "$LOG_DIR" "$RENDER_DIR"
     local label
@@ -96,6 +99,7 @@ cmd_install() {
     done
     echo ""
     echo "Interface: ${IFACE}"
+    echo "Proxy DHCP: ${DHCP_RANGE}"
     echo "Python:    ${PYTHON}"
     echo "Logs:      ${LOG_DIR}/{watcher,dnsmasq}.log"
 }

@@ -10,6 +10,7 @@
         <string>--keep-in-foreground</string>
         <string>--user=root</string>
         <string>--conf-file=@REPO@/netboot/dnsmasq.conf</string>
+        <string>--dhcp-range=@DHCP_RANGE@</string>
         <string>--tftp-root=@REPO@/netboot</string>
         <string>--log-facility=@REPO@/logs/dnsmasq.log</string>
         <string>--pid-file=@REPO@/logs/dnsmasq.pid</string>

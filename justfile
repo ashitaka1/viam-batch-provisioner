@@ -34,10 +34,11 @@ serve:
     echo ""
     echo "Starting HTTP server..."
     docker compose up -d
-    echo "Starting dnsmasq (DHCP proxy + TFTP)..."
+    DHCP_RANGE="$(./scripts/pxe-subnet.sh)"
+    echo "Starting dnsmasq (DHCP proxy on ${DHCP_RANGE%%,*}, TFTP)..."
     # --user=root: dnsmasq's default 'nobody' user can't traverse macOS home
     # directories, so TFTP fails with "Permission denied" reading netboot/.
-    sudo dnsmasq {{dnsmasq_args}}
+    sudo dnsmasq {{dnsmasq_args}} --dhcp-range="$DHCP_RANGE"
     echo "Starting PXE watcher (Ctrl-C to stop all; HTTP requests: just logs)..."
     echo ""
     sudo "$(command -v python3)" {{justfile_directory()}}/pxe-watcher/watcher.py
@@ -108,8 +109,10 @@ watch:
 
 # Start dnsmasq proxy DHCP + TFTP server only
 dhcp:
+    #!/usr/bin/env bash
+    set -euo pipefail
     mkdir -p logs
-    sudo dnsmasq {{dnsmasq_args}} --no-daemon 2>&1 | grep -v '^dnsmasq-dhcp'
+    sudo dnsmasq {{dnsmasq_args}} --dhcp-range="$(./scripts/pxe-subnet.sh)" --no-daemon 2>&1 | grep -v '^dnsmasq-dhcp'
 
 # Start HTTP server only (Docker)
 up:

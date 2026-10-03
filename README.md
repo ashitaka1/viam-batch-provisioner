@@ -172,6 +172,8 @@ All site-specific settings live in `config/site.env` (created by `just setup-wiz
 
 The environment holds stable settings (credentials, WiFi, SSH key, timezone). Per-run details (hostname prefix, count) are passed as arguments to `just provision`.
 
+For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set `PXE_PROXY_SUBNET` (CIDR, e.g. `10.1.0.0/20`) in `site.env` when the provisioning network differs from that interface's own subnet.
+
 ## Commands
 
 | Command | Description |
