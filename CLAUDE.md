@@ -6,7 +6,7 @@ Zero-touch provisioning for x86 Linux machines (PXE or USB stick) and Raspberry 
 
 A client-server rewrite (Swift server + SwiftUI client apps, REST + SSE from an OpenAPI contract) is planned in `docs/architecture-v2.md`, including phasing and open questions. Read it before starting new feature work. The existing bash/Python tooling below remains the working system until v2 replaces it — don't break it.
 
-Phase 1 (persistent server on the current stack) is complete and validated live (2026-10-03): stateless watcher, append-only queue via `queue_store.py`, launchd daemons, proxy-DHCP range derived from the serving interface via `scripts/pxe-subnet.sh`. Phase 2 (OpenAPI contract + Python REST/SSE + Bonjour) is implemented: `openapi/provisioner.yaml` is the contract, `pxe-watcher/provisioner_api.py` serves it on the standard library, and the watcher journals lifecycle events to `logs/events.jsonl`. Phase 3 (Swift shared library + macOS client) is next.
+Phase 1 (persistent server on the current stack) is complete and validated live (2026-10-03): stateless watcher, append-only queue via `queue_store.py`, launchd daemons, proxy-DHCP range derived from the serving interface via `scripts/pxe-subnet.sh`. Phase 2 (OpenAPI contract + Python REST/SSE + Bonjour) is implemented and validated against a running server (2026-10-04): `openapi/provisioner.yaml` is the contract, `pxe-watcher/provisioner_api.py` serves it on the standard library, and the watcher journals lifecycle events to `logs/events.jsonl`. Phase 3 (Swift shared library + macOS client) is next.
 
 ## Configuration
 
@@ -42,6 +42,7 @@ UEFI USB boot → GRUB on stick → kernel + initrd from stick → installer dow
 - **pxe-watcher/provisioner_service.py** — request validation, credential staging via `queue_store.append(stage=)`, disk-derived entry status, removal
 - **pxe-watcher/provisioner_api.py** — stdlib `ThreadingHTTPServer` implementing `openapi/provisioner.yaml` (REST + SSE); runs as the operator on `API_PORT` (8235)
 - **scripts/api-service.sh** — starts/stops the API and `dns-sd -R` in foreground mode (`just serve`, `just serve-usb`) via pid files in `logs/`
+- **scripts/lib/site-env.sh** — sourced by `api-service.sh` and `daemon.sh`; reads settings from `config/site.env` without sourcing it, and defaults `API_PORT`/`HTTP_PORT`
 - **scripts/daemon.sh** — renders `templates/launchd/*.plist.tpl` and installs dnsmasq, watcher, API and Bonjour as LaunchDaemons
 - **scripts/tail-http-logs.sh** — pretty-prints `logs/access.log` (`just logs`); writes nothing
 - **provision-batch.sh** — creates Viam machines + fetches credentials (full mode), or generates names-only queue (os-only/agent mode); appends to the existing queue

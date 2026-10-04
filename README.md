@@ -79,8 +79,8 @@ just daemon-status
 just stop-daemon          # removes the daemons
 ```
 
-Both `just serve` and `just serve-daemon` also start the [provisioner API](#provisioner-api)
-on port 8235, advertised over Bonjour as `_viam-provisioner._tcp`.
+`just serve`, `just serve-usb` and `just serve-daemon` also start the [provisioner API](#provisioner-api)
+on `API_PORT` (default 8235), advertised over Bonjour as `_viam-provisioner._tcp`.
 
 The HTTP server runs in Docker with a restart policy, so it returns after a
 reboot once the Docker engine is up: set Docker Desktop to start at sign-in,
@@ -211,6 +211,8 @@ The environment holds stable settings (credentials, WiFi, SSH key, timezone). Pe
 
 For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set `PXE_PROXY_SUBNET` (CIDR, e.g. `10.1.0.0/20`) in `site.env` when the provisioning network differs from that interface's own subnet.
 
+Set `API_PORT` in `site.env` to move the provisioner API off 8235.
+
 ## Commands
 
 | Command | Description |
@@ -223,7 +225,7 @@ For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set 
 | `just stop-daemon` | Remove the daemons and stop the HTTP server |
 | `just daemon-status` | Daemon, HTTP server and queue state |
 | `just logs` | Follow HTTP requests |
-| `just serve-usb` | Start HTTP server only (for USB-mode targets) |
+| `just serve-usb` | Start HTTP server and API, no DHCP/TFTP (for USB-mode targets) |
 | `just flash <device> <name>` | Flash a single Pi SD card |
 | `just flash-batch` | Flash all queued Pi SD cards with swap prompts |
 | `just flash-usb <device> <name>` | Flash a single x86 USB boot stick |
@@ -234,7 +236,7 @@ For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set 
 | `just clean` | Wipe the queue and all provisioning state |
 | `just reset` | Re-use current queue (mark unassigned, clear MAC assignments and PXE guards) |
 | `just stop` | Stop all PXE services |
-| `just unguard <name-or-mac>` | Clear one machine's PXE guard so it can re-attempt install |
+| `just unguard <name-or-mac>` | Clear one machine's PXE guard and completion mark so it can re-attempt install |
 | `just api` | Run the provisioner API alone in the foreground |
 | `just test` | Run the unit tests (prefers `.venv/bin/python3` for the contract test) |
 
