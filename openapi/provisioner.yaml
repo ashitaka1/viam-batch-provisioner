@@ -1,0 +1,529 @@
+openapi: 3.0.3
+info:
+  title: Viam Provisioner API
+  version: 1.0.0
+  description: |
+    Control plane for a provisioning server. Clients queue machines (name plus
+    optional per-machine Viam credentials), read queue state, and follow
+    lifecycle events over Server-Sent Events.
+
+    Queue entry status is derived from the server's on-disk state, never from
+    the event stream, so operator actions performed outside the API
+    (`just reset`, `just clean`, `just unguard`) are reflected on the next read
+    but emit no events. Clients should refetch `/queue` on reconnect and when
+    they receive a `resync` event.
+
+    Snapshot-then-stream: take `last_event_id` from `GET /queue`, then open
+    `GET /events` with that value as `Last-Event-ID`. Every event after the
+    snapshot is delivered exactly once. Replayed events are idempotent.
+servers:
+  - url: /
+tags:
+  - name: queue
+  - name: status
+  - name: events
+
+paths:
+  /api/v1/provision:
+    post:
+      tags: [queue]
+      operationId: provision
+      summary: Add machines to the queue
+      description: |
+        All-or-nothing validation: if any item is invalid the whole request is
+        rejected with 400 and nothing is written. Otherwise each item is either
+        `added` or `skipped` (already queued, or a duplicate within this
+        request). Credentials for an already-queued name are never overwritten.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              maxItems: 500
+              items:
+                $ref: '#/components/schemas/ProvisionRequest'
+      responses:
+        '200':
+          description: Per-item results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProvisionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          description: Credentials could not be staged; nothing was queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/QueueUnreadable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+
+  /api/v1/queue:
+    get:
+      tags: [queue]
+      operationId: listQueue
+      summary: Current queue state
+      responses:
+        '200':
+          description: Queue snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueList'
+        '503':
+          $ref: '#/components/responses/QueueUnreadable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+
+  /api/v1/queue/{name}:
+    parameters:
+      - $ref: '#/components/parameters/Name'
+    get:
+      tags: [queue]
+      operationId: getQueueEntry
+      summary: Single machine status
+      responses:
+        '200':
+          description: Queue entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/QueueUnreadable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags: [queue]
+      operationId: removeQueueEntry
+      summary: Remove an unassigned machine from the queue
+      description: Removes the entry and any staged credentials. Fails with 409 once a machine has been assigned.
+      responses:
+        '204':
+          description: Removed
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The machine is already assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/QueueUnreadable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+
+  /api/v1/status:
+    get:
+      tags: [status]
+      operationId: getStatus
+      summary: Server health and service status
+      responses:
+        '200':
+          description: Server status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerStatus'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+
+  /api/v1/events:
+    get:
+      tags: [events]
+      operationId: streamEvents
+      summary: Machine lifecycle events (Server-Sent Events)
+      description: |
+        Each SSE frame carries `id:` (the event id), `event:` (the event type)
+        and `data:` (a JSON object matching `MachineEvent`). The server sends
+        `retry: 3000` on connect and a `: keepalive` comment every 15 seconds
+        of silence.
+
+        With `Last-Event-ID` the server replays every event with a greater id
+        before switching to live delivery. Without it, only live events are
+        sent. If the requested id is ahead of the server's journal or older than
+        its retained history, the first frame is a `resync` event (no `id:`)
+        and the client must refetch `/queue`.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+        - name: last_event_id
+          in: query
+          required: false
+          description: Fallback for clients that cannot set the header. The header wins when both are present.
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          description: Too many open streams
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+      x-sse-events:
+        machine-assigned: '#/components/schemas/MachineAssigned'
+        install-started: '#/components/schemas/InstallStarted'
+        install-complete: '#/components/schemas/InstallComplete'
+        guard-installed: '#/components/schemas/GuardInstalled'
+        resync: '#/components/schemas/Resync'
+
+components:
+  parameters:
+    Name:
+      name: name
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Name'
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: No such machine in the queue
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    QueueUnreadable:
+      description: queue.json exists but is not valid JSON
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnexpectedError:
+      description: Any other error (405 with Allow, 411, 413, 500, 503 queue-locked); the body is always an Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Name:
+      type: string
+      description: Machine name. RFC 1123 hostname label; also used as a directory name on the server.
+      pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+      minLength: 1
+      maxLength: 63
+
+    Mac:
+      type: string
+      description: Lowercase colon-separated MAC address
+      pattern: '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$'
+
+    ViamCredentials:
+      type: object
+      description: Contents of the machine's viam.json
+      required: [cloud]
+      additionalProperties: true
+      properties:
+        cloud:
+          type: object
+          required: [id, secret]
+          additionalProperties: true
+          properties:
+            app_address:
+              type: string
+            id:
+              type: string
+              minLength: 1
+            secret:
+              type: string
+              minLength: 1
+
+    ProvisionRequest:
+      type: object
+      required: [name]
+      additionalProperties: true
+      properties:
+        name:
+          $ref: '#/components/schemas/Name'
+        credentials:
+          $ref: '#/components/schemas/ViamCredentials'
+
+    ProvisionResult:
+      type: object
+      required: [name, result]
+      additionalProperties: false
+      properties:
+        name:
+          $ref: '#/components/schemas/Name'
+        result:
+          type: string
+          enum: [added, skipped]
+        reason:
+          type: string
+          enum: [already-queued, duplicate-in-request]
+
+    ProvisionResponse:
+      type: object
+      required: [results]
+      additionalProperties: false
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProvisionResult'
+
+    EntryStatus:
+      type: string
+      description: |
+        queued: waiting for a machine.
+        flashed: written to a USB stick; no PXE assignment will follow.
+        assigned: a PXE client has been bound to this name and is installing or retrying.
+        installing: the installer fetched its hostname (late-commands reached); the GRUB guard is in place.
+        installed: the machine PXE-booted again after install and was sent to disk.
+      enum: [queued, flashed, assigned, installing, installed]
+
+    QueueEntry:
+      type: object
+      required: [name, status, has_credentials]
+      additionalProperties: false
+      properties:
+        name:
+          $ref: '#/components/schemas/Name'
+        status:
+          $ref: '#/components/schemas/EntryStatus'
+        mac:
+          $ref: '#/components/schemas/Mac'
+        assigned_at:
+          $ref: '#/components/schemas/Timestamp'
+        completed_at:
+          $ref: '#/components/schemas/Timestamp'
+        has_credentials:
+          type: boolean
+        flashed_via:
+          type: string
+          enum: [usb]
+
+    QueueCounts:
+      type: object
+      required: [queued, flashed, assigned, installing, installed, total]
+      additionalProperties: false
+      properties:
+        queued: {type: integer, minimum: 0}
+        flashed: {type: integer, minimum: 0}
+        assigned: {type: integer, minimum: 0}
+        installing: {type: integer, minimum: 0}
+        installed: {type: integer, minimum: 0}
+        total: {type: integer, minimum: 0}
+
+    QueueList:
+      type: object
+      required: [last_event_id, entries]
+      additionalProperties: false
+      properties:
+        last_event_id:
+          type: integer
+          minimum: 0
+          description: Newest event id at the time of the snapshot; pass as Last-Event-ID to /events.
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueueEntry'
+
+    ServiceState:
+      type: string
+      enum: [up, down, unknown]
+
+    ServerStatus:
+      type: object
+      required: [api_version, server_name, time, services, last_event_id]
+      additionalProperties: false
+      properties:
+        api_version:
+          type: string
+          enum: [v1]
+        server_name:
+          type: string
+        time:
+          $ref: '#/components/schemas/Timestamp'
+        address:
+          type: string
+          description: host:port of the HTTP file server targets fetch from, when the server can determine it
+        queue:
+          $ref: '#/components/schemas/QueueCounts'
+        services:
+          type: object
+          required: [http, dnsmasq, watcher]
+          additionalProperties: false
+          properties:
+            http:
+              $ref: '#/components/schemas/ServiceState'
+            dnsmasq:
+              $ref: '#/components/schemas/ServiceState'
+            watcher:
+              $ref: '#/components/schemas/ServiceState'
+        last_event_id:
+          type: integer
+          minimum: 0
+
+    ErrorDetail:
+      type: object
+      required: [message]
+      additionalProperties: false
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        field:
+          type: string
+        message:
+          type: string
+
+    Error:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+              enum:
+                - invalid-request
+                - invalid-json
+                - invalid-name
+                - not-found
+                - already-assigned
+                - method-not-allowed
+                - length-required
+                - payload-too-large
+                - queue-unreadable
+                - queue-locked
+                - too-many-streams
+                - stage-failed
+                - internal
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                $ref: '#/components/schemas/ErrorDetail'
+
+    EventId:
+      type: integer
+      minimum: 1
+      description: Journal id; also sent as the SSE `id:` field.
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: ISO 8601 with second precision and a UTC offset, e.g. 2026-10-04T04:08:29+00:00
+
+    MachineAssigned:
+      type: object
+      description: A PXE client was bound to a queued name.
+      required: [id, type, timestamp, name, mac]
+      additionalProperties: false
+      properties:
+        id: {$ref: '#/components/schemas/EventId'}
+        type: {type: string, enum: [machine-assigned]}
+        timestamp: {$ref: '#/components/schemas/Timestamp'}
+        name: {$ref: '#/components/schemas/Name'}
+        mac: {$ref: '#/components/schemas/Mac'}
+
+    InstallStarted:
+      type: object
+      description: The installer fetched its hostname; late-commands are running.
+      required: [id, type, timestamp, name, mac, stage]
+      additionalProperties: false
+      properties:
+        id: {$ref: '#/components/schemas/EventId'}
+        type: {type: string, enum: [install-started]}
+        timestamp: {$ref: '#/components/schemas/Timestamp'}
+        name: {$ref: '#/components/schemas/Name'}
+        mac: {$ref: '#/components/schemas/Mac'}
+        stage: {type: string, enum: [late-commands]}
+
+    InstallComplete:
+      type: object
+      description: The machine PXE-booted again after install and was sent to its disk.
+      required: [id, type, timestamp, name, mac, duration_seconds]
+      additionalProperties: false
+      properties:
+        id: {$ref: '#/components/schemas/EventId'}
+        type: {type: string, enum: [install-complete]}
+        timestamp: {$ref: '#/components/schemas/Timestamp'}
+        name: {$ref: '#/components/schemas/Name'}
+        mac: {$ref: '#/components/schemas/Mac'}
+        duration_seconds:
+          type: number
+          minimum: 0
+          description: Seconds from assignment to this event
+
+    GuardInstalled:
+      type: object
+      description: The GRUB guard for this MAC was written.
+      required: [id, type, timestamp, name, mac, reason]
+      additionalProperties: false
+      properties:
+        id: {$ref: '#/components/schemas/EventId'}
+        type: {type: string, enum: [guard-installed]}
+        timestamp: {$ref: '#/components/schemas/Timestamp'}
+        name: {$ref: '#/components/schemas/Name'}
+        mac: {$ref: '#/components/schemas/Mac'}
+        reason: {type: string, enum: [hostname-fetch, repeat-pxe]}
+
+    Resync:
+      type: object
+      description: The client's Last-Event-ID cannot be served; refetch /queue and continue from latest_id. Sent without an SSE `id:`.
+      required: [type, latest_id]
+      additionalProperties: false
+      properties:
+        type: {type: string, enum: [resync]}
+        latest_id:
+          type: integer
+          minimum: 0
+
+    MachineEvent:
+      description: The `data` object of every SSE frame.
+      oneOf:
+        - $ref: '#/components/schemas/MachineAssigned'
+        - $ref: '#/components/schemas/InstallStarted'
+        - $ref: '#/components/schemas/InstallComplete'
+        - $ref: '#/components/schemas/GuardInstalled'
+        - $ref: '#/components/schemas/Resync'
+      discriminator:
+        propertyName: type
+        mapping:
+          machine-assigned: '#/components/schemas/MachineAssigned'
+          install-started: '#/components/schemas/InstallStarted'
+          install-complete: '#/components/schemas/InstallComplete'
+          guard-installed: '#/components/schemas/GuardInstalled'
+          resync: '#/components/schemas/Resync'
