@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Install, remove, or inspect the launchd daemons that keep the PXE server
-# running: dnsmasq (proxy DHCP + TFTP) and pxe-watcher. Both run as root in
-# the system domain. The nginx container is managed by docker compose and
-# its restart policy, not by launchd.
+# running: dnsmasq (proxy DHCP + TFTP), pxe-watcher, the provisioner API
+# and its Bonjour advertisement. dnsmasq and the watcher run as root;
+# the API and dns-sd run as the operator. The nginx container is managed
+# by docker compose and its restart policy, not by launchd.
 #
 # Usage:
 #   scripts/daemon.sh install [--interface IFACE] [--python PATH]
 #       The proxy-DHCP range comes from scripts/pxe-subnet.sh for IFACE.
+#       API_PORT and HTTP_PORT come from config/site.env (8235 / 8234).
 #   scripts/daemon.sh uninstall
 #   scripts/daemon.sh status
 #   scripts/daemon.sh installed      # exit 0 if the plists are installed
@@ -17,9 +19,12 @@ TEMPLATE_DIR="${REPO_ROOT}/templates/launchd"
 RENDER_DIR="${REPO_ROOT}/config/launchd"
 LOG_DIR="${REPO_ROOT}/logs"
 DAEMON_DIR="/Library/LaunchDaemons"
-LABELS=(com.viam.provisioner.dnsmasq com.viam.provisioner.watcher)
+LABELS=(com.viam.provisioner.dnsmasq com.viam.provisioner.watcher com.viam.provisioner.api com.viam.provisioner.bonjour)
 
 die() { echo "ERROR: $*" >&2; exit 1; }
+
+# shellcheck source=lib/site-env.sh
+source "${REPO_ROOT}/scripts/lib/site-env.sh" || die "bad port setting in config/site.env"
 
 installed() {
     [[ -f "${DAEMON_DIR}/com.viam.provisioner.watcher.plist" ]]
@@ -45,6 +50,10 @@ render() {
         -e "s|@DNSMASQ@|${DNSMASQ}|g" \
         -e "s|@IFACE@|${IFACE}|g" \
         -e "s|@DHCP_RANGE@|${DHCP_RANGE}|g" \
+        -e "s|@USER@|${OPERATOR}|g" \
+        -e "s|@API_PORT@|${API_PORT}|g" \
+        -e "s|@HTTP_PORT@|${HTTP_PORT}|g" \
+        -e "s|@SERVER_NAME@|${SERVER_NAME}|g" \
         "${TEMPLATE_DIR}/${label}.plist.tpl" > "${RENDER_DIR}/${label}.plist"
 }
 
@@ -67,8 +76,9 @@ cmd_install() {
             die "Repo is under a TCC-protected folder (${REPO_ROOT}). Move it elsewhere (e.g. ~/eng) before installing daemons." ;;
     esac
 
-    if [[ -f "${LOG_DIR}/dnsmasq.pid" ]] && ! installed && kill -0 "$(cat "${LOG_DIR}/dnsmasq.pid")" 2>/dev/null; then
-        die "A foreground dnsmasq is running (just serve). Stop it first."
+    if ! installed; then
+        pid_alive "${LOG_DIR}/dnsmasq.pid" && die "A foreground dnsmasq is running (just serve). Stop it first."
+        pid_alive "${LOG_DIR}/api.pid" && die "A foreground API is running (just serve). Stop it first."
     fi
 
     DNSMASQ="$(command -v dnsmasq || true)"
@@ -84,7 +94,12 @@ cmd_install() {
     IFACE="$iface"
     DHCP_RANGE="$("${REPO_ROOT}/scripts/pxe-subnet.sh" "$IFACE")"
 
+    OPERATOR="$(id -un)"
+    SERVER_NAME="$(server_name)"
+
     mkdir -p "$LOG_DIR" "$RENDER_DIR"
+    # The operator-owned daemons append to these; create them as the operator.
+    touch "${LOG_DIR}/api.log" "${LOG_DIR}/bonjour.log"
     local label
     for label in "${LABELS[@]}"; do
         render "$label"
@@ -98,10 +113,11 @@ cmd_install() {
         echo "  ${label} loaded"
     done
     echo ""
-    echo "Interface: ${IFACE}"
+    echo "Interface:  ${IFACE}"
     echo "Proxy DHCP: ${DHCP_RANGE}"
-    echo "Python:    ${PYTHON}"
-    echo "Logs:      ${LOG_DIR}/{watcher,dnsmasq}.log"
+    echo "Python:     ${PYTHON}"
+    echo "API:        http://localhost:${API_PORT}/api/v1/  (Bonjour: _viam-provisioner._tcp, as ${OPERATOR})"
+    echo "Logs:       ${LOG_DIR}/{watcher,dnsmasq,api,bonjour}.log"
 }
 
 cmd_uninstall() {
@@ -131,6 +147,7 @@ cmd_status() {
         py="$(sed -n 's|.*<string>\(.*python3[^<]*\)</string>.*|\1|p' "${RENDER_DIR}/com.viam.provisioner.watcher.plist" | head -1)"
         [[ -n "$py" ]] && echo "  python: ${py}"
     fi
+    "${REPO_ROOT}/scripts/api-service.sh" status
     if [[ -f "${LOG_DIR}/watcher.log" ]]; then
         echo ""
         echo "  watcher.log (last 5 lines):"

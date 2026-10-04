@@ -53,3 +53,5 @@ logs/
 
 # Agents
 .claude/settings.local.json
+.claude/worktrees/
+.claude/test-proposals/

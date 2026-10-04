@@ -104,6 +104,11 @@ check xz      xz          "Pi image decompress (just flash / download-pi-image)"
 # envsubst is needed by build-config.sh and flash-usb.sh (template stamping)
 check envsubst gettext     "template substitution (build-config / flash-usb)"
 
+# Bonjour advertisement of the provisioner API; ships with macOS.
+if [[ "$OS" == "Darwin" ]]; then
+    check dns-sd mDNSResponder "Bonjour advertisement of the API (just serve)" optional "x86 PXE only"
+fi
+
 # Tools used by the USB-mode flasher on Linux. macOS does this with diskutil
 # which is part of the OS; Linux needs parted + dosfstools to format sticks.
 if [[ "$OS" == "Linux" ]]; then

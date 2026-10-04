@@ -25,6 +25,7 @@ serve:
         if [[ -f logs/dnsmasq.pid ]]; then
             sudo kill "$(cat logs/dnsmasq.pid)" 2>/dev/null && echo "  dnsmasq stopped" || true
         fi
+        ./scripts/api-service.sh stop
         docker compose down 2>/dev/null && echo "  Docker stopped" || true
         echo "Done."
     }
@@ -34,6 +35,8 @@ serve:
     echo ""
     echo "Starting HTTP server..."
     docker compose up -d
+    echo "Starting provisioner API + Bonjour..."
+    ./scripts/api-service.sh start
     DHCP_RANGE="$(./scripts/pxe-subnet.sh)"
     echo "Starting dnsmasq (DHCP proxy on ${DHCP_RANGE%%,*}, TFTP)..."
     # --user=root: dnsmasq's default 'nobody' user can't traverse macOS home
@@ -51,6 +54,7 @@ stop:
         exit 1
     fi
     echo "Stopping services..."
+    ./scripts/api-service.sh stop
     if [[ -f logs/dnsmasq.pid ]] && sudo kill "$(cat logs/dnsmasq.pid)" 2>/dev/null; then
         echo "  dnsmasq stopped"
     else
@@ -60,7 +64,7 @@ stop:
 
 # --- Always-on server (launchd) ---
 
-# Install dnsmasq + watcher as launchd daemons and start the HTTP server
+# Install dnsmasq, watcher, API and Bonjour as launchd daemons and start the HTTP server
 serve-daemon:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -97,15 +101,23 @@ daemon-status:
 logs:
     ./scripts/tail-http-logs.sh
 
-# Run the unit tests
+# Run the unit tests (uses .venv/bin/python3 when present so the OpenAPI
+# contract test can import PyYAML + jsonschema)
 test:
-    python3 -m unittest discover -s pxe-watcher -p 'test_*.py'
+    #!/usr/bin/env bash
+    PY=python3
+    [[ -x .venv/bin/python3 ]] && PY=.venv/bin/python3
+    "$PY" -m unittest discover -s pxe-watcher -p 'test_*.py'
 
 # --- Debug helpers (individual services; `just serve` runs them together) ---
 
 # Start PXE watcher only (assigns names to MACs as machines boot)
 watch:
     sudo "$(command -v python3)" pxe-watcher/watcher.py
+
+# Start the provisioner REST/SSE API only (foreground, as the operator)
+api:
+    python3 pxe-watcher/provisioner_api.py --port "$(./scripts/api-service.sh port)" --http-port "$(./scripts/api-service.sh http-port)"
 
 # Start dnsmasq proxy DHCP + TFTP server only
 dhcp:
@@ -168,12 +180,15 @@ serve-usb:
     cleanup() {
         echo ""
         echo "Stopping HTTP server..."
+        ./scripts/api-service.sh stop
         docker compose down 2>/dev/null || true
     }
     trap cleanup EXIT
     echo "Generating autoinstall config..."
     ./scripts/build-config.sh
     echo ""
+    echo "Starting provisioner API + Bonjour..."
+    ./scripts/api-service.sh start
     echo "Starting HTTP server (Ctrl-C to stop)..."
     docker compose up
 
@@ -223,17 +238,22 @@ unguard slot:
     }
     rm -f "netboot/grub/provisioned/$MAC.cfg"
     # Restart the repeat-PXE window so the watcher doesn't re-guard on the
-    # next boot. The machine-info file must stay: without it the watcher
-    # treats the MAC as new and assigns it another queue entry.
+    # next boot, and forget the completion so the reinstall reports
+    # install-complete again. The machine-info file must stay: without it
+    # the watcher treats the MAC as new.
     INFO="http-server/machines/$MAC/machine-info.json"
     if [ -f "$INFO" ]; then
         python3 -c "
     import json, sys
     from datetime import datetime, timezone
-    p = sys.argv[1]
-    info = json.load(open(p))
-    info['assigned_at'] = datetime.now(timezone.utc).isoformat()
-    json.dump(info, open(p, 'w'), indent=2)
+    from pathlib import Path
+    sys.path.insert(0, 'pxe-watcher')
+    import queue_store
+    p = Path(sys.argv[1])
+    info = json.loads(p.read_text())
+    info['assigned_at'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    info.pop('completed_at', None)
+    queue_store.atomic_write_json(p, info, indent=2)
     " "$INFO"
     fi
     echo "Unguarded $MAC. Reboot the target; the running watcher picks it up."
@@ -268,6 +288,7 @@ status:
     echo ""
     echo "=== Services ==="
     docker compose ps --format 'table {{{{.Name}}\t{{{{.Status}}' 2>/dev/null || echo "  Docker not running"
+    ./scripts/api-service.sh status
     if ./scripts/daemon.sh installed; then
       echo "  daemons: installed (just daemon-status)"
     elif [[ -f logs/dnsmasq.pid ]] && kill -0 "$(cat logs/dnsmasq.pid)" 2>/dev/null; then
