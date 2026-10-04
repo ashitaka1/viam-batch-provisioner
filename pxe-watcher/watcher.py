@@ -21,6 +21,7 @@ import argparse
 import json
 import os
 import re
+import platform
 import signal
 import subprocess
 import sys
@@ -31,6 +32,7 @@ from typing import Callable, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import event_journal  # noqa: E402
 import queue_store  # noqa: E402
 
 # Wait this long after first PXE from a MAC before writing the GRUB guard.
@@ -90,13 +92,29 @@ def assigned_at(queue_dir: Path, mac: str) -> Optional[datetime]:
         return datetime.now(timezone.utc)
 
 
+def read_info(queue_dir: Path, mac: str) -> Optional[dict]:
+    """The MAC's machine-info.json, or None if missing or unreadable."""
+    try:
+        info = json.loads((queue_dir / mac / "machine-info.json").read_text())
+    except (OSError, ValueError):
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def write_info(queue_dir: Path, mac: str, info: dict) -> None:
+    """Replace the MAC's machine-info.json atomically."""
+    queue_store.atomic_write_json(queue_dir / mac / "machine-info.json", info, owner_ref=queue_dir, indent=2)
+
+
 def assign_machine(queue_dir: Path, mac: str, now: Optional[datetime] = None) -> Optional[dict]:
     """Assign the next queued name to a MAC address.
 
     Creates the MAC-keyed directory with hostname, viam.json (full mode)
-    and machine-info.json, and marks the entry assigned in queue.json.
+    and machine-info.json, and marks the entry assigned in queue.json. An
+    entry already assigned to this MAC (a crash between marking the queue
+    and writing the files) is completed rather than a new one consumed.
     """
-    slot = queue_store.assign_next(queue_dir, mac)
+    slot = queue_store.find_by_mac(queue_dir, mac) or queue_store.assign_next(queue_dir, mac)
     if slot is None:
         return None
 
@@ -121,11 +139,9 @@ def assign_machine(queue_dir: Path, mac: str, now: Optional[datetime] = None) ->
     info = {
         "name": name,
         "mac": mac,
-        "assigned_at": (now or datetime.now(timezone.utc)).isoformat(),
+        "assigned_at": (now or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
     }
-    info_file = machine_dir / "machine-info.json"
-    info_file.write_text(json.dumps(info, indent=2))
-    queue_store.chown_like(info_file, queue_dir)
+    write_info(queue_dir, mac, info)
     return info
 
 
@@ -138,15 +154,26 @@ class PxeTracker:
 
     NO_SLOT_LOG_INTERVAL = timedelta(minutes=5)
 
-    def __init__(self, queue_dir: Path, *, now: Optional[Callable[[], datetime]] = None, log: Callable[..., None] = print):
+    def __init__(self, queue_dir: Path, *, now: Optional[Callable[[], datetime]] = None, log: Callable[..., None] = print,
+                 emit: Optional[Callable[[str, dict], None]] = None):
         self.queue_dir = queue_dir.resolve()
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.log = log
+        self.emit = emit or (lambda _type, _data: None)
         # Only throttles the "no slot" log line; carries no assignment state.
         self._no_slot_logged: dict[str, datetime] = {}
 
     def _stamp(self) -> str:
         return datetime.now().strftime("%H:%M:%S")
+
+    def _emit(self, event_type: str, info: dict, **extra) -> None:
+        """Record a lifecycle event. A failing journal never blocks provisioning."""
+        data = {"name": info["name"], "mac": info["mac"], "timestamp": self.now().isoformat(timespec="seconds")}
+        data.update(extra)
+        try:
+            self.emit(event_type, data)
+        except Exception as e:
+            self.log(f"[{self._stamp()}] WARNING: could not record {event_type} for {info['mac']}: {e}")
 
     def on_pxe(self, mac: str) -> str:
         current = self.now()
@@ -161,6 +188,7 @@ class PxeTracker:
                 return "no-slot"
             self._no_slot_logged.pop(mac, None)
             self.log(f"[{self._stamp()}] New PXE client: MAC {mac} → assigned {info['name']}")
+            self._emit("machine-assigned", info)
             unassigned, _total = queue_store.summary(self.queue_dir)
             if unassigned == 0:
                 self.log(f"[{self._stamp()}] Queue empty — run `just provision` to add machines")
@@ -173,16 +201,33 @@ class PxeTracker:
         elapsed = current - first
         if elapsed < REPEAT_PXE_THRESHOLD:
             return "retry"
-        if write_guard(self.queue_dir, mac):
+        wrote = write_guard(self.queue_dir, mac)
+        if wrote:
             self.log(f"[{self._stamp()}] Repeat PXE: MAC {mac} ({int(elapsed.total_seconds())}s after first) → GRUB guard installed")
-            return "guard"
-        return "guard-exists"
+        info = read_info(self.queue_dir, mac)
+        if info is not None:
+            if wrote:
+                self._emit("guard-installed", info, reason="repeat-pxe")
+            # The first PXE after the window is the post-install reboot. The
+            # guard is usually already there from the hostname fetch, so
+            # completion is tracked in machine-info.json, stamped before the
+            # event so a failed emit can't cause a duplicate later.
+            if "completed_at" not in info:
+                info["completed_at"] = current.isoformat(timespec="seconds")
+                write_info(self.queue_dir, mac, info)
+                self.log(f"[{self._stamp()}] Install complete: {info['name']} ({mac}) rebooted after {int(elapsed.total_seconds())}s")
+                self._emit("install-complete", info, duration_seconds=elapsed.total_seconds())
+        return "guard" if wrote else "guard-exists"
 
     def on_hostname_fetch(self, mac: str) -> bool:
         """The installer fetched its hostname: the install reached late-commands."""
         wrote = write_guard(self.queue_dir, mac)
         if wrote:
             self.log(f"[{self._stamp()}] Hostname fetched by MAC {mac} → GRUB guard installed")
+            info = read_info(self.queue_dir, mac)
+            if info is not None:
+                self._emit("install-started", info, stage="late-commands")
+                self._emit("guard-installed", info, reason="hostname-fetch")
         return wrote
 
 
@@ -196,16 +241,20 @@ class LogTailer(threading.Thread):
     """Follow a log file like `tail -F`, delivering complete lines to on_line.
 
     start() opens the file and seeks to its end before the thread runs, so
-    history is never replayed. Truncation (size shrinks below the read
-    offset) and replacement (inode changes) reopen the file from the start;
-    a missing file is waited for and then read from the start.
+    history is never replayed unless from_start is set. Truncation (size
+    shrinks below the read offset) and replacement (inode changes) call
+    on_reopen and reopen the file from the start; a missing file is waited
+    for and then read from the start.
     """
 
-    def __init__(self, path: Path, on_line: Callable[[str], None], stop_event: Optional[threading.Event] = None, poll: float = 0.5):
+    def __init__(self, path: Path, on_line: Callable[[str], None], stop_event: Optional[threading.Event] = None, poll: float = 0.5,
+                 from_start: bool = False, on_reopen: Optional[Callable[[], None]] = None):
         super().__init__(name="log-tailer", daemon=True)
         self.path = Path(path)
         self.on_line = on_line
         self.poll = poll
+        self.from_start = from_start
+        self.on_reopen = on_reopen
         self.stop_event = stop_event or threading.Event()
         self.ready = threading.Event()
         self._fh = None
@@ -240,7 +289,7 @@ class LogTailer(threading.Thread):
         return st.st_ino != self._ino or st.st_size < self._pos
 
     def start(self) -> None:
-        self._open(from_end=True)
+        self._open(from_end=not self.from_start)
         super().start()
 
     def stop(self) -> None:
@@ -264,6 +313,8 @@ class LogTailer(threading.Thread):
                 continue
             if self._rotated():
                 self._close()
+                if self.on_reopen is not None:
+                    self.on_reopen()
                 continue
             self.stop_event.wait(self.poll)
         self._close()
@@ -301,10 +352,12 @@ def feed_packets(stream, handle_packet: Callable[[list[str]], None]) -> None:
         handle_packet(current)
 
 
-def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: Optional[str] = None):
+def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: Optional[str] = None,
+          events_log: Optional[Path] = None):
     """Sniff DHCP Discover packets via tcpdump (or replay a capture) and assign names."""
     queue_dir = queue_dir.resolve()
-    tracker = PxeTracker(queue_dir)
+    emit = event_journal.EventJournal(events_log, owner_ref=queue_dir).emit if events_log else None
+    tracker = PxeTracker(queue_dir, emit=emit)
 
     try:
         unassigned, total = queue_store.summary(queue_dir)
@@ -314,6 +367,7 @@ def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: O
     print(f"PXE Watcher started on {interface or 'replay'}")
     print(f"  Queue directory: {queue_dir}")
     print(f"  Access log:      {access_log}")
+    print(f"  Events log:      {events_log or '(disabled)'}")
     print(f"  Machines waiting: {unassigned} of {total}")
     if unassigned == 0:
         print("  No machines queued — run `just provision` to add some.")
@@ -368,27 +422,22 @@ def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: O
     sys.exit(1)
 
 
-def detect_interface() -> str:
-    """Find the default route interface."""
-    import platform
-
+def detect_interface() -> Optional[str]:
+    """The default-route interface, or None if it can't be determined."""
     try:
         if platform.system() == "Darwin":
-            result = subprocess.run(["route", "-n", "get", "default"], capture_output=True, text=True)
+            result = subprocess.run(["route", "-n", "get", "default"], capture_output=True, text=True, timeout=5)
             for line in result.stdout.splitlines():
                 if "interface:" in line:
                     return line.split()[-1]
         else:
-            result = subprocess.run(["ip", "-o", "route", "show", "default"], capture_output=True, text=True)
+            result = subprocess.run(["ip", "-o", "route", "show", "default"], capture_output=True, text=True, timeout=5)
             parts = result.stdout.split()
             if "dev" in parts:
                 return parts[parts.index("dev") + 1]
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired):
         pass
-
-    print("ERROR: Could not detect default network interface.", file=sys.stderr)
-    print("  Specify one with --interface", file=sys.stderr)
-    sys.exit(1)
+    return None
 
 
 def main():
@@ -400,6 +449,8 @@ def main():
                         help="Directory containing queue.json and credential slots (default: ../http-server/machines)")
     parser.add_argument("--access-log", type=Path, default=repo / "logs" / "access.log",
                         help="nginx access log to watch for hostname fetches (default: ../logs/access.log)")
+    parser.add_argument("--events-log", type=Path, default=repo / "logs" / "events.jsonl",
+                        help="JSONL journal of lifecycle events read by the API (default: ../logs/events.jsonl)")
     parser.add_argument("--replay", metavar="FILE",
                         help="Read tcpdump -v output from FILE (or - for stdin) instead of sniffing; no root needed")
     args = parser.parse_args()
@@ -410,7 +461,7 @@ def main():
         pass
 
     if args.replay is not None:
-        watch(None, args.queue_dir, args.access_log, replay=args.replay)
+        watch(None, args.queue_dir, args.access_log, replay=args.replay, events_log=args.events_log)
         return
 
     if os.geteuid() != 0:
@@ -419,7 +470,11 @@ def main():
         sys.exit(1)
 
     interface = args.interface or detect_interface()
-    watch(interface, args.queue_dir, args.access_log)
+    if interface is None:
+        print("ERROR: Could not detect default network interface.", file=sys.stderr)
+        print("  Specify one with --interface", file=sys.stderr)
+        sys.exit(1)
+    watch(interface, args.queue_dir, args.access_log, events_log=args.events_log)
 
 
 if __name__ == "__main__":

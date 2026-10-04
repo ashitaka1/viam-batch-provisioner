@@ -15,9 +15,11 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import queue_store  # noqa: E402
 import watcher  # noqa: E402
 
 MAC = "aa:bb:cc:dd:ee:ff"
@@ -134,14 +136,27 @@ class PxeTrackerTest(RepoLayoutTest):
     def test_reset_on_disk_makes_mac_assignable_again(self):
         self.seed([{"name": "t-1", "assigned": False}, {"name": "t-2", "assigned": False}])
         self.tracker.on_pxe(MAC)
-        # What `just reset` does to a MAC: remove its directory.
+        # What `just reset` does: mark every entry unassigned and remove the
+        # MAC directories.
+        queue_store.reset(self.queue_dir)
         for p in (self.queue_dir / MAC).iterdir():
             p.unlink()
         (self.queue_dir / MAC).rmdir()
         self.advance(600)
         result = self.tracker.on_pxe(MAC)
-        self.assertEqual((self.queue_dir / MAC / "hostname").read_text(), "t-2")
+        self.assertEqual((self.queue_dir / MAC / "hostname").read_text(), "t-1")
         self.assertEqual(result, "assigned")
+
+    def test_mac_dir_removed_but_entry_still_assigned_is_completed_not_duplicated(self):
+        self.seed([{"name": "t-1", "assigned": False}, {"name": "t-2", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        for p in (self.queue_dir / MAC).iterdir():
+            p.unlink()
+        (self.queue_dir / MAC).rmdir()
+        self.advance(600)
+        self.assertEqual(self.tracker.on_pxe(MAC), "assigned")
+        self.assertEqual((self.queue_dir / MAC / "hostname").read_text(), "t-1")
+        self.assertFalse(queue_store.read(self.queue_dir)[1]["assigned"])
 
     def test_hostname_fetch_writes_guard_once(self):
         self.assertTrue(self.tracker.on_hostname_fetch(MAC))
@@ -253,6 +268,214 @@ class LogTailerTest(unittest.TestCase):
         self.assertEqual(self.received, ["partx"])
         self.append("\n")
         self.expect(["partx", "tail-no-newline"])
+
+
+class LogTailerFlagsTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.path = Path(self._tmp.name) / "events.jsonl"
+        self.tailers = []
+
+    def tearDown(self):
+        for tailer in self.tailers:
+            tailer.stop()
+            tailer.join(timeout=5)
+        self._tmp.cleanup()
+
+    def start(self, on_line, **kwargs):
+        tailer = watcher.LogTailer(self.path, on_line, poll=0.02, **kwargs)
+        tailer.start()
+        self.tailers.append(tailer)
+        return tailer
+
+    def append(self, text):
+        with open(self.path, "a") as f:
+            f.write(text)
+
+    def test_from_start_delivers_existing_lines(self):
+        self.path.write_text("a\nb\n")
+        received = []
+        self.start(received.append, from_start=True)
+        self.assertTrue(wait_until(lambda: received == ["a", "b"]), received)
+
+        default = []
+        self.start(default.append, from_start=False)
+        self.append("c\n")
+        self.assertTrue(wait_until(lambda: default == ["c"]), default)
+
+    def test_on_reopen_fires_on_truncation(self):
+        self.path.write_text("old line that is long enough\n")
+        events = []
+        self.start(events.append, on_reopen=lambda: events.append("<reopen>"))
+        self.append("x\n")
+        self.assertTrue(wait_until(lambda: events == ["x"]), events)
+
+        self.path.write_text("y\n")
+        self.assertTrue(wait_until(lambda: "y" in events), events)
+        self.assertEqual(events, ["x", "<reopen>", "y"])
+
+
+class EmitTest(RepoLayoutTest):
+    """Lifecycle events the tracker emits for the API's journal."""
+
+    def setUp(self):
+        super().setUp()
+        self.clock = T0
+        self.events = []
+        self.logs = []
+        self.tracker = watcher.PxeTracker(
+            self.queue_dir, now=lambda: self.clock, log=self.logs.append,
+            emit=lambda t, d: self.events.append((t, d)),
+        )
+
+    def advance(self, seconds):
+        self.clock = T0 + timedelta(seconds=seconds)
+
+    def types(self):
+        return [t for t, _ in self.events]
+
+    def info(self, mac=MAC):
+        return json.loads((self.queue_dir / mac / "machine-info.json").read_text())
+
+    def write_info(self, info, mac=MAC):
+        (self.queue_dir / mac / "machine-info.json").write_text(json.dumps(info))
+
+    def base(self, **extra):
+        data = {"name": "t-1", "mac": MAC, "timestamp": self.clock.isoformat()}
+        data.update(extra)
+        return data
+
+    def install(self):
+        self.seed([{"name": "t-1", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        self.tracker.on_hostname_fetch(MAC)
+        self.advance(300)
+        self.tracker.on_pxe(MAC)
+
+    def test_emits_machine_assigned_with_clock_timestamp(self):
+        self.seed([{"name": "t-1", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        self.assertEqual(self.events, [("machine-assigned", self.base())])
+
+        self.advance(10)
+        self.assertEqual(self.tracker.on_pxe(MAC), "retry")
+        self.assertEqual(self.tracker.on_pxe("11:22:33:44:55:66"), "no-slot")
+        self.assertEqual(len(self.events), 1, self.events)
+
+    def test_hostname_fetch_emits_started_then_guard_once(self):
+        self.seed([{"name": "t-1", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        self.events.clear()
+
+        self.assertTrue(self.tracker.on_hostname_fetch(MAC))
+        self.assertEqual(self.events, [
+            ("install-started", self.base(stage="late-commands")),
+            ("guard-installed", self.base(reason="hostname-fetch")),
+        ])
+
+        self.assertFalse(self.tracker.on_hostname_fetch(MAC))
+        self.assertEqual(len(self.events), 2, self.events)
+
+    def test_repeat_pxe_after_hostname_guard_emits_complete_once(self):
+        self.seed([{"name": "t-1", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        self.tracker.on_hostname_fetch(MAC)
+        self.events.clear()
+
+        self.advance(300)
+        self.assertEqual(self.tracker.on_pxe(MAC), "guard-exists")
+        self.assertEqual(self.events, [("install-complete", self.base(duration_seconds=300.0))])
+        self.assertEqual(self.info()["completed_at"], self.clock.isoformat())
+
+        self.advance(1000)
+        self.assertEqual(self.tracker.on_pxe(MAC), "guard-exists")
+        self.assertEqual(len(self.events), 1, self.events)
+
+    def test_repeat_pxe_without_prior_guard_emits_guard_and_complete(self):
+        self.seed([{"name": "t-1", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        self.events.clear()
+
+        self.advance(61)
+        self.assertEqual(self.tracker.on_pxe(MAC), "guard")
+        self.assertEqual(self.events, [
+            ("guard-installed", self.base(reason="repeat-pxe")),
+            ("install-complete", self.base(duration_seconds=61.0)),
+        ])
+        self.assertEqual(self.info()["completed_at"], self.clock.isoformat())
+
+    def test_unguard_state_rearms_install_complete(self):
+        self.install()
+        self.events.clear()
+
+        # Mirrors the revised `just unguard`: drop the guard, forget completion,
+        # restart the retry window.
+        self.guard().unlink()
+        info = self.info()
+        info.pop("completed_at")
+        self.advance(400)
+        info["assigned_at"] = self.clock.isoformat()
+        self.write_info(info)
+
+        self.advance(430)
+        self.assertEqual(self.tracker.on_pxe(MAC), "retry")
+        self.assertEqual(self.events, [])
+
+        self.advance(520)
+        self.assertEqual(self.tracker.on_pxe(MAC), "guard")
+        self.assertEqual(self.types(), ["guard-installed", "install-complete"])
+        self.assertEqual(self.events[1][1]["duration_seconds"], 120.0)
+
+    def test_emit_failure_does_not_block_state_changes(self):
+        def boom(_type, _data):
+            raise OSError("journal unwritable")
+
+        self.tracker.emit = boom
+        self.seed([{"name": "t-1", "assigned": False}])
+
+        with self.subTest(point="assign"):
+            self.assertEqual(self.tracker.on_pxe(MAC), "assigned")
+            self.assertEqual((self.queue_dir / MAC / "hostname").read_text(), "t-1")
+            self.assertTrue(any("journal unwritable" in line for line in self.logs), self.logs)
+
+        with self.subTest(point="hostname fetch"):
+            self.assertTrue(self.tracker.on_hostname_fetch(MAC))
+            self.assertTrue(self.guard().exists())
+
+        with self.subTest(point="install complete"):
+            self.advance(100)
+            self.assertEqual(self.tracker.on_pxe(MAC), "guard-exists")
+            self.assertEqual(self.info()["completed_at"], self.clock.isoformat())
+
+        self.tracker.emit = lambda t, d: self.events.append((t, d))
+        self.advance(200)
+        self.tracker.on_pxe(MAC)
+        self.assertEqual(self.events, [], "completed_at is stamped before emitting, so no re-emit on retry")
+
+    def test_orphaned_assignment_is_reused_not_duplicated(self):
+        self.seed([{"name": "t-1", "assigned": False}, {"name": "t-2", "assigned": False}])
+        queue_store.assign_next(self.queue_dir, MAC)  # crash before the files were written
+
+        self.assertEqual(self.tracker.on_pxe(MAC), "assigned")
+
+        self.assertEqual((self.queue_dir / MAC / "hostname").read_text(), "t-1")
+        entries = {e["name"]: e for e in queue_store.read(self.queue_dir)}
+        self.assertEqual((entries["t-1"]["assigned"], entries["t-1"]["mac"]), (True, MAC))
+        self.assertFalse(entries["t-2"]["assigned"])
+        self.assertEqual(self.types(), ["machine-assigned"])
+
+    def test_machine_info_written_atomically(self):
+        self.seed([{"name": "t-1", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        info_path = self.queue_dir / MAC / "machine-info.json"
+        original = info_path.read_bytes()
+
+        with mock.patch.object(watcher.os, "replace", side_effect=OSError("boom")):
+            with self.assertRaises(OSError):
+                watcher.write_info(self.queue_dir, MAC, {"name": "clobbered"})
+
+        self.assertEqual(info_path.read_bytes(), original)
+        self.assertEqual(sorted(p.name for p in (self.queue_dir / MAC).iterdir()), ["hostname", "machine-info.json"])
 
 
 if __name__ == "__main__":

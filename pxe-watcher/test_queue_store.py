@@ -267,6 +267,52 @@ class LockTest(QueueDirTest):
         self.assertEqual(len(disk), n)
 
 
+class AppendStageTest(QueueDirTest):
+    def test_stage_runs_only_for_added_entries(self):
+        self.seed([_entry("a", assigned=True, mac="aa:aa:aa:aa:aa:01", slot_id="slot-a")])
+        slot = self.queue_dir / "slot-a"
+        slot.mkdir()
+        (slot / "viam.json").write_text("orig")
+        staged = []
+
+        def stage(entry):
+            staged.append(entry["name"])
+            self.assertNotIn(entry["name"], [e["name"] for e in self.on_disk()],
+                             "stage must run before the queue is rewritten")
+
+        added, skipped = queue_store.append(self.queue_dir, [_entry("a"), _entry("b")], stage=stage)
+
+        self.assertEqual(([e["name"] for e in added], skipped), (["b"], ["a"]))
+        self.assertEqual(staged, ["b"])
+        self.assertEqual((slot / "viam.json").read_text(), "orig")
+
+    def test_stage_raising_leaves_queue_unchanged(self):
+        self.seed([_entry("x")])
+        before = self.snapshot()
+
+        def stage(entry):
+            if entry["name"] == "c":
+                raise RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            queue_store.append(self.queue_dir, [_entry("b"), _entry("c")], stage=stage)
+        self.assertEqual(self.snapshot(), before)
+
+
+class RemoveTest(QueueDirTest):
+    def test_remove_outcomes(self):
+        self.seed([_entry("a"), _entry("b", assigned=True, mac="aa:aa:aa:aa:aa:01")])
+
+        self.assertEqual(queue_store.remove(self.queue_dir, "a"), "removed")
+        self.assertEqual([e["name"] for e in self.on_disk()], ["b"])
+
+        before = self.snapshot()
+        self.assertEqual(queue_store.remove(self.queue_dir, "b"), "assigned")
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(queue_store.remove(self.queue_dir, "z"), "not-found")
+        self.assertEqual(self.snapshot(), before)
+
+
 class CliTest(QueueDirTest):
     def run_cli(self, *args, stdin=None):
         return subprocess.run(

@@ -33,11 +33,10 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Callable, Generator, Optional
 
 QUEUE_FILE = "queue.json"
 LOCK_FILE = "queue.lock"
-TEMP_PREFIX = ".queue.json."
 
 DEFAULT_QUEUE_DIR = Path(__file__).resolve().parent.parent / "http-server" / "machines"
 
@@ -51,22 +50,22 @@ def chown_like(path: Path, template: Path) -> None:
 
 
 @contextmanager
-def locked(queue_dir: Path, timeout: Optional[float] = 30.0) -> Generator[None, None, None]:
-    """Hold an exclusive flock on queue_dir/queue.lock.
+def locked_file(lock_path: Path, owner_ref: Path, timeout: Optional[float] = 30.0) -> Generator[None, None, None]:
+    """Hold an exclusive flock on lock_path, creating it world-writable and
+    owned like owner_ref so root and operator processes share it.
 
     Opens a fresh descriptor per call so two callers in one process still
     exclude each other. Raises TimeoutError if the lock isn't acquired
     within timeout seconds (None waits forever).
     """
-    queue_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = queue_dir / LOCK_FILE
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     existed = lock_path.exists()
     fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o666)
     try:
         if not existed:
             try:
                 os.chmod(lock_path, 0o666)
-                chown_like(lock_path, queue_dir)
+                chown_like(lock_path, owner_ref)
             except OSError:
                 pass
         if timeout is None:
@@ -86,6 +85,38 @@ def locked(queue_dir: Path, timeout: Optional[float] = 30.0) -> Generator[None, 
         os.close(fd)
 
 
+@contextmanager
+def locked(queue_dir: Path, timeout: Optional[float] = 30.0) -> Generator[None, None, None]:
+    """Hold the queue lock, queue_dir/queue.lock."""
+    with locked_file(queue_dir / LOCK_FILE, queue_dir, timeout):
+        yield
+
+
+def atomic_write_json(path: Path, data, *, owner_ref: Optional[Path] = None, indent: Optional[int] = None, fsync: bool = False) -> None:
+    """Replace path with the JSON for data via a temp file and rename, mode
+    0644, owned like owner_ref when given."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=indent)
+            if indent is not None:
+                f.write("\n")
+            if fsync:
+                f.flush()
+                os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        if owner_ref is not None:
+            chown_like(Path(tmp), owner_ref)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def read(queue_dir: Path) -> list[dict]:
     """Return the queue, or [] if the file doesn't exist. Invalid JSON raises."""
     path = queue_dir / QUEUE_FILE
@@ -97,31 +128,17 @@ def read(queue_dir: Path) -> list[dict]:
 
 def write(queue_dir: Path, entries: list[dict]) -> None:
     """Replace queue.json atomically."""
-    queue_dir.mkdir(parents=True, exist_ok=True)
-    path = queue_dir / QUEUE_FILE
-    fd, tmp = tempfile.mkstemp(prefix=TEMP_PREFIX, dir=str(queue_dir))
-    try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(entries, f, indent=2)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.chmod(tmp, 0o644)
-        chown_like(Path(tmp), queue_dir)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write_json(queue_dir / QUEUE_FILE, entries, owner_ref=queue_dir, indent=2, fsync=True)
 
 
-def append(queue_dir: Path, new_entries: list[dict]) -> tuple[list[dict], list[str]]:
+def append(queue_dir: Path, new_entries: list[dict], stage: Optional[Callable[[dict], None]] = None) -> tuple[list[dict], list[str]]:
     """Add entries whose names aren't already queued.
 
     Returns (added entries, skipped names). Does not touch the file when
-    nothing is added.
+    nothing is added. `stage`, when given, is called with each entry about
+    to be added, under the lock and before the file is rewritten, so a
+    caller can place per-entry files (credentials) without racing another
+    writer; if it raises, nothing is added.
     """
     if not new_entries:
         return [], []
@@ -137,8 +154,39 @@ def append(queue_dir: Path, new_entries: list[dict]) -> tuple[list[dict], list[s
             names.add(e["name"])
             added.append(e)
         if added:
+            if stage is not None:
+                for e in added:
+                    stage(e)
             write(queue_dir, entries + added)
     return added, skipped
+
+
+def remove(queue_dir: Path, name: str, on_removed: Optional[Callable[[dict], None]] = None) -> str:
+    """Drop an unassigned entry. Returns "removed", "assigned" or "not-found".
+
+    `on_removed` runs with the dropped entry while the lock is still held,
+    so per-entry files can be cleaned up without racing a re-add.
+    """
+    with locked(queue_dir):
+        entries = read(queue_dir)
+        for i, e in enumerate(entries):
+            if e["name"] == name:
+                if e.get("assigned"):
+                    return "assigned"
+                del entries[i]
+                write(queue_dir, entries)
+                if on_removed is not None:
+                    on_removed(e)
+                return "removed"
+    return "not-found"
+
+
+def find_by_mac(queue_dir: Path, mac: str) -> Optional[dict]:
+    """A copy of the entry already assigned to mac, or None."""
+    for e in read(queue_dir):
+        if e.get("assigned") and e.get("mac") == mac:
+            return dict(e)
+    return None
 
 
 def assign_next(queue_dir: Path, mac: str) -> Optional[dict]:
