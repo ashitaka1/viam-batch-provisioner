@@ -6,7 +6,7 @@ Zero-touch provisioning for x86 Linux machines (PXE or USB stick) and Raspberry 
 
 A client-server rewrite (Swift server + SwiftUI client apps, REST + SSE from an OpenAPI contract) is planned in `docs/architecture-v2.md`, including phasing and open questions. Read it before starting new feature work. The existing bash/Python tooling below remains the working system until v2 replaces it — don't break it.
 
-Phase 1 (persistent server on the current stack) is complete and validated live (2026-10-03): stateless watcher, append-only queue via `queue_store.py`, launchd daemons, proxy-DHCP range derived from the serving interface via `scripts/pxe-subnet.sh`. Phase 2 (OpenAPI contract + Python REST/SSE) is next.
+Phase 1 (persistent server on the current stack) is complete and validated live (2026-10-03): stateless watcher, append-only queue via `queue_store.py`, launchd daemons, proxy-DHCP range derived from the serving interface via `scripts/pxe-subnet.sh`. Phase 2 (OpenAPI contract + Python REST/SSE + Bonjour) is implemented: `openapi/provisioner.yaml` is the contract, `pxe-watcher/provisioner_api.py` serves it on the standard library, and the watcher journals lifecycle events to `logs/events.jsonl`. Phase 3 (Swift shared library + macOS client) is next.
 
 ## Configuration
 
@@ -36,8 +36,13 @@ UEFI USB boot → GRUB on stick → kernel + initrd from stick → installer dow
 - **dnsmasq** (native, not Docker) — proxy DHCP + TFTP for PXE boot
 - **nginx** (Docker) — HTTP server for ISO, autoinstall configs, credentials
 - **pxe-watcher** (host script, root) — assigns names to MACs as machines PXE boot; tails the nginx access log and writes GRUB guards on hostname fetch or repeat PXE
-- **pxe-watcher/queue_store.py** — sole writer of `queue.json` (flock + atomic replace); imported by the watcher, called as a CLI by the bash scripts
-- **scripts/daemon.sh** — renders `templates/launchd/*.plist.tpl` and installs dnsmasq + watcher as LaunchDaemons
+- **pxe-watcher/queue_store.py** — sole writer of `queue.json` (flock + atomic replace); imported by the watcher and the API, called as a CLI by the bash scripts
+- **pxe-watcher/event_journal.py** — append-only `logs/events.jsonl` written by the watcher; ids derived from the last line under an flock
+- **pxe-watcher/event_hub.py** — API-side tailer of the journal: ring buffer, `events_after(cursor)`, resync detection
+- **pxe-watcher/provisioner_service.py** — request validation, credential staging via `queue_store.append(stage=)`, disk-derived entry status, removal
+- **pxe-watcher/provisioner_api.py** — stdlib `ThreadingHTTPServer` implementing `openapi/provisioner.yaml` (REST + SSE); runs as the operator on `API_PORT` (8235)
+- **scripts/api-service.sh** — starts/stops the API and `dns-sd -R` in foreground mode (`just serve`, `just serve-usb`) via pid files in `logs/`
+- **scripts/daemon.sh** — renders `templates/launchd/*.plist.tpl` and installs dnsmasq, watcher, API and Bonjour as LaunchDaemons
 - **scripts/tail-http-logs.sh** — pretty-prints `logs/access.log` (`just logs`); writes nothing
 - **provision-batch.sh** — creates Viam machines + fetches credentials (full mode), or generates names-only queue (os-only/agent mode); appends to the existing queue
 - **flash-pi-sd.sh** / **flash-batch.sh** — SD card flashing for Pis
@@ -64,7 +69,11 @@ UEFI USB boot → GRUB on stick → kernel + initrd from stick → installer dow
 - **Append-only queue.** `provision` adds `COUNT` machines after the highest existing `<prefix>-N`; names already queued are skipped. `just clean` is the only wipe. Full-mode slot dirs are `slot-<name>` so two prefixes never collide.
 - **One guard writer.** nginx writes its access log to `logs/access.log` (mounted at `/var/log/pxe`, outside the served `/srv` tree). The root watcher tails it and writes the guard on `GET /machines/<mac>/hostname` 200, and also on a repeat PXE more than 60s after assignment.
 - **Daemon files take the operator's ownership.** Everything the root watcher creates is chowned to the owner of `http-server/machines/`, so user-run scripts can still write the queue.
-- **launchd, not the venv.** Daemons run the watcher with a stable system or Homebrew `python3` (≥3.9; the code avoids 3.10-only syntax). The serving interface is baked into the plist at install because default-route detection fails at boot. dnsmasq is stopped by pid file, never `killall`.
+- **launchd, not the venv.** Daemons run the watcher and the API with a stable system or Homebrew `python3` (≥3.9; the code avoids 3.10-only syntax). The serving interface is baked into the plist at install because default-route detection fails at boot. dnsmasq is stopped by pid file, never `killall`.
+- **Stdlib API, not FastAPI.** The Phase 2 server uses `http.server` so it runs under the same interpreter rules as the watcher with no venv. The hand-written OpenAPI spec is the contract; `test_contract.py` validates real responses and events against it (needs PyYAML + jsonschema in `.venv`, which `just test` prefers).
+- **The journal is the only IPC.** The root watcher appends events to `logs/events.jsonl` (`PxeTracker(emit=...)`); the operator-owned API tails it. No sockets between them. A journal write failure is logged and never blocks assignment or guards.
+- **Entry status comes from disk, events from the journal.** `queued`/`flashed`/`assigned`/`installing`/`installed` are derived from `queue.json`, `machine-info.json` and the guard file on every read, so `just reset`/`clean`/`unguard` take effect without events. `install-complete` is decided by `completed_at` in `machine-info.json`, stamped before the event is emitted; `just unguard` clears it. The watcher completes an entry already assigned to a MAC (crash recovery) instead of consuming a second slot.
+- **The API runs as the operator.** Its plist carries `UserName`; it needs no root. It binds `0.0.0.0` with no auth (trusted LAN), and the server bind skips `getfqdn()` so startup never stalls on reverse DNS.
 
 ## Operator Workflow
 
@@ -89,7 +98,11 @@ just daemon-status      # daemons, HTTP server, queue
 just stop-daemon
 
 # Tests
-just test               # python3 -m unittest discover -s pxe-watcher
+just test               # unittest discover -s pxe-watcher (uses .venv/bin/python3 when present)
+
+# Provisioner API (runs inside serve / serve-daemon; standalone for debugging)
+just api                # foreground on API_PORT (default 8235)
+curl -s localhost:8235/api/v1/queue
 
 # x86 USB-stick provisioning (when sharing network with other operators)
 just setup              # one-time

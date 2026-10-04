@@ -137,23 +137,26 @@ GET    /api/v1/events             SSE stream (Accept: text/event-stream)
 ### SSE Events
 
 ```
+id: 12
 event: machine-assigned
-data: {"name": "lab-7", "mac": "aa:bb:cc:dd:ee:ff", "timestamp": "..."}
+data: {"id": 12, "type": "machine-assigned", "timestamp": "...", "name": "lab-7", "mac": "aa:bb:cc:dd:ee:ff"}
 
 event: install-started
-data: {"name": "lab-7", "mac": "aa:bb:cc:dd:ee:ff", "stage": "kernel-boot"}
-
-event: install-complete
-data: {"name": "lab-7", "mac": "aa:bb:cc:dd:ee:ff", "duration_seconds": 342}
-
-event: install-failed
-data: {"name": "lab-7", "mac": "aa:bb:cc:dd:ee:ff", "stage": "package-install", "reason": "network unreachable"}
+data: {..., "stage": "late-commands"}
 
 event: guard-installed
-data: {"name": "lab-7", "mac": "aa:bb:cc:dd:ee:ff"}
+data: {..., "reason": "hostname-fetch"}
+
+event: install-complete
+data: {..., "duration_seconds": 342}
+
+event: resync
+data: {"type": "resync", "latest_id": 12}
 ```
 
-`Last-Event-ID` supported for reconnection — clients resume without missing events.
+Every frame's `data` carries `id`, `type` and `timestamp` alongside the event fields, so a client decodes a single discriminated type. `install-progress` and `install-failed` are reserved for the failure-detection work in the open questions.
+
+`Last-Event-ID` supported for reconnection — clients resume without missing events. `GET /queue` returns `last_event_id` so a client takes a snapshot, then streams from it with no gap. A `resync` event means the cursor is ahead of the journal or older than the server's retained history; the client refetches `/queue` and continues from `latest_id`.
 
 ### Authentication
 
@@ -215,9 +218,17 @@ Implemented as:
 Write the protocol spec, then implement it on the existing Python stack. Build and test the client against a real server before writing the Swift server.
 
 - `openapi/provisioner.yaml` — endpoints, request/response schemas, SSE event schemas
-- FastAPI server alongside the watcher, validated against the spec
+- Python server alongside the watcher, validated against the spec
 - SSE event stream fed by watcher observations
 - Bonjour advertisement (`dns-sd -R` under launchd)
+
+Implemented as:
+- `openapi/provisioner.yaml` (OpenAPI 3.0.3) is the contract. Optional fields are omitted rather than null. `ProvisionRequest` is `{name, credentials?}`; environment config is not part of the Phase 2 schema.
+- `pxe-watcher/provisioner_api.py` is a standard-library `ThreadingHTTPServer`, not FastAPI, so it runs under the daemons' system/Homebrew python with no venv. `provisioner_service.py` holds the logic; `test_contract.py` validates real responses and journal events against the spec.
+- Events travel through an append-only journal, `logs/events.jsonl`, written by the root watcher (`event_journal.py`) and tailed by the operator-owned API (`event_hub.py`). Ids come from the last line on disk under an flock. The SSE `data` object carries `id`, `type` and `timestamp` so a client decodes one discriminated type.
+- Emitted now: `machine-assigned`, `install-started` (hostname fetch), `guard-installed` (`reason`: `hostname-fetch` | `repeat-pxe`), `install-complete` (first PXE more than 60s after assignment, with `duration_seconds`). `install-progress` and `install-failed` wait on the failure-detection open question. A `resync` event tells a client its `Last-Event-ID` cannot be served; `GET /queue` returns `last_event_id` for snapshot-then-stream.
+- Queue entry status is derived from disk on each read (`queued`, `flashed`, `assigned`, `installing`, `installed`), never from the journal. `install-complete` is tracked by `completed_at` in `machine-info.json`; `just unguard` clears it. `just reset`/`clean`/`unguard` emit no events, so clients refetch `/queue` on reconnect and resync.
+- Two more LaunchDaemons, `com.viam.provisioner.api` and `com.viam.provisioner.bonjour` (`/usr/bin/dns-sd -R <host> _viam-provisioner._tcp local <port> api=v1`), both with `UserName` set to the operator. `scripts/api-service.sh` runs the same pair in foreground mode. `API_PORT` (default 8235) lives in `site.env`.
 
 ### Phase 3 — Swift shared library + macOS app (client role)
 

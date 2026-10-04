@@ -65,6 +65,9 @@ just serve
 `just provision` appends to the queue, so you can add machines while the
 server runs. `just clean` wipes it.
 
+Either way the REST/SSE API is up on port 8235 (Bonjour `_viam-provisioner._tcp`):
+`curl localhost:8235/api/v1/queue`.
+
 ## Provisioning x86 Machines (USB sticks)
 
 Use this when multiple people share the network, or when you can't run

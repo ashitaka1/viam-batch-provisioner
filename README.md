@@ -73,11 +73,14 @@ services as launchd daemons instead. They survive reboots, and `just
 provision` adds machines to the queue while they run:
 
 ```bash
-just serve-daemon         # once: picks the interface, installs dnsmasq + watcher daemons
+just serve-daemon         # once: picks the interface, installs the daemons
 just provision my-machine 6   # any time; appends to the queue
 just daemon-status
 just stop-daemon          # removes the daemons
 ```
+
+Both `just serve` and `just serve-daemon` also start the [provisioner API](#provisioner-api)
+on port 8235, advertised over Bonjour as `_viam-provisioner._tcp`.
 
 The HTTP server runs in Docker with a restart policy, so it returns after a
 reboot once the Docker engine is up: set Docker Desktop to start at sign-in,
@@ -151,9 +154,10 @@ Phase 2 service for packages + Viam + Tailscale
 |-----------|------|
 | **dnsmasq** (native) | Proxy DHCP for PXE discovery + TFTP for GRUB/kernel/initrd |
 | **nginx** (Docker) | HTTP server for Ubuntu ISO, autoinstall configs, credentials |
-| **pxe-watcher** | Sniffs DHCP for PXE clients, assigns hostnames by arrival order, writes GRUB guards (on hostname fetch or repeat PXE) |
-| **queue_store.py** | Sole writer of `queue.json`: locked, atomic append/assign used by the watcher and scripts |
-| **daemon.sh** | Installs dnsmasq + watcher as launchd daemons (`just serve-daemon`) |
+| **pxe-watcher** | Sniffs DHCP for PXE clients, assigns hostnames by arrival order, writes GRUB guards (on hostname fetch or repeat PXE), appends lifecycle events to `logs/events.jsonl` |
+| **queue_store.py** | Sole writer of `queue.json`: locked, atomic append/assign used by the watcher, the API and scripts |
+| **provisioner_api.py** | REST + SSE server (stdlib) implementing `openapi/provisioner.yaml`; runs as the operator on port 8235 |
+| **daemon.sh** | Installs dnsmasq, watcher, API and Bonjour as launchd daemons (`just serve-daemon`) |
 | **provision-batch.sh** | Creates Viam machines + retrieves credentials (full mode); appends to the queue |
 | **flash-pi-sd.sh** | Writes Pi OS to SD card with cloud-init config |
 | **setup-wizard.sh** | Interactive environment configuration |
@@ -165,6 +169,37 @@ Phase 2 service for packages + Viam + Tailscale
 - Tailscale auth key is served over the local network during install, deleted after first use
 - SSH public key is baked into the OS config
 - All secrets live in `config/` (gitignored)
+- The provisioner API has no authentication and listens on every interface. It accepts per-machine credentials in request bodies in cleartext, so it belongs on a trusted lab network only.
+
+## Provisioner API
+
+The contract is `openapi/provisioner.yaml`. The server listens on `API_PORT`
+(default 8235) and advertises itself over Bonjour as `_viam-provisioner._tcp`
+with `api=v1` in the TXT record.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/v1/provision` | Queue machines: `[{"name": "lab-7", "credentials": {viam.json}}]`. Credentials are optional. Per-item result is `added` or `skipped`. |
+| `GET` | `/api/v1/queue` | Every entry with its derived status, plus `last_event_id` |
+| `GET` | `/api/v1/queue/{name}` | One entry |
+| `DELETE` | `/api/v1/queue/{name}` | Remove an unassigned entry and its staged credentials (409 once assigned) |
+| `GET` | `/api/v1/status` | Service health (nginx, dnsmasq, watcher), queue counts, server address |
+| `GET` | `/api/v1/events` | Server-Sent Events; send `Last-Event-ID` to replay |
+
+Entry status is derived from disk on every read: `queued`, `flashed` (USB),
+`assigned` (PXE client bound), `installing` (installer fetched its hostname),
+`installed` (rebooted from disk after install). Events are `machine-assigned`,
+`install-started`, `guard-installed` and `install-complete`; a `resync` event
+tells a client its cursor can no longer be served.
+
+```bash
+curl -s localhost:8235/api/v1/queue | jq
+curl -N -H 'Last-Event-ID: 0' localhost:8235/api/v1/events
+dns-sd -B _viam-provisioner._tcp
+```
+
+`just test` validates the server's responses and events against the spec when
+PyYAML and jsonschema are importable: `.venv/bin/pip install pyyaml jsonschema`.
 
 ## Environment configuration
 
@@ -183,8 +218,8 @@ For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set 
 | `just doctor` | Verify host tools (dnsmasq, p7zip, docker, viam CLI) |
 | `just setup-wizard` | Interactive setup — create/switch environments |
 | `just provision <prefix> <count>` | Add `<count>` machines to the queue (creates them in Viam in full mode) |
-| `just serve` | Start all PXE services + watcher (Ctrl-C stops all) |
-| `just serve-daemon` | Install dnsmasq + watcher as launchd daemons; start HTTP server |
+| `just serve` | Start all PXE services, watcher and API (Ctrl-C stops all) |
+| `just serve-daemon` | Install dnsmasq, watcher, API and Bonjour as launchd daemons; start HTTP server |
 | `just stop-daemon` | Remove the daemons and stop the HTTP server |
 | `just daemon-status` | Daemon, HTTP server and queue state |
 | `just logs` | Follow HTTP requests |
@@ -200,7 +235,8 @@ For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set 
 | `just reset` | Re-use current queue (mark unassigned, clear MAC assignments and PXE guards) |
 | `just stop` | Stop all PXE services |
 | `just unguard <name-or-mac>` | Clear one machine's PXE guard so it can re-attempt install |
-| `just test` | Run the unit tests |
+| `just api` | Run the provisioner API alone in the foreground |
+| `just test` | Run the unit tests (prefers `.venv/bin/python3` for the contract test) |
 
 ## Target machine config
 
