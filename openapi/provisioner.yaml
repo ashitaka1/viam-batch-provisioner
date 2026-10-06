@@ -87,6 +87,9 @@ paths:
         for a machine that has completed, or sending progress after the
         installer reported a failure changes nothing and is reported as
         `duplicate` or `ignored`. Progress after a timeout failure clears it.
+        A USB-flashed machine has no PXE boot to restart it, so any progress
+        report after its failure means the stick was booted again and clears
+        the failure.
 
         The endpoint is unauthenticated, like the rest of this API.
       requestBody:
@@ -396,7 +399,7 @@ components:
         queued: waiting for a machine.
         flashed: written to a USB stick; no PXE assignment will follow.
         assigned: a PXE client has been bound to this name and is installing or retrying.
-        installing: the installer fetched its hostname (late-commands reached); the GRUB guard is in place.
+        installing: the installer fetched its hostname; the GRUB guard is in place.
         installed: the machine PXE-booted again after install and was sent to disk.
         failed: the installer reported a failure, or the server saw no installer activity for the install timeout. A PXE machine installs again on its next boot, and a progress report after a timeout failure returns it to installing.
       enum: [queued, flashed, assigned, installing, installed, failed]

@@ -68,12 +68,12 @@ server runs. `just clean` wipes it.
 Either way the REST/SSE API is up on port 8235 (Bonjour `_viam-provisioner._tcp`):
 `curl localhost:8235/api/v1/queue`.
 
-If an install fails, or goes 45 minutes without any sign of life, the machine
-shows as `failed` in the API (`curl localhost:8235/api/v1/queue`); `just status`
-does not show it. Reboot it over the network to
-install again; if its boot order puts the disk first, use the one-time boot
-menu to PXE. `just unguard <name>` does the same for a machine that installed
-but needs reinstalling.
+When the installer reports a failure, or an install goes 45 minutes without
+any sign of life, the machine shows as `failed` in the API
+(`curl localhost:8235/api/v1/queue`); `just status` does not show it. Reboot it
+over the network to install again; if its boot order puts the disk first, use
+the one-time boot menu to PXE. `just unguard <name>` makes a machine that
+installed reinstall on its next PXE boot.
 
 ## Provisioning x86 Machines (USB sticks)
 

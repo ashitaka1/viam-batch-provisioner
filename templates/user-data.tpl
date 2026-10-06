@@ -285,7 +285,7 @@ ${PACKAGES}
     # Last, so a machine that reached here is never timed out as silent.
     - sh /tmp/install-report.sh ${PXE_SERVER} progress done || true
 
-  # Runs when the install fails. The reason is a fixed phrase plus, when the
+  # Autoinstall runs these when the install fails. The reason is a fixed phrase plus, when the
   # installer left a crash report, its exception class. Never log text: it can
   # echo commands that contain the WiFi password.
   error-commands:

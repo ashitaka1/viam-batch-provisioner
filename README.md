@@ -154,7 +154,7 @@ Phase 2 service for packages + Viam + Tailscale
 |-----------|------|
 | **dnsmasq** (native) | Proxy DHCP for PXE discovery + TFTP for GRUB/kernel/initrd |
 | **nginx** (Docker) | HTTP server for Ubuntu ISO, autoinstall configs, credentials |
-| **pxe-watcher** | Sniffs DHCP for PXE clients, assigns hostnames by arrival order, writes GRUB guards (on hostname fetch or repeat PXE), appends lifecycle events to `logs/events.jsonl` |
+| **pxe-watcher** | Sniffs DHCP for PXE clients, assigns hostnames by arrival order, writes GRUB guards (on hostname fetch or repeat PXE), appends lifecycle events to `logs/events.jsonl` (the API appends installer reports to it too) |
 | **queue_store.py** | Sole writer of `queue.json`: locked, atomic append/assign used by the watcher, the API and scripts |
 | **provisioner_api.py** | REST + SSE server (stdlib) implementing `openapi/provisioner.yaml`; runs as the operator on port 8235 |
 | **daemon.sh** | Installs dnsmasq, watcher, API and Bonjour as launchd daemons (`just serve-daemon`) |
@@ -198,18 +198,26 @@ cursor can no longer be served.
 ### Failed installs
 
 The installer reports each stage it enters (`late-commands`, `identity`,
-`tooling`, `tailscale`, `done`) and, through autoinstall's `error-commands`,
-any failure. A failure marks the machine `failed` and removes its PXE guard, so
-rebooting it over the network installs again. If the machine's boot order puts
-the disk first, use the one-time boot menu to PXE.
+`tooling`, `tailscale`, `done`) and, from autoinstall's `error-commands` when
+autoinstall runs them, a failure. A failure marks the machine `failed` and
+removes its PXE guard, so rebooting it over the network installs again. If the
+machine's boot order puts the disk first, use the one-time boot menu to PXE. A
+USB-flashed machine has no PXE boot to restart it, so a progress report after
+its failure means the stick was booted again and clears the failure.
 
 An install that goes silent is failed by the server after
 `INSTALL_TIMEOUT_MINUTES` (default 45, `0` turns it off). Any report counts as
 a sign of life, and the final `done` report exempts a machine from the
 timeout. Reports never include installer log text, since logs can echo
-commands that contain secrets. `just unguard <name>` has the same effect as a
-failure: the machine's next PXE boot starts a new install, however long from
-now it happens.
+commands that contain secrets. `just unguard <name>` makes the machine's next
+PXE boot start a new install, however long from now it happens, without
+marking it failed.
+
+After upgrading, run `just serve-daemon` (or restart `just serve`) so nginx is
+recreated with the report forwarding and the watcher is started with the
+timeout setting. Start the HTTP server with `just up` rather than a bare
+`docker compose up`: compose does not read `site.env`, so only the recipes pass
+a custom `API_PORT` through to nginx.
 
 ```bash
 curl -s localhost:8235/api/v1/queue | jq
