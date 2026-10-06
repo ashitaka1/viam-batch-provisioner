@@ -25,7 +25,16 @@ import watcher  # noqa: E402
 
 NAME_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 MAX_ITEMS = 500
-STATUSES = ("queued", "flashed", "assigned", "installing", "installed")
+STATUSES = ("queued", "flashed", "assigned", "installing", "installed", "failed")
+
+# Install reports from the target. A stage names the section of the installer
+# that was entered last. `installer` (before late-commands began) only ever
+# appears on a failure, `done` only on progress, and `unknown` is set by the
+# server when a timeout fires with nothing on record, so a target can't send it.
+PROGRESS_STAGES = ("late-commands", "identity", "tooling", "tailscale", "done")
+FAILURE_STAGES = ("installer", "late-commands", "identity", "tooling", "tailscale")
+MAX_REASON = 500
+DEFAULT_REASON = "installer reported a failure"
 
 
 class ServiceError(Exception):
@@ -125,9 +134,60 @@ def validate_provision(body) -> list:
     return items
 
 
+def sanitize_reason(text) -> str:
+    """A failure reason that is safe to journal: control characters become
+    spaces, whitespace collapses, the length is capped, and an empty reason
+    is replaced with readable text."""
+    if text is None:
+        return DEFAULT_REASON
+    cleaned = " ".join("".join(c if c.isprintable() else " " for c in text).split())
+    return cleaned[:MAX_REASON] or DEFAULT_REASON
+
+
+def validate_report(body) -> dict:
+    """A normalized {kind, stage, name, mac, reason} install report, or
+    ValidationError with per-field details. The target is untrusted input."""
+    if not isinstance(body, dict):
+        raise ValidationError("request body must be a JSON object", [{"message": "body must be an object"}])
+
+    details = []
+    kind = body.get("kind")
+    if kind not in ("progress", "failed"):
+        details.append({"field": "kind", "message": "must be progress or failed"})
+    else:
+        allowed = PROGRESS_STAGES if kind == "progress" else FAILURE_STAGES
+        if body.get("stage") not in allowed:
+            details.append({"field": "stage", "message": "for " + kind + " must be one of " + ", ".join(allowed)})
+
+    name, mac = body.get("name"), body.get("mac")
+    if (name is None) == (mac is None):
+        details.append({"message": "exactly one of name and mac is required"})
+    elif name is not None and not (isinstance(name, str) and safe_lookup_name(name)):
+        details.append({"field": "name", "message": "is not a valid machine name"})
+    elif mac is not None and not (isinstance(mac, str) and re.fullmatch(watcher.MAC_RE, mac)):
+        details.append({"field": "mac", "message": "must be a lowercase colon-separated MAC address"})
+
+    reason = body.get("reason")
+    if kind == "failed" and reason is not None and not isinstance(reason, str):
+        details.append({"field": "reason", "message": "must be a string"})
+
+    if details:
+        raise ValidationError("invalid install report", details)
+    return {
+        "kind": kind, "stage": body["stage"], "name": name, "mac": mac,
+        "reason": sanitize_reason(reason) if kind == "failed" else None,
+    }
+
+
 def write_slot_file(slot_dir: Path, credentials: dict) -> None:
     """Write slot-<name>/viam.json atomically, mode 0644 like fetch-credentials.py's output."""
     queue_store.atomic_write_json(slot_dir / "viam.json", credentials)
+
+
+def _copy_failure(out: dict, source: dict) -> None:
+    for key in ("failed_at", "failure_reason", "stage"):
+        if source.get(key):
+            out[key] = source[key]
 
 
 def derive_entry(queue_dir: Path, raw: dict, guard_dir: Optional[Path] = None) -> dict:
@@ -143,7 +203,12 @@ def derive_entry(queue_dir: Path, raw: dict, guard_dir: Optional[Path] = None) -
         status = "queued"
     elif not mac:
         flashed_via = raw.get("flashed_via")
-        status = "flashed" if flashed_via == "usb" else "assigned"
+        if raw.get("failed_at"):
+            # A failure removes the guard, so it has to outrank everything else.
+            status = "failed"
+            _copy_failure(out, raw)
+        else:
+            status = "flashed" if flashed_via == "usb" else "assigned"
         if flashed_via:
             out["flashed_via"] = flashed_via
     else:
@@ -155,13 +220,19 @@ def derive_entry(queue_dir: Path, raw: dict, guard_dir: Optional[Path] = None) -
         else:
             out["assigned_at"] = info["assigned_at"]
             guard = (guard_dir or watcher._guard_dir(queue_dir)) / f"{mac}.cfg"
-            if not guard.exists():
+            if info.get("failed_at"):
+                # A failure removes the guard, which alone would read as "assigned".
+                status = "failed"
+                _copy_failure(out, info)
+            elif not guard.exists():
                 status = "assigned"
             elif info.get("completed_at"):
                 status = "installed"
                 out["completed_at"] = info["completed_at"]
             else:
                 status = "installing"
+                if info.get("stage"):
+                    out["stage"] = info["stage"]
 
     out["status"] = status
     out["has_credentials"] = has_credentials
@@ -176,12 +247,20 @@ def counts(entries: list) -> dict:
     return result
 
 
+def _log(message: str) -> None:
+    print(message, file=sys.stderr)
+
+
 class ProvisionService:
-    def __init__(self, queue_dir: Path, hub=None, now: Optional[Callable[[], datetime]] = None, guard_dir: Optional[Path] = None):
+    def __init__(self, queue_dir: Path, hub=None, now: Optional[Callable[[], datetime]] = None, guard_dir: Optional[Path] = None,
+                 emit: Optional[Callable[[str, dict], None]] = None):
         self.queue_dir = Path(queue_dir)
         self.hub = hub
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.guard_dir = Path(guard_dir) if guard_dir else watcher._guard_dir(self.queue_dir)
+        # Appends to the event journal. The API owns this so reports work under
+        # `just serve-usb`, where no watcher runs.
+        self.emit = emit
 
     def _read(self) -> list:
         try:
@@ -253,6 +332,40 @@ class ProvisionService:
             if raw["name"] == name:
                 return derive_entry(self.queue_dir, raw, self.guard_dir)
         raise NotFound(f"{name} is not in the queue")
+
+    def report_install(self, body) -> dict:
+        """Record an installer's progress or failure report. Returns {"result": ...}
+        where result is "recorded", "duplicate" or "ignored"."""
+        report = validate_report(body)
+        name, mac = report["name"], report["mac"]
+        entries = self._read()
+        if name is not None:
+            entry = next((e for e in entries if e["name"] == name), None)
+            if entry is None or not entry.get("assigned"):
+                raise NotFound(f"{name} is not an assigned machine")
+            mac = entry.get("mac")  # None for a USB-flashed machine
+        else:
+            entry = next((e for e in entries if e.get("assigned") and e.get("mac") == mac), None)
+            if entry is None:
+                raise NotFound(f"no machine is assigned to {mac}")
+            name = entry["name"]
+
+        try:
+            if report["kind"] == "failed":
+                result = watcher.apply_failure(
+                    self.queue_dir, name=name, mac=mac, stage=report["stage"], reason=report["reason"],
+                    source="installer", now=self.now(), emit=self.emit, log=_log)
+            else:
+                result = watcher.apply_progress(
+                    self.queue_dir, name=name, mac=mac, stage=report["stage"],
+                    now=self.now(), emit=self.emit, log=_log)
+        except TimeoutError as e:
+            raise QueueLocked(str(e))
+        except json.JSONDecodeError as e:
+            raise QueueUnreadable(f"queue.json is not valid JSON: {e}")
+        if result == "unknown":
+            raise NotFound(f"{name} has no install record")
+        return {"result": result}
 
     def remove(self, name: str) -> None:
         if not safe_lookup_name(name):

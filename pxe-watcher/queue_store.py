@@ -215,6 +215,26 @@ def mark_assigned(queue_dir: Path, name: str, **extra) -> bool:
     return False
 
 
+def update_entry(queue_dir: Path, name: str, mutate: Callable[[dict], bool]) -> Optional[dict]:
+    """Run mutate(entry) on the named entry under the lock.
+
+    The file is rewritten only when mutate returns True. Returns a copy of
+    the entry as it stands afterwards, or None if the name isn't queued.
+    """
+    with locked(queue_dir):
+        entries = read(queue_dir)
+        for e in entries:
+            if e["name"] == name:
+                if mutate(e):
+                    write(queue_dir, entries)
+                return dict(e)
+    return None
+
+
+# Set on a USB-flashed entry when its install is reported failed.
+FAILURE_KEYS = ("failed_at", "failure_reason", "stage")
+
+
 def reset(queue_dir: Path) -> int:
     """Mark every entry unassigned. Returns the number of entries."""
     with locked(queue_dir):
@@ -223,6 +243,8 @@ def reset(queue_dir: Path) -> int:
             e["assigned"] = False
             e["mac"] = None
             e.pop("flashed_via", None)
+            for key in FAILURE_KEYS:
+                e.pop(key, None)
         if entries:
             write(queue_dir, entries)
     return len(entries)

@@ -15,6 +15,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import event_journal  # noqa: E402
 import provisioner_service as svc  # noqa: E402
 import queue_store  # noqa: E402
 
@@ -252,6 +253,168 @@ class QueueReadTest(ServiceLayoutTest):
             snapshot = self.service().list_queue()
         self.assertEqual(snapshot["last_event_id"], 5, "last_event_id must be captured before the queue is read")
         self.assertEqual(self.hub.last_id, 6)
+
+
+class ValidateReportTest(unittest.TestCase):
+    def report(self, **fields):
+        body = {"kind": "progress", "stage": "identity", "mac": MAC}
+        body.update(fields)
+        return body
+
+    def test_malformed_reports_are_rejected(self):
+        bad = {
+            "not an object": [],
+            "neither name nor mac": {"kind": "progress", "stage": "identity"},
+            "both name and mac": self.report(name="m"),
+            "uppercase mac": self.report(mac=MAC.upper()),
+            "unknown kind": self.report(kind="nope"),
+            "missing stage": {"kind": "progress", "mac": MAC},
+            "unknown stage": self.report(stage="bogus"),
+            "a stage only the server may set": self.report(kind="failed", stage="unknown"),
+            "done with a failure": self.report(kind="failed", stage="done"),
+            "installer with progress": self.report(stage="installer"),
+            "non-string reason": self.report(kind="failed", stage="tooling", reason=5),
+            "name with a slash": {"kind": "progress", "stage": "identity", "name": "a/b"},
+        }
+        for label, body in bad.items():
+            with self.subTest(label):
+                with self.assertRaises(svc.ValidationError):
+                    svc.validate_report(body)
+
+    def test_each_documented_stage_is_accepted_for_its_kind(self):
+        for stage in ("late-commands", "identity", "tooling", "tailscale", "done"):
+            with self.subTest(kind="progress", stage=stage):
+                self.assertEqual(svc.validate_report(self.report(stage=stage))["stage"], stage)
+        for stage in ("installer", "late-commands", "identity", "tooling", "tailscale"):
+            with self.subTest(kind="failed", stage=stage):
+                self.assertEqual(svc.validate_report(self.report(kind="failed", stage=stage))["stage"], stage)
+
+    def test_reasons_are_cleaned_and_bounded(self):
+        limit = svc.MAX_REASON
+        cases = {
+            "control characters and newlines become single spaces": ("curl\x00 failed\n\non line 3\t!", "curl failed on line 3 !"),
+            "exactly at the limit is kept": ("x" * limit, "x" * limit),
+            "one over the limit is cut": ("x" * (limit + 1), "x" * limit),
+        }
+        for label, (raw, expected) in cases.items():
+            with self.subTest(label):
+                got = svc.validate_report(self.report(kind="failed", stage="tooling", reason=raw))["reason"]
+                self.assertEqual(got, expected)
+        for label, raw in {"whitespace only": " \n\t ", "absent": None}.items():
+            with self.subTest(label):
+                got = svc.validate_report(self.report(kind="failed", stage="tooling", reason=raw))["reason"]
+                self.assertTrue(got.strip(), "an empty reason must be replaced with readable text")
+
+
+class FailedStatusTest(ServiceLayoutTest):
+    def test_a_failed_machine_is_not_shown_as_waiting_or_installing(self):
+        raw = {"name": "m", "assigned": True, "mac": MAC}
+        self.write_info(MAC, failed_at=T0.isoformat(), failure_reason="boom", failure_source="installer", stage="tooling")
+
+        with self.subTest("no guard, which on its own reads as waiting"):
+            entry = svc.derive_entry(self.queue_dir, raw, self.guard_dir)
+            self.assertEqual((entry["failed_at"], entry["failure_reason"], entry["stage"]), (T0.isoformat(), "boom", "tooling"))
+            self.assertEqual(entry["mac"], MAC)
+            self.assertEqual(entry["status"], "failed")
+
+        with self.subTest("guard present, which on its own reads as installing"):
+            self.write_guard(MAC)
+            self.assertEqual(svc.derive_entry(self.queue_dir, raw, self.guard_dir)["status"], "failed")
+
+        with self.subTest("a USB machine"):
+            usb = {"name": "u", "assigned": True, "flashed_via": "usb", "failed_at": T0.isoformat(),
+                   "failure_reason": "boom", "stage": "installer"}
+            entry = svc.derive_entry(self.queue_dir, usb, self.guard_dir)
+            self.assertEqual((entry["failure_reason"], entry["stage"], entry["flashed_via"]), ("boom", "installer", "usb"))
+            self.assertEqual(entry["status"], "failed")
+
+        with self.subTest("counts include a failed bucket"):
+            counted = svc.counts([{"status": "failed"}, {"status": "failed"}, {"status": "queued"}])
+            self.assertEqual((counted["failed"], counted["queued"], counted["total"]), (2, 1, 3))
+
+
+class ReportInstallTest(ServiceLayoutTest):
+    def setUp(self):
+        super().setUp()
+        self.journal_path = self.root / "logs" / "events.jsonl"
+        self.journal = event_journal.EventJournal(self.journal_path, now=lambda: T0)
+
+    def service(self):
+        return svc.ProvisionService(self.queue_dir, hub=self.hub, now=lambda: T0, guard_dir=self.guard_dir, emit=self.journal.emit)
+
+    def events(self):
+        return [r["data"] for r in event_journal.read_all(self.journal_path)] if self.journal_path.exists() else []
+
+    def info(self):
+        return json.loads((self.queue_dir / MAC / "machine-info.json").read_text())
+
+    def failed(self, **who):
+        body = {"kind": "failed", "stage": "tooling", "reason": "curl failed"}
+        body.update(who)
+        return body
+
+    def test_reports_reach_the_right_machine(self):
+        with self.subTest("a PXE machine by mac"):
+            self.seed([{"name": "m", "assigned": True, "mac": MAC}])
+            self.write_info(MAC, name="m", attempt=1)
+            self.write_guard(MAC)
+            result = self.service().report_install(self.failed(mac=MAC))
+            self.assertEqual((self.info()["failure_reason"], self.info()["stage"]), ("curl failed", "tooling"))
+            self.assertFalse((self.guard_dir / f"{MAC}.cfg").exists())
+            self.assertEqual([(e["type"], e["name"], e["mac"]) for e in self.events()], [("install-failed", "m", MAC)])
+            self.assertEqual(result, {"result": "recorded"})
+
+        with self.subTest("a name bound to a MAC takes the PXE path"):
+            self.journal_path.unlink(missing_ok=True)
+            self.write_info(MAC, name="m", attempt=1)
+            self.write_guard(MAC)
+            result = self.service().report_install(self.failed(name="m"))
+            self.assertIn("failed_at", self.info())
+            self.assertEqual([e["mac"] for e in self.events()], [MAC])
+            self.assertEqual(result, {"result": "recorded"})
+
+        with self.subTest("a USB machine is recorded on its queue entry and its event has no mac"):
+            self.journal_path.unlink(missing_ok=True)
+            self.seed([{"name": "u", "assigned": True, "flashed_via": "usb"}])
+            result = self.service().report_install(self.failed(name="u", stage="installer"))
+            entry = self.queue()[0]
+            self.assertEqual((entry["failure_reason"], entry["stage"]), ("curl failed", "installer"))
+            self.assertIn("failed_at", entry)
+            events = self.events()
+            self.assertEqual([e["name"] for e in events], ["u"])
+            self.assertNotIn("mac", events[0])
+            self.assertEqual(result, {"result": "recorded"})
+
+        for label, body, entries in [
+            ("an unassigned entry", self.failed(name="q"), [{"name": "q", "assigned": False}]),
+            ("an unknown name", self.failed(name="nope"), []),
+            ("an unknown mac", self.failed(mac="11:22:33:44:55:66"), []),
+        ]:
+            with self.subTest(label):
+                self.journal_path.unlink(missing_ok=True)
+                self.seed(entries)
+                with self.assertRaises(svc.NotFound):
+                    self.service().report_install(body)
+                self.assertEqual(self.events(), [])
+
+    def test_a_broken_event_journal_never_loses_or_repeats_a_failure(self):
+        attempts = []
+
+        def broken(event_type, data):
+            attempts.append(event_type)
+            raise OSError("journal unwritable")
+
+        self.seed([{"name": "m", "assigned": True, "mac": MAC}])
+        self.write_info(MAC, name="m", attempt=1)
+        service = svc.ProvisionService(self.queue_dir, hub=self.hub, now=lambda: T0, guard_dir=self.guard_dir, emit=broken)
+
+        first = service.report_install(self.failed(mac=MAC))
+        recorded = self.info()
+        second = service.report_install(self.failed(mac=MAC))
+
+        self.assertIn("failed_at", recorded)
+        self.assertEqual(attempts, ["install-failed"], "the repeated report must not try to emit again")
+        self.assertEqual((first, second), ({"result": "recorded"}, {"result": "duplicate"}))
 
 
 if __name__ == "__main__":

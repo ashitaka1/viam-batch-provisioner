@@ -52,6 +52,16 @@ HOSTNAME_FETCH_RE = re.compile(
 
 _guard_lock = threading.Lock()
 
+# Lock taken around every change to an existing machine-info.json.
+INFO_LOCK = "info.lock"
+
+# What a failure leaves in machine-info.json, cleared when it is recovered from.
+INFO_FAILURE_KEYS = ("failed_at", "failure_reason", "failure_source")
+
+# The hostname fetch writes the GRUB guard, and it happens in the `identity`
+# section of the installer. A machine reporting one of these stages is past it.
+GUARD_STAGES = ("tooling", "tailscale", "done")
+
 
 def _guard_dir(queue_dir: Path) -> Path:
     """Locate the GRUB provisioned-guard directory relative to the queue dir."""
@@ -104,6 +114,177 @@ def read_info(queue_dir: Path, mac: str) -> Optional[dict]:
 def write_info(queue_dir: Path, mac: str, info: dict) -> None:
     """Replace the MAC's machine-info.json atomically."""
     queue_store.atomic_write_json(queue_dir / mac / "machine-info.json", info, owner_ref=queue_dir, indent=2)
+
+
+def update_info(queue_dir: Path, mac: str, mutate: Callable[[dict], bool], timeout: Optional[float] = 10.0) -> Optional[dict]:
+    """Read-modify-write one machine's machine-info.json under info.lock.
+
+    The root watcher and the operator-run API both write this file, so every
+    change to an existing one goes through here. mutate(info) edits the dict
+    in place and returns True when it should be saved. Returns the dict as it
+    stands afterwards, or None if the MAC has no machine-info.json. Raises
+    TimeoutError if the lock can't be taken.
+    """
+    with queue_store.locked_file(queue_dir / INFO_LOCK, queue_dir, timeout=timeout):
+        info = read_info(queue_dir, mac)
+        if info is None:
+            return None
+        if mutate(info):
+            write_info(queue_dir, mac, info)
+        return info
+
+
+def remove_guard(queue_dir: Path, mac: str) -> bool:
+    """Delete the MAC's GRUB guard so its next PXE boot installs. True if one was removed."""
+    with _guard_lock:
+        try:
+            (_guard_dir(queue_dir) / f"{mac}.cfg").unlink()
+        except FileNotFoundError:
+            return False
+        return True
+
+
+def parse_time(value) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def last_activity(info: dict) -> Optional[datetime]:
+    """The later of assignment and the last progress report; None if a timestamp is unreadable."""
+    times = [parse_time(info[key]) for key in ("assigned_at", "progress_at") if key in info]
+    if not times or any(t is None for t in times):
+        return None
+    return max(times)
+
+
+def _event(name: str, mac: Optional[str], now: datetime, **extra) -> dict:
+    data = {"name": name, "timestamp": now.isoformat(timespec="seconds")}
+    if mac:
+        data["mac"] = mac
+    data.update(extra)
+    return data
+
+
+def _emit_event(emit: Optional[Callable[[str, dict], None]], log: Callable[..., None], event_type: str, data: dict) -> None:
+    """Record a lifecycle event. A failing journal never blocks a state change."""
+    if emit is None:
+        return
+    try:
+        emit(event_type, data)
+    except Exception as e:
+        log(f"WARNING: could not record {event_type} for {data.get('name')}: {e}")
+
+
+def apply_failure(queue_dir: Path, *, name: str, mac: Optional[str], stage: str, reason: str, source: str,
+                  now: datetime, emit: Optional[Callable[[str, dict], None]] = None,
+                  log: Callable[..., None] = print, stale_before: Optional[datetime] = None) -> str:
+    """Record that an install failed. Returns "recorded", "duplicate", "ignored" or "unknown".
+
+    A PXE machine (mac given) keeps the failure in machine-info.json and loses
+    its GRUB guard, so its next boot reinstalls. A USB machine (mac None) keeps
+    it on its queue entry. The state is written before the event is emitted,
+    so a journal failure can't cause a duplicate later.
+
+    A report for a machine that has completed is ignored. A repeat is a
+    duplicate, except that the installer's own report replaces a failure the
+    timeout guessed at. With stale_before, a machine that showed activity
+    after that moment is left alone: the timeout lost a race with a report.
+    """
+    when = now.isoformat(timespec="seconds")
+    outcome = {"result": "duplicate"}
+
+    if mac is not None:
+        def mutate(info: dict) -> bool:
+            if info.get("completed_at"):
+                outcome["result"] = "ignored"
+                return False
+            if stale_before is not None:
+                activity = last_activity(info)
+                if activity is None or activity > stale_before:
+                    outcome["result"] = "ignored"
+                    return False
+            if info.get("failed_at") and not (info.get("failure_source") == "timeout" and source == "installer"):
+                outcome["result"] = "duplicate"
+                return False
+            info.update(failed_at=when, failure_reason=reason, failure_source=source, stage=stage)
+            outcome["result"] = "recorded"
+            return True
+
+        if update_info(queue_dir, mac, mutate) is None:
+            return "unknown"
+    else:
+        def mutate_entry(entry: dict) -> bool:
+            if entry.get("failed_at"):
+                outcome["result"] = "duplicate"
+                return False
+            entry.update(failed_at=when, failure_reason=reason, stage=stage)
+            outcome["result"] = "recorded"
+            return True
+
+        if queue_store.update_entry(queue_dir, name, mutate_entry) is None:
+            return "unknown"
+
+    if outcome["result"] == "recorded":
+        if mac is not None:
+            remove_guard(queue_dir, mac)
+        _emit_event(emit, log, "install-failed", _event(name, mac, now, stage=stage, reason=reason, source=source))
+    return outcome["result"]
+
+
+def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str, now: datetime,
+                   emit: Optional[Callable[[str, dict], None]] = None, log: Callable[..., None] = print) -> str:
+    """Record that the installer entered a stage. Returns "recorded", "duplicate", "ignored" or "unknown".
+
+    Every report moves a PXE machine's progress time, so an install that
+    keeps reporting is never timed out; only a new stage (or a recovery)
+    emits an event. A completed machine, and a machine the installer itself
+    reported failed, are left alone. A failure the timeout guessed at is
+    cleared, and the guard comes back if the machine is already past its
+    hostname fetch.
+    """
+    when = now.isoformat(timespec="seconds")
+    outcome = {"result": "recorded", "cleared": False}
+
+    if mac is not None:
+        def mutate(info: dict) -> bool:
+            if info.get("completed_at"):
+                outcome["result"] = "ignored"
+                return False
+            if info.get("failed_at"):
+                if info.get("failure_source") != "timeout":
+                    outcome["result"] = "ignored"
+                    return False
+                for key in INFO_FAILURE_KEYS:
+                    info.pop(key, None)
+                outcome["cleared"] = True
+            if info.get("stage") == stage and not outcome["cleared"]:
+                outcome["result"] = "duplicate"
+            info["stage"] = stage
+            info["progress_at"] = when
+            return True
+
+        if update_info(queue_dir, mac, mutate) is None:
+            return "unknown"
+    else:
+        def mutate_entry(entry: dict) -> bool:
+            if not entry.get("failed_at"):
+                return False
+            for key in queue_store.FAILURE_KEYS:
+                entry.pop(key, None)
+            outcome["cleared"] = True
+            return True
+
+        if queue_store.update_entry(queue_dir, name, mutate_entry) is None:
+            return "unknown"
+
+    if outcome["result"] != "recorded":
+        return outcome["result"]
+    if outcome["cleared"] and mac is not None and stage in GUARD_STAGES:
+        write_guard(queue_dir, mac)
+    _emit_event(emit, log, "install-progress", _event(name, mac, now, stage=stage))
+    return "recorded"
 
 
 def assign_machine(queue_dir: Path, mac: str, now: Optional[datetime] = None) -> Optional[dict]:

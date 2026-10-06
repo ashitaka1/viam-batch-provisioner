@@ -116,6 +116,47 @@ class SchemaValidationTest(unittest.TestCase):
                 self.assertGreaterEqual(status, 400)
                 self.validate(body, "Error")
 
+    def test_install_reports_validate_against_spec(self):
+        live = self.live
+        live.reset_disk()
+        live.journal_path.unlink(missing_ok=True)
+        (live.queue_dir / "queue.json").write_text(json.dumps([
+            {"name": "c-1", "assigned": True, "mac": MAC},
+            {"name": "u-1", "assigned": True, "flashed_via": "usb"},
+        ]))
+        (live.queue_dir / MAC).mkdir()
+        (live.queue_dir / MAC / "machine-info.json").write_text(json.dumps(
+            {"name": "c-1", "mac": MAC, "assigned_at": T0.isoformat(timespec="seconds"), "attempt": 1}))
+        live.guard_dir.mkdir(parents=True, exist_ok=True)
+        (live.guard_dir / f"{MAC}.cfg").write_text("exit\n")
+
+        reports = [
+            {"kind": "progress", "stage": "tooling", "mac": MAC},
+            {"kind": "failed", "stage": "tooling", "mac": MAC, "reason": "x" * 500},
+            {"kind": "failed", "stage": "installer", "name": "u-1"},
+        ]
+        for report in reports:
+            with self.subTest(report=f"{report['kind']} {report.get('mac') or report.get('name')}"):
+                status, _, body = live.request("POST", "/api/v1/install-reports", body=report)
+                self.assertEqual(status, 200)
+                self.validate(body, "InstallReportResult")
+
+        status, _, body = live.request("GET", "/api/v1/queue")
+        self.assertEqual(status, 200)
+        self.validate(body, "QueueList")
+        self.assertEqual(sorted(e["status"] for e in body["entries"]), ["failed", "failed"])
+
+        status, _, body = live.request("GET", "/api/v1/status")
+        self.assertEqual(status, 200)
+        self.validate(body, "ServerStatus")
+        self.assertEqual(body["queue"]["failed"], 2)
+
+        records = event_journal.read_all(live.journal_path)
+        self.assertEqual([r["type"] for r in records], ["install-progress", "install-failed", "install-failed"])
+        for record in records:
+            with self.subTest(event=record["type"], mac=record["data"].get("mac")):
+                self.validate(record["data"], "MachineEvent")
+
     def test_events_validate_against_spec(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -20,6 +20,7 @@ servers:
   - url: /
 tags:
   - name: queue
+  - name: install
   - name: status
   - name: events
 
@@ -59,6 +60,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/QueueUnreadable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+
+  /api/v1/install-reports:
+    post:
+      tags: [install]
+      operationId: reportInstall
+      summary: Progress or failure report from a target's installer
+      description: |
+        Sent by the installer on the target machine, through the file server,
+        which forwards only this path. Identify the machine by `mac` (PXE) or
+        `name` (USB-flashed, or a PXE machine by name).
+
+        `progress` records the stage the installer entered. Every report moves
+        the machine's progress time, so an install that keeps reporting is never
+        timed out. The final `done` stage only exempts the machine from the
+        install timeout: it does not complete the install. A machine is
+        `installed` when it PXE-boots again after installing.
+
+        `failed` records the failure and removes the machine's GRUB guard, so
+        its next PXE boot installs again. The installer's report replaces a
+        failure that the timeout recorded. Repeating a failure, reporting one
+        for a machine that has completed, or sending progress after the
+        installer reported a failure changes nothing and is reported as
+        `duplicate` or `ignored`. Progress after a timeout failure clears it.
+
+        The endpoint is unauthenticated, like the rest of this API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InstallReport'
+      responses:
+        '200':
+          description: Report processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstallReportResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/QueueUnreadable'
         default:
@@ -191,6 +238,8 @@ paths:
       x-sse-events:
         machine-assigned: '#/components/schemas/MachineAssigned'
         install-started: '#/components/schemas/InstallStarted'
+        install-progress: '#/components/schemas/InstallProgress'
+        install-failed: '#/components/schemas/InstallFailed'
         install-complete: '#/components/schemas/InstallComplete'
         guard-installed: '#/components/schemas/GuardInstalled'
         resync: '#/components/schemas/Resync'
@@ -297,6 +346,50 @@ components:
           items:
             $ref: '#/components/schemas/ProvisionResult'
 
+    InstallStage:
+      type: string
+      description: |
+        The section of the installer that was entered last.
+        installer: before late-commands began (storage, packages). Only on failures.
+        late-commands: late-commands started.
+        identity: the machine is resolving its name and fetching its credentials.
+        tooling: downloading the Viam CLI and agent.
+        tailscale: installing Tailscale.
+        done: late-commands finished. Exempts the machine from the install timeout; it does not complete the install.
+        unknown: set by the server when the timeout fires on a machine that never reported a stage. Never accepted from a target.
+      enum: [installer, late-commands, identity, tooling, tailscale, done, unknown]
+
+    InstallReport:
+      type: object
+      description: Exactly one of name and mac identifies the machine. `reason` applies to `failed` only.
+      required: [kind, stage]
+      additionalProperties: true
+      oneOf:
+        - required: [name]
+        - required: [mac]
+      properties:
+        kind:
+          type: string
+          enum: [progress, failed]
+        stage:
+          $ref: '#/components/schemas/InstallStage'
+        name:
+          $ref: '#/components/schemas/Name'
+        mac:
+          $ref: '#/components/schemas/Mac'
+        reason:
+          type: string
+          description: Control characters become spaces, whitespace collapses, and the text is cut to 500 characters. An empty reason is replaced with a default.
+
+    InstallReportResult:
+      type: object
+      required: [result]
+      additionalProperties: false
+      properties:
+        result:
+          type: string
+          enum: [recorded, duplicate, ignored]
+
     EntryStatus:
       type: string
       description: |
@@ -305,7 +398,8 @@ components:
         assigned: a PXE client has been bound to this name and is installing or retrying.
         installing: the installer fetched its hostname (late-commands reached); the GRUB guard is in place.
         installed: the machine PXE-booted again after install and was sent to disk.
-      enum: [queued, flashed, assigned, installing, installed]
+        failed: the installer reported a failure, or the server saw no installer activity for the install timeout. A PXE machine installs again on its next boot, and a progress report after a timeout failure returns it to installing.
+      enum: [queued, flashed, assigned, installing, installed, failed]
 
     QueueEntry:
       type: object
@@ -322,6 +416,13 @@ components:
           $ref: '#/components/schemas/Timestamp'
         completed_at:
           $ref: '#/components/schemas/Timestamp'
+        failed_at:
+          $ref: '#/components/schemas/Timestamp'
+        failure_reason:
+          type: string
+          maxLength: 500
+        stage:
+          $ref: '#/components/schemas/InstallStage'
         has_credentials:
           type: boolean
         flashed_via:
@@ -330,7 +431,7 @@ components:
 
     QueueCounts:
       type: object
-      required: [queued, flashed, assigned, installing, installed, total]
+      required: [queued, flashed, assigned, installing, installed, failed, total]
       additionalProperties: false
       properties:
         queued: {type: integer, minimum: 0}
@@ -338,6 +439,7 @@ components:
         assigned: {type: integer, minimum: 0}
         installing: {type: integer, minimum: 0}
         installed: {type: integer, minimum: 0}
+        failed: {type: integer, minimum: 0}
         total: {type: integer, minimum: 0}
 
     QueueList:
@@ -471,9 +573,43 @@ components:
         mac: {$ref: '#/components/schemas/Mac'}
         stage: {type: string, enum: [late-commands]}
 
+    InstallProgress:
+      type: object
+      description: The installer entered a stage. For a machine whose timeout failure was just cleared, it means the install is still running.
+      required: [id, type, timestamp, name, stage]
+      additionalProperties: false
+      properties:
+        id: {$ref: '#/components/schemas/EventId'}
+        type: {type: string, enum: [install-progress]}
+        timestamp: {$ref: '#/components/schemas/Timestamp'}
+        name: {$ref: '#/components/schemas/Name'}
+        mac:
+          allOf:
+            - $ref: '#/components/schemas/Mac'
+          description: Absent for USB-flashed machines.
+        stage: {$ref: '#/components/schemas/InstallStage'}
+
+    InstallFailed:
+      type: object
+      description: The installer reported a failure, or the server saw no activity for the install timeout. An installer failure replaces an earlier timeout failure and is announced again.
+      required: [id, type, timestamp, name, stage, reason, source]
+      additionalProperties: false
+      properties:
+        id: {$ref: '#/components/schemas/EventId'}
+        type: {type: string, enum: [install-failed]}
+        timestamp: {$ref: '#/components/schemas/Timestamp'}
+        name: {$ref: '#/components/schemas/Name'}
+        mac:
+          allOf:
+            - $ref: '#/components/schemas/Mac'
+          description: Absent for USB-flashed machines.
+        stage: {$ref: '#/components/schemas/InstallStage'}
+        reason: {type: string, maxLength: 500}
+        source: {type: string, enum: [installer, timeout]}
+
     InstallComplete:
       type: object
-      description: The machine PXE-booted again after install and was sent to its disk.
+      description: The machine PXE-booted again after install and was sent to its disk. The installer's final `done` report does not produce this event.
       required: [id, type, timestamp, name, mac, duration_seconds]
       additionalProperties: false
       properties:
@@ -516,6 +652,8 @@ components:
       oneOf:
         - $ref: '#/components/schemas/MachineAssigned'
         - $ref: '#/components/schemas/InstallStarted'
+        - $ref: '#/components/schemas/InstallProgress'
+        - $ref: '#/components/schemas/InstallFailed'
         - $ref: '#/components/schemas/InstallComplete'
         - $ref: '#/components/schemas/GuardInstalled'
         - $ref: '#/components/schemas/Resync'
@@ -524,6 +662,8 @@ components:
         mapping:
           machine-assigned: '#/components/schemas/MachineAssigned'
           install-started: '#/components/schemas/InstallStarted'
+          install-progress: '#/components/schemas/InstallProgress'
+          install-failed: '#/components/schemas/InstallFailed'
           install-complete: '#/components/schemas/InstallComplete'
           guard-installed: '#/components/schemas/GuardInstalled'
           resync: '#/components/schemas/Resync'

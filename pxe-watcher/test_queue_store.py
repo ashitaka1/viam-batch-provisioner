@@ -235,6 +235,7 @@ class LockTest(QueueDirTest):
         finally:
             if proc.poll() is None:
                 proc.kill()
+            proc.stdout.close()
 
     def test_released_when_body_raises(self):
         with self.assertRaises(RuntimeError):
@@ -311,6 +312,57 @@ class RemoveTest(QueueDirTest):
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(queue_store.remove(self.queue_dir, "z"), "not-found")
         self.assertEqual(self.snapshot(), before)
+
+
+class UpdateEntryTest(QueueDirTest):
+    def test_writes_only_when_the_callback_reports_a_change(self):
+        self.seed([_entry("p-1"), _entry("p-2")])
+        before = self.snapshot()
+
+        got = queue_store.update_entry(self.queue_dir, "p-2", lambda entry: False)
+
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(got["name"], "p-2")
+
+        def annotate(entry):
+            entry["note"] = "x"
+            return True
+
+        queue_store.update_entry(self.queue_dir, "p-2", annotate)
+        disk = self.on_disk()
+        self.assertEqual(disk[1]["note"], "x")
+        self.assertNotIn("note", disk[0])
+
+    def test_returns_a_copy_not_the_stored_entry(self):
+        self.seed([_entry("p-1")])
+        got = queue_store.update_entry(self.queue_dir, "p-1", lambda entry: False)
+        got["name"] = "changed"
+        self.assertEqual(self.on_disk()[0]["name"], "p-1")
+
+    def test_unknown_name_returns_none_and_writes_nothing(self):
+        self.seed([_entry("p-1")])
+        before = self.snapshot()
+        self.assertIsNone(queue_store.update_entry(self.queue_dir, "nope", lambda entry: True))
+        self.assertEqual(self.snapshot(), before)
+
+        self.queue_file.unlink()
+        self.assertIsNone(queue_store.update_entry(self.queue_dir, "nope", lambda entry: True))
+        self.assertFalse(self.queue_file.exists())
+
+
+class ResetFailureTest(QueueDirTest):
+    def test_reset_clears_usb_failure_state(self):
+        failed = _entry("u-1", assigned=True)
+        failed.update({"flashed_via": "usb", "failed_at": "2026-01-01T12:00:00+00:00", "failure_reason": "boom", "stage": "tooling"})
+        self.seed([failed, _entry("u-2", assigned=True, mac="aa:aa:aa:aa:aa:01")])
+
+        queue_store.reset(self.queue_dir)
+
+        for entry in self.on_disk():
+            with self.subTest(name=entry["name"]):
+                for key in ("failed_at", "failure_reason", "stage", "flashed_via"):
+                    self.assertNotIn(key, entry)
+                self.assertFalse(entry["assigned"])
 
 
 class CliTest(QueueDirTest):

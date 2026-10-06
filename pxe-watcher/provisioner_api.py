@@ -33,15 +33,18 @@ from urllib.parse import parse_qs, unquote, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import event_hub  # noqa: E402
+import event_journal  # noqa: E402
 import provisioner_service as svc  # noqa: E402
 import watcher  # noqa: E402
 
 DEFAULT_PORT = 8235
 DEFAULT_HTTP_PORT = 8234
 MAX_BODY = 5 * 1024 * 1024
+MAX_REPORT_BODY = 16 * 1024  # installer reports are tiny; the endpoint is open to the LAN
 
 ROUTES = [
     ("POST", "/api/v1/provision", "provision"),
+    ("POST", "/api/v1/install-reports", "install_report"),
     ("GET", "/api/v1/queue", "list_queue"),
     ("GET", "/api/v1/queue/{name}", "get_entry"),
     ("DELETE", "/api/v1/queue/{name}", "remove_entry"),
@@ -148,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.end_headers()
 
-    def _read_json(self):
+    def _read_json(self, limit: int = MAX_BODY):
         length = self.headers.get("Content-Length")
         if length is None:
             raise HttpError(411, "length-required", "Content-Length is required")
@@ -158,9 +161,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except ValueError:
             raise HttpError(400, "invalid-request", "Content-Length is not a non-negative integer")
-        if size > MAX_BODY:
+        if size > limit:
             self._drain(size)
-            raise HttpError(413, "payload-too-large", f"body exceeds {MAX_BODY} bytes")
+            raise HttpError(413, "payload-too-large", f"body exceeds {limit} bytes")
         raw = self.rfile.read(size)
         try:
             return json.loads(raw)
@@ -179,6 +182,10 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_json()
         results = self.server.service.provision(body)
         self._send_json(200, {"results": results})
+
+    def _h_install_report(self, _params, _url):
+        body = self._read_json(MAX_REPORT_BODY)
+        self._send_json(200, self.server.service.report_install(body))
 
     def _h_list_queue(self, _params, _url):
         self._send_json(200, self.server.service.list_queue())
@@ -378,7 +385,8 @@ def main() -> None:
 
     hub = event_hub.EventHub(args.events_log)
     hub.start()
-    service = svc.ProvisionService(args.queue_dir, hub=hub)
+    journal = event_journal.EventJournal(args.events_log, owner_ref=args.queue_dir)
+    service = svc.ProvisionService(args.queue_dir, hub=hub, emit=journal.emit)
     try:
         server = make_server(
             service, hub, args.bind, args.port,

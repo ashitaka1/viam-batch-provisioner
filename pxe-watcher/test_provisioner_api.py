@@ -44,7 +44,7 @@ class LiveServer:
         self.journal = event_journal.EventJournal(self.journal_path, now=lambda: T0)
         self.hub = event_hub.EventHub(self.journal_path, poll=0.02)
         self.hub.start()
-        self.service = provisioner_service.ProvisionService(self.queue_dir, hub=self.hub, now=lambda: T0)
+        self.service = provisioner_service.ProvisionService(self.queue_dir, hub=self.hub, now=lambda: T0, emit=self.journal.emit)
         self.server = provisioner_api.make_server(
             self.service, self.hub, "127.0.0.1", 0,
             server_name="test-server", probes=PROBES, now=lambda: T0, keepalive=keepalive,
@@ -264,6 +264,85 @@ class ShutdownTest(unittest.TestCase):
             reader.close()
             live.server.server_close()
             live._tmp.cleanup()
+
+
+class InstallReportTest(unittest.TestCase):
+    """The installer's report endpoint, end to end through the live server."""
+
+    def setUp(self):
+        self.live = LiveServer()
+        self.live.reset_disk()
+
+    def tearDown(self):
+        self.live.close()
+
+    def assign_pxe(self, name="r-1", mac=MAC, guard=True):
+        """An assigned PXE machine, optionally already past its hostname fetch."""
+        live = self.live
+        (live.queue_dir / "queue.json").write_text(json.dumps([{"name": name, "assigned": True, "mac": mac}]))
+        (live.queue_dir / mac).mkdir(exist_ok=True)
+        (live.queue_dir / mac / "machine-info.json").write_text(json.dumps(
+            {"name": name, "mac": mac, "assigned_at": T0.isoformat(timespec="seconds"), "attempt": 1}))
+        if guard:
+            live.guard_dir.mkdir(parents=True, exist_ok=True)
+            (live.guard_dir / f"{mac}.cfg").write_text("exit\n")
+
+    def journal(self):
+        path = self.live.journal_path
+        return event_journal.read_all(path) if path.exists() else []
+
+    def test_a_failure_report_shows_up_in_the_queue_and_event_stream(self):
+        live = self.live
+        self.assign_pxe()
+        report = {"kind": "failed", "stage": "tooling", "mac": MAC, "reason": "curl failed"}
+
+        status, _, body = live.request("POST", "/api/v1/install-reports", body=report)
+        _, _, entry = live.request("GET", "/api/v1/queue/r-1")
+        after_first = [r["type"] for r in self.journal()]
+        repeat_status, _, repeat_body = live.request("POST", "/api/v1/install-reports", body=report)
+        after_repeat = [r["type"] for r in self.journal()]
+        reader = live.open_stream(last_event_id=0)
+        try:
+            frame = reader.next_frame()
+        finally:
+            reader.close()
+
+        self.assertEqual((entry["status"], entry["failure_reason"], entry["stage"]), ("failed", "curl failed", "tooling"))
+        self.assertEqual(after_first, ["install-failed"])
+        self.assertEqual(after_repeat, ["install-failed"], "a repeated report must not add an event")
+        self.assertEqual(frame["event"], "install-failed")
+        self.assertEqual((status, body), (200, {"result": "recorded"}))
+        self.assertEqual((repeat_status, repeat_body), (200, {"result": "duplicate"}))
+
+    def test_usb_failures_are_reported_without_a_watcher(self):
+        live = self.live
+        (live.queue_dir / "queue.json").write_text(json.dumps([{"name": "u-1", "assigned": True, "flashed_via": "usb"}]))
+
+        status, _, body = live.request("POST", "/api/v1/install-reports", body={"kind": "failed", "stage": "installer", "name": "u-1"})
+        _, _, entry = live.request("GET", "/api/v1/queue/u-1")
+        records = self.journal()
+
+        self.assertEqual((entry["status"], entry["flashed_via"]), ("failed", "usb"))
+        self.assertEqual([r["data"]["name"] for r in records], ["u-1"])
+        self.assertNotIn("mac", records[0]["data"])
+        self.assertEqual((status, body), (200, {"result": "recorded"}))
+
+    def test_bad_requests_get_the_right_http_error(self):
+        live = self.live
+        cases = [
+            ("invalid fields", {"kind": "nope"}, 400, "invalid-request"),
+            ("not json", b"nope", 400, "invalid-json"),
+            ("unknown machine", {"kind": "progress", "stage": "identity", "mac": MAC}, 404, "not-found"),
+            ("body over the report limit", b" " * (provisioner_api.MAX_REPORT_BODY + 1), 413, "payload-too-large"),
+        ]
+        for label, payload, expected_status, expected_code in cases:
+            with self.subTest(label):
+                status, _, body = live.request("POST", "/api/v1/install-reports", body=payload)
+                self.assertEqual((status, error_code(body)), (expected_status, expected_code))
+
+        with self.subTest("wrong method"):
+            status, headers, body = live.request("GET", "/api/v1/install-reports")
+            self.assertEqual((status, headers["Allow"], error_code(body)), (405, "POST", "method-not-allowed"))
 
 
 def wait_until(pred, timeout=5.0, interval=0.01):

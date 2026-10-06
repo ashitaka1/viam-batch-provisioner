@@ -9,7 +9,9 @@ reset, clean) take effect on the running daemon.
 """
 
 import json
+import shutil
 import sys
+import threading
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -476,6 +478,246 @@ class EmitTest(RepoLayoutTest):
 
         self.assertEqual(info_path.read_bytes(), original)
         self.assertEqual(sorted(p.name for p in (self.queue_dir / MAC).iterdir()), ["hostname", "machine-info.json"])
+
+
+class FailureStateTest(RepoLayoutTest):
+    """How installer reports and the timeout change a PXE machine's recorded state."""
+
+    def setUp(self):
+        super().setUp()
+        self.clock = T0
+        self.events = []
+
+    def advance(self, seconds):
+        self.clock = T0 + timedelta(seconds=seconds)
+
+    def iso(self, seconds=0):
+        return (T0 + timedelta(seconds=seconds)).isoformat(timespec="seconds")
+
+    def machine(self, guard=False, **extra):
+        """A PXE machine assigned at T0, optionally past its hostname fetch."""
+        info = {"name": "t-1", "mac": MAC, "assigned_at": self.iso(), "attempt": 1}
+        info.update(extra)
+        (self.queue_dir / MAC).mkdir(parents=True, exist_ok=True)
+        (self.queue_dir / MAC / "machine-info.json").write_text(json.dumps(info))
+        self.seed([{"name": "t-1", "assigned": True, "mac": MAC}])
+        if guard:
+            watcher.write_guard(self.queue_dir, MAC)
+
+    def forget(self):
+        """Back to a blank repo layout between subTests."""
+        shutil.rmtree(self.queue_dir)
+        self.queue_dir.mkdir(parents=True)
+        if self.guard_dir.exists():
+            shutil.rmtree(self.guard_dir)
+        self.events.clear()
+
+    def info(self):
+        return json.loads((self.queue_dir / MAC / "machine-info.json").read_text())
+
+    def types(self):
+        return [t for t, _ in self.events]
+
+    def fail(self, source="installer", stage="tooling", reason="curl failed", **kwargs):
+        return watcher.apply_failure(
+            self.queue_dir, name="t-1", mac=MAC, stage=stage, reason=reason, source=source,
+            now=self.clock, emit=lambda t, d: self.events.append((t, d)), log=lambda *_: None, **kwargs)
+
+    def progress(self, stage):
+        return watcher.apply_progress(
+            self.queue_dir, name="t-1", mac=MAC, stage=stage, now=self.clock,
+            emit=lambda t, d: self.events.append((t, d)), log=lambda *_: None)
+
+    def test_repeated_or_late_failure_reports_do_no_harm(self):
+        with self.subTest("a duplicate report emits one event and leaves the machine failed"):
+            self.forget()
+            self.machine(guard=True)
+            self.fail(reason="first")
+            result = self.fail(reason="second")
+            self.assertIn("failed_at", self.info())
+            self.assertFalse(self.guard().exists())
+            self.assertEqual(self.types(), ["install-failed"])
+            self.assertEqual(result, "duplicate")
+
+        with self.subTest("a report after completion leaves the finished install alone"):
+            self.forget()
+            self.machine(guard=True, completed_at=self.iso(300))
+            before = self.info()
+            result = self.fail()
+            self.assertEqual(self.info(), before)
+            self.assertTrue(self.guard().exists())
+            self.assertEqual(self.events, [])
+            self.assertEqual(result, "ignored")
+
+        with self.subTest("an unknown machine writes nothing"):
+            self.forget()
+            result = self.fail()
+            self.assertFalse((self.queue_dir / MAC).exists())
+            self.assertEqual(self.events, [])
+            self.assertEqual(result, "unknown")
+
+    def test_the_real_error_replaces_a_timeout_failure(self):
+        self.machine(guard=True)
+        self.fail(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
+        self.events.clear()
+        self.advance(60)
+
+        result = self.fail(source="installer", stage="tooling", reason="curl failed")
+
+        info = self.info()
+        self.assertEqual((info["failure_source"], info["failure_reason"], info["stage"]), ("installer", "curl failed", "tooling"))
+        self.assertIn("failed_at", info)
+        self.assertEqual(self.types(), ["install-failed"])
+        data = self.events[0][1]
+        self.assertEqual((data["source"], data["reason"], data["stage"]), ("installer", "curl failed", "tooling"))
+        self.assertEqual(result, "recorded")
+
+        # From here on the failure is the installer's, so late progress is ignored.
+        before = self.info()
+        self.events.clear()
+        self.assertEqual(self.progress("done"), "ignored")
+        self.assertEqual(self.info(), before)
+        self.assertEqual(self.events, [])
+
+    def test_late_progress_after_a_failure(self):
+        with self.subTest("an installer failure ignores late progress completely"):
+            self.forget()
+            self.machine(guard=True)
+            self.fail(source="installer", stage="tooling")
+            before = self.info()
+            self.events.clear()
+            self.advance(60)
+            result = self.progress("tailscale")
+            self.assertEqual(self.info(), before)
+            self.assertFalse(self.guard().exists())
+            self.assertEqual(self.events, [])
+            self.assertEqual(result, "ignored")
+
+        with self.subTest("a timeout failure is cleared and the guard comes back once past the hostname fetch"):
+            self.forget()
+            self.machine(guard=True)
+            self.fail(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
+            self.events.clear()
+            self.advance(60)
+            result = self.progress("tooling")
+            info = self.info()
+            for key in ("failed_at", "failure_reason", "failure_source"):
+                self.assertNotIn(key, info)
+            self.assertEqual((info["stage"], info["progress_at"]), ("tooling", self.iso(60)))
+            self.assertTrue(self.guard().exists())
+            self.assertEqual(self.types(), ["install-progress"])
+            self.assertEqual(result, "recorded")
+
+        with self.subTest("a timeout failure cleared before the hostname fetch gets no guard early"):
+            self.forget()
+            self.machine(guard=False)
+            self.fail(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
+            self.advance(60)
+            result = self.progress("late-commands")
+            info = self.info()
+            self.assertNotIn("failed_at", info)
+            self.assertEqual(info["stage"], "late-commands")
+            self.assertFalse(self.guard().exists())
+            self.assertEqual(result, "recorded")
+
+    def test_repeated_progress_reports_keep_an_install_alive(self):
+        with self.subTest("a new stage is recorded and announced"):
+            self.forget()
+            self.machine()
+            self.advance(30)
+            result = self.progress("identity")
+            info = self.info()
+            self.assertEqual((info["stage"], info["progress_at"]), ("identity", self.iso(30)))
+            self.assertEqual(self.types(), ["install-progress"])
+            self.assertEqual(self.events[0][1]["stage"], "identity")
+            self.assertEqual(result, "recorded")
+
+        with self.subTest("a repeated stage is silent but still moves the deadline"):
+            self.forget()
+            self.machine(stage="tooling", progress_at=self.iso(30))
+            self.advance(900)
+            result = self.progress("tooling")
+            self.assertEqual(self.info()["progress_at"], self.iso(900))
+            self.assertEqual(self.events, [])
+            self.assertEqual(result, "duplicate")
+
+        with self.subTest("progress after completion changes nothing"):
+            self.forget()
+            self.machine(guard=True, completed_at=self.iso(300), stage="done")
+            before = self.info()
+            self.advance(400)
+            result = self.progress("tooling")
+            self.assertEqual(self.info(), before)
+            self.assertEqual(self.events, [])
+            self.assertEqual(result, "ignored")
+
+    def test_the_timeout_loses_to_a_report_that_just_arrived(self):
+        cutoff = T0 + timedelta(seconds=50)
+
+        with self.subTest("activity after the cutoff means the install is alive"):
+            self.forget()
+            self.machine(guard=True, progress_at=self.iso(100))
+            before = self.info()
+            result = self.fail(source="timeout", stage="unknown", reason="no installer activity", stale_before=cutoff)
+            self.assertEqual(self.info(), before)
+            self.assertTrue(self.guard().exists())
+            self.assertEqual(self.events, [])
+            self.assertEqual(result, "ignored")
+
+        with self.subTest("activity before the cutoff is a silent install"):
+            self.forget()
+            self.machine(guard=True, progress_at=self.iso(10))
+            result = self.fail(source="timeout", stage="unknown", reason="no installer activity", stale_before=cutoff)
+            self.assertIn("failed_at", self.info())
+            self.assertFalse(self.guard().exists())
+            self.assertEqual(self.types(), ["install-failed"])
+            self.assertEqual(result, "recorded")
+
+
+class InfoLockTest(RepoLayoutTest):
+    """Both the root watcher and the operator-run API write machine-info.json."""
+
+    def setUp(self):
+        super().setUp()
+        (self.queue_dir / MAC).mkdir()
+        (self.queue_dir / MAC / "machine-info.json").write_text(json.dumps({"name": "t-1", "mac": MAC}))
+
+    def lock(self, timeout):
+        return queue_store.locked_file(self.queue_dir / watcher.INFO_LOCK, self.queue_dir, timeout=timeout)
+
+    def test_two_writers_cannot_update_one_machine_record_at_once(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_update(info):
+            entered.set()
+            release.wait(5)
+            info["touched"] = True
+            return True
+
+        worker = threading.Thread(target=watcher.update_info, args=(self.queue_dir, MAC, slow_update))
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(5), "update never started")
+            with self.assertRaises(TimeoutError):
+                with self.lock(0.1):
+                    pass
+        finally:
+            release.set()
+            worker.join(5)
+
+        with self.lock(1.0):
+            pass
+        self.assertTrue(json.loads((self.queue_dir / MAC / "machine-info.json").read_text())["touched"])
+
+    def test_the_lock_is_released_when_the_update_raises(self):
+        def boom(info):
+            raise RuntimeError("inside")
+
+        with self.assertRaises(RuntimeError):
+            watcher.update_info(self.queue_dir, MAC, boom)
+
+        with self.lock(0.1):
+            pass
 
 
 if __name__ == "__main__":
