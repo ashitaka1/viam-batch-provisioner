@@ -44,6 +44,8 @@ __pycache__/
 
 # Logs (dnsmasq, watcher, nginx access log)
 logs/
+# Pre-logs/ location of the dnsmasq log
+dnsmasq.log
 
 # OS / editor
 .DS_Store
