@@ -170,6 +170,7 @@ Phase 2 service for packages + Viam + Tailscale
 - SSH public key is baked into the OS config
 - All secrets live in `config/` (gitignored)
 - The provisioner API has no authentication and listens on every interface. It accepts per-machine credentials in request bodies in cleartext, so it belongs on a trusted lab network only.
+- Anyone who can reach the file server can submit an install report. The worst a forged report does is mark a machine that is still installing as failed, so it reinstalls on its next PXE boot. Machines that have completed are not affected.
 
 ## Provisioner API
 
@@ -185,12 +186,30 @@ with `api=v1` in the TXT record.
 | `DELETE` | `/api/v1/queue/{name}` | Remove an unassigned entry and its staged credentials (409 once assigned) |
 | `GET` | `/api/v1/status` | Service health (nginx, dnsmasq, watcher), queue counts, server address |
 | `GET` | `/api/v1/events` | Server-Sent Events; send `Last-Event-ID` to replay |
+| `POST` | `/api/v1/install-reports` | Progress or failure report from a target's installer. The file server on `HTTP_PORT` forwards exactly this path, so targets never talk to the API port. |
 
 Entry status is derived from disk on every read: `queued`, `flashed` (USB),
 `assigned` (PXE client bound), `installing` (installer fetched its hostname),
-`installed` (rebooted from disk after install). Events are `machine-assigned`,
-`install-started`, `guard-installed` and `install-complete`; a `resync` event
-tells a client its cursor can no longer be served.
+`installed` (rebooted from disk after install), `failed`. Events are
+`machine-assigned`, `install-started`, `install-progress`, `install-failed`,
+`guard-installed` and `install-complete`; a `resync` event tells a client its
+cursor can no longer be served.
+
+### Failed installs
+
+The installer reports each stage it enters (`late-commands`, `identity`,
+`tooling`, `tailscale`, `done`) and, through autoinstall's `error-commands`,
+any failure. A failure marks the machine `failed` and removes its PXE guard, so
+rebooting it over the network installs again. If the machine's boot order puts
+the disk first, use the one-time boot menu to PXE.
+
+An install that goes silent is failed by the server after
+`INSTALL_TIMEOUT_MINUTES` (default 45, `0` turns it off). Any report counts as
+a sign of life, and the final `done` report exempts a machine from the
+timeout. Reports never include installer log text, since logs can echo
+commands that contain secrets. `just unguard <name>` has the same effect as a
+failure: the machine's next PXE boot starts a new install, however long from
+now it happens.
 
 ```bash
 curl -s localhost:8235/api/v1/queue | jq
@@ -211,7 +230,7 @@ The environment holds stable settings (credentials, WiFi, SSH key, timezone). Pe
 
 For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set `PXE_PROXY_SUBNET` (CIDR, e.g. `10.1.0.0/20`) in `site.env` when the provisioning network differs from that interface's own subnet.
 
-Set `API_PORT` in `site.env` to move the provisioner API off 8235.
+Set `API_PORT` in `site.env` to move the provisioner API off 8235. Set `INSTALL_TIMEOUT_MINUTES` to change how long an install may go without any sign of life before it is marked failed (default 45, `0` turns it off).
 
 ## Commands
 
@@ -236,7 +255,7 @@ Set `API_PORT` in `site.env` to move the provisioner API off 8235.
 | `just clean` | Wipe the queue and all provisioning state |
 | `just reset` | Re-use current queue (mark unassigned, clear MAC assignments and PXE guards) |
 | `just stop` | Stop all PXE services |
-| `just unguard <name-or-mac>` | Clear one machine's PXE guard and completion mark so it can re-attempt install |
+| `just unguard <name-or-mac>` | Make one machine reinstall on its next PXE boot, however long from now |
 | `just api` | Run the provisioner API alone in the foreground |
 | `just test` | Run the unit tests (prefers `.venv/bin/python3` for the contract test) |
 

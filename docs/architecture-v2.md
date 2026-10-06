@@ -154,7 +154,7 @@ event: resync
 data: {"type": "resync", "latest_id": 12}
 ```
 
-Every frame's `data` carries `id`, `type` and `timestamp` alongside the event fields, so a client decodes a single discriminated type. `install-progress` and `install-failed` are reserved for the failure-detection work in the open questions.
+Every frame's `data` carries `id`, `type` and `timestamp` alongside the event fields, so a client decodes a single discriminated type.
 
 `Last-Event-ID` supported for reconnection — clients resume without missing events. `GET /queue` returns `last_event_id` so a client takes a snapshot, then streams from it with no gap. A `resync` event means the cursor is ahead of the journal or older than the server's retained history; the client refetches `/queue` and continues from `latest_id`.
 
@@ -226,8 +226,17 @@ Implemented as:
 - `openapi/provisioner.yaml` (OpenAPI 3.0.3) is the contract. Optional fields are omitted rather than null. `ProvisionRequest` is `{name, credentials?}`; environment config is not part of the Phase 2 schema.
 - `pxe-watcher/provisioner_api.py` is a standard-library `ThreadingHTTPServer`, not FastAPI, so it runs under the daemons' system/Homebrew python with no venv. `provisioner_service.py` holds the logic; `test_contract.py` validates real responses and journal events against the spec.
 - Events travel through an append-only journal, `logs/events.jsonl`, written by the root watcher (`event_journal.py`) and tailed by the operator-owned API (`event_hub.py`). Ids come from the last line on disk under an flock. The SSE `data` object carries `id`, `type` and `timestamp` so a client decodes one discriminated type.
-- Emitted now: `machine-assigned`, `install-started` (hostname fetch), `guard-installed` (`reason`: `hostname-fetch` | `repeat-pxe`), `install-complete` (first PXE more than 60s after assignment, with `duration_seconds`). `install-progress` and `install-failed` wait on the failure-detection open question. A `resync` event tells a client its `Last-Event-ID` cannot be served; `GET /queue` returns `last_event_id` for snapshot-then-stream.
-- Queue entry status is derived from disk on each read (`queued`, `flashed`, `assigned`, `installing`, `installed`), never from the journal. `install-complete` is tracked by `completed_at` in `machine-info.json`; `just unguard` clears it. `just reset`/`clean`/`unguard` emit no events, so clients refetch `/queue` on reconnect and resync.
+- Emitted now: `machine-assigned`, `install-started` (hostname fetch), `install-progress` and `install-failed` (installer reports and the timeout, see below), `guard-installed` (`reason`: `hostname-fetch` | `repeat-pxe`), `install-complete` (first PXE more than 60s after assignment, with `duration_seconds`). A `resync` event tells a client its `Last-Event-ID` cannot be served; `GET /queue` returns `last_event_id` for snapshot-then-stream.
+- Queue entry status is derived from disk on each read (`queued`, `flashed`, `assigned`, `installing`, `installed`, `failed`), never from the journal. `install-complete` is tracked by `completed_at` in `machine-info.json`. `just reset`/`clean`/`unguard` emit no events, so clients refetch `/queue` on reconnect and resync.
+
+Install-failure detection, implemented as:
+- The installer runs `install-report.sh`, served from `http-server/scripts/`, between sections of late-commands and from autoinstall's `error-commands`. It posts `{kind, stage, name|mac, reason?}` to `POST /api/v1/install-reports`. nginx forwards that one exact path to the API, so a target needs only the address already in its config, and USB sticks already flashed keep working. The API appends the event to the journal itself, so reports work under `just serve-usb`, where no watcher runs.
+- A failure stamps `failed_at`, `failure_reason` and `failure_source` (`installer` or `timeout`) into `machine-info.json` (the queue entry for USB) and removes the GRUB guard. The next PXE sighting of a failed MAC starts a new attempt: `assigned_at` resets, the last attempt's markers clear, and `machine-assigned` is emitted again. `just unguard` flags the machine `armed` through the same path, so the retry no longer depends on the 60-second repeat-PXE window.
+- An installer failure replaces a timeout failure and is then sticky. A timeout failure is cleared by later progress or a hostname fetch, and the guard returns once the machine is past its hostname fetch.
+- A watcher thread fails an install that has shown no sign of life for `INSTALL_TIMEOUT_MINUTES` (default 45). Every report counts as life; the final `done` report exempts the machine; machines assigned before installers reported progress are never timed out; and a watcher restart gives every machine a fresh window. USB machines have no assignment time, so only their own reports can fail them.
+- The `done` stage does not complete an install. `install-complete` still means the machine PXE-booted again after installing. A machine whose boot order puts the disk first may never PXE again, so it stays `installing`; whether to complete on `done` instead is open.
+- Failure reasons never come from installer logs, because the WiFi password is embedded in a late-command and logs can echo commands. The helper sends a fixed phrase plus at most the crash exception class, restricted to a safe character set, and the server cleans and caps it again.
+- Three behaviors of Ubuntu 24.04's autoinstall are taken from its documentation and are unverified on hardware: that `error-commands` runs on a failed late-command, a package failure and a storage failure, that the network is still up when it runs, and the shape of the crash report's title line.
 - Two more LaunchDaemons, `com.viam.provisioner.api` and `com.viam.provisioner.bonjour` (`/usr/bin/dns-sd -R <host> _viam-provisioner._tcp local <port> api=v1`), both with `UserName` set to the operator. `scripts/api-service.sh` runs the same pair in foreground mode. `API_PORT` (default 8235) lives in `site.env`.
 
 ### Phase 3 — Swift shared library + macOS app (client role)
@@ -269,7 +278,7 @@ Extend to mobile with platform-specific features.
 
 ## Open Questions
 
-- **Install-failure detection.** Today the only completion signal is the installer fetching `/machines/<MAC>/hostname`; failures are silent. Options: autoinstall `error-commands` that POST a failure report to the server, stage-progress callbacks from `late-commands`, and a server-side timeout for machines that assigned but never reported. Failure notifications depend on this.
+- **Install-failure detection.** Implemented (see Phase 2). Open: validating `error-commands` on real hardware, whether the installer's final `done` report should also complete the install for machines that never PXE-boot again, and failures before the installer's config loads (DHCP, TFTP, ISO download), which only the timeout can catch, and only for PXE machines.
 - **iOS notifications vs. a credential-free server.** iOS suspends background SSE connections, so mobile failure alerts need APNs. Sending APNs requires an Apple push key held by whatever sends the push — the LAN server or a relay. Decide where that key lives and whether it weakens the "server holds no meaningful credentials" principle.
 - **Multi-client queue assignment.** With several clients queueing batches concurrently, which slot does an unrecognized PXE MAC get? Candidates: camera pre-binding required for concurrent batches, a per-server "active batch" selector, or FIFO across batches. Camera pre-binding also needs a defined fallback when an unbound MAC shows up.
 - **Viam OAuth client registration.** Sign-in is supported (the first-party mobile app uses it); still need a client ID and redirect URI registered for this app, and confirmation of which API surface creates machines and fetches part credentials with a user token.
@@ -315,3 +324,12 @@ Shared generated types with the client apps, and Swift's async/await and SwiftNI
 ### Why coexist in one repo
 
 The Swift and Python/bash codebases share netboot configs, autoinstall templates, and GRUB assets. The existing tooling works for debugging and one-off operations even after the Swift server is live. Splitting repos would duplicate assets or add submodule complexity.
+
+### Why nginx forwards installer reports to the API
+
+Targets already know one address, the file server's `host:port`, baked into the autoinstall config and, for USB, into each stick's GRUB config. Forwarding one exact path from nginx to the API keeps that the only address a target needs, and USB sticks already in the field work without reflashing. The alternatives:
+
+- **Target calls the API port directly.** No nginx change, but the API port has to be stamped into every config, the whole unauthenticated API is exposed to targets, and the host firewall may prompt for the API's listener.
+- **Report through the nginx access log.** A failure encoded in a GET URL and read by the watcher needs no new API surface. Nothing consumes the log under `just serve-usb`, the target gets no acknowledgement, and a free-text reason is awkward in a URL.
+
+The forwarded location accepts only `POST` on that path with a 16 KiB body limit, so the rest of the API (provision, queue removal, events) stays unreachable from a target. The API is reachable from the container as `host.docker.internal`, which compose maps with `host-gateway`.
