@@ -27,6 +27,12 @@ autoinstall:
 ${PACKAGES}
 
   late-commands:
+    # Progress reports for the provisioner. None of them can fail the install:
+    # the helper always exits 0 and each call ends in || true.
+    - |
+      curl -sf --max-time 5 http://${PXE_SERVER}/scripts/install-report.sh -o /tmp/install-report.sh || true
+      sh /tmp/install-report.sh ${PXE_SERVER} progress late-commands || true
+
     # Set timezone
     - curtin in-target -- timedatectl set-timezone ${TIMEZONE}
 
@@ -176,6 +182,8 @@ ${PACKAGES}
       chmod 755 /target/usr/local/bin/wifi-setup.sh
     - curtin in-target -- systemctl enable wifi-setup.service
 
+    - sh /tmp/install-report.sh ${PXE_SERVER} progress identity || true
+
     # Resolve per-machine identity. Two paths:
     #   USB mode — hostname is baked into the kernel cmdline as
     #   viam_hostname=<name>; credentials live at /machines/by-name/<name>/.
@@ -217,6 +225,8 @@ ${PACKAGES}
         echo "FAILED to resolve hostname — no viam_hostname cmdline arg and no MAC matched on server" >> $LOG
       fi
 
+    - sh /tmp/install-report.sh ${PXE_SERVER} progress tooling || true
+
     # Install Viam CLI
     - curtin in-target -- curl --compressed -fsSL -o /usr/local/bin/viam https://storage.googleapis.com/packages.viam.com/apps/viam-cli/viam-cli-stable-linux-amd64
     - chmod 755 /target/usr/local/bin/viam
@@ -242,6 +252,8 @@ ${PACKAGES}
       WantedBy=multi-user.target
       UNIT
     - curtin in-target -- systemctl enable viam-agent.service
+
+    - sh /tmp/install-report.sh ${PXE_SERVER} progress tailscale || true
 
     # Install Tailscale and set up first-boot join
     - curtin in-target -- bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'
@@ -269,3 +281,17 @@ ${PACKAGES}
       WantedBy=multi-user.target
       TSUNIT
     - curtin in-target -- systemctl enable tailscale-join.service
+
+    # Last, so a machine that reached here is never timed out as silent.
+    - sh /tmp/install-report.sh ${PXE_SERVER} progress done || true
+
+  # Runs when the install fails. The reason is a fixed phrase plus, when the
+  # installer left a crash report, its exception class. Never log text: it can
+  # echo commands that contain the WiFi password.
+  error-commands:
+    - |
+      curl -sf --max-time 5 http://${PXE_SERVER}/scripts/install-report.sh -o /tmp/install-report.sh || true
+      CLASS=$(sed -n 's/^Title:.* crashed with \([A-Za-z_.]*\).*/\1/p' /var/crash/*.crash 2>/dev/null | head -n 1)
+      REASON="autoinstall failed"
+      [ -n "$CLASS" ] && REASON="autoinstall failed: $CLASS"
+      sh /tmp/install-report.sh ${PXE_SERVER} failed auto "$REASON" || true

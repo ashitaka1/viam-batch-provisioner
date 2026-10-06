@@ -1,0 +1,28 @@
+# Rendered into conf.d/default.conf when the container starts. The image's
+# entrypoint substitutes only API_PORT (NGINX_ENVSUBST_FILTER in compose), so
+# nginx's own $variables are left alone.
+server {
+    listen 8080;
+    root /srv;
+    autoindex on;
+
+    # Container stdout for `docker logs`; the file is tailed by pxe-watcher,
+    # which writes a GRUB guard when an installer fetches its hostname.
+    access_log /dev/stdout;
+    access_log /var/log/pxe/access.log;
+
+    # Installer progress and failure reports go to the provisioner API on the
+    # host. Only this exact path and method are forwarded, so the rest of the
+    # API (provision, queue removal, events) is not reachable from targets.
+    location = /api/v1/install-reports {
+        limit_except POST { deny all; }
+        client_max_body_size 16k;
+        proxy_pass http://host.docker.internal:${API_PORT}/api/v1/install-reports;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
