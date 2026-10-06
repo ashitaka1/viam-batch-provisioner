@@ -28,9 +28,9 @@ export API_PORT HTTP_PORT INSTALL_TIMEOUT_MINUTES
 
 [[ "$API_PORT" =~ ^[0-9]+$ && "$HTTP_PORT" =~ ^[0-9]+$ ]] || {
     echo "ERROR: API_PORT/HTTP_PORT must be numbers (got '$API_PORT' / '$HTTP_PORT')" >&2
-    false
+    return 1
 }
 [[ "$INSTALL_TIMEOUT_MINUTES" =~ ^[0-9]+$ ]] || {
     echo "ERROR: INSTALL_TIMEOUT_MINUTES must be a number of minutes, 0 to turn it off (got '$INSTALL_TIMEOUT_MINUTES')" >&2
-    false
+    return 1
 }

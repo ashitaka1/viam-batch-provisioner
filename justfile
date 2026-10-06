@@ -34,7 +34,8 @@ serve:
     ./scripts/build-config.sh
     echo ""
     echo "Starting HTTP server..."
-    export API_PORT="$(./scripts/api-service.sh port)"  # nginx forwards installer reports to it
+    API_PORT="$(./scripts/api-service.sh port)"  # nginx forwards installer reports to it
+    export API_PORT
     docker compose up -d
     echo "Starting provisioner API + Bonjour..."
     ./scripts/api-service.sh start
@@ -74,7 +75,8 @@ serve-daemon:
     mkdir -p logs
     echo ""
     echo "Starting HTTP server..."
-    export API_PORT="$(./scripts/api-service.sh port)"  # nginx forwards installer reports to it
+    API_PORT="$(./scripts/api-service.sh port)"  # nginx forwards installer reports to it
+    export API_PORT
     docker compose up -d
     echo ""
     ./scripts/daemon.sh install
@@ -192,7 +194,8 @@ serve-usb:
     echo "Starting provisioner API + Bonjour..."
     ./scripts/api-service.sh start
     echo "Starting HTTP server (Ctrl-C to stop)..."
-    export API_PORT="$(./scripts/api-service.sh port)"  # nginx forwards installer reports to it
+    API_PORT="$(./scripts/api-service.sh port)"  # nginx forwards installer reports to it
+    export API_PORT
     docker compose up
 
 # Download Raspberry Pi OS Lite image
