@@ -21,6 +21,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import event_journal  # noqa: E402
 import queue_store  # noqa: E402
 import watcher  # noqa: E402
 
@@ -780,6 +781,164 @@ class RetryTest(RepoLayoutTest):
             self.assertTrue(self.guard().exists())
             self.assertEqual(self.types(), ["install-started", "guard-installed"])
             self.assertTrue(result)
+
+
+class TimeoutSweepTest(RepoLayoutTest):
+    """The sweep that fails PXE installs which have gone silent."""
+
+    TIMEOUT = timedelta(minutes=45)
+
+    def setUp(self):
+        super().setUp()
+        self.clock = T0
+        self.journal_path = self.root / "logs" / "events.jsonl"
+        self.journal = event_journal.EventJournal(self.journal_path, now=lambda: self.clock)
+        self.logs = []
+        self.tracker = self.make_tracker()
+        self.entries = []
+
+    def make_tracker(self, emit=None):
+        return watcher.PxeTracker(
+            self.queue_dir, now=lambda: self.clock, log=self.logs.append,
+            emit=emit or self.journal.emit, install_timeout=self.TIMEOUT)
+
+    def iso(self, minutes=0):
+        return (T0 + timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+    def at(self, minutes):
+        self.clock = T0 + timedelta(minutes=minutes)
+
+    def machine(self, name="t-1", mac=MAC, guard=False, **extra):
+        """An assigned PXE machine, assigned at T0 unless extra says otherwise."""
+        info = {"name": name, "mac": mac, "assigned_at": self.iso(), "attempt": 1}
+        info.update(extra)
+        (self.queue_dir / mac).mkdir(parents=True, exist_ok=True)
+        (self.queue_dir / mac / "machine-info.json").write_text(json.dumps(info))
+        self.entries.append({"name": name, "assigned": True, "mac": mac})
+        self.seed(self.entries)
+        if guard:
+            watcher.write_guard(self.queue_dir, mac)
+
+    def info(self, mac=MAC):
+        return json.loads((self.queue_dir / mac / "machine-info.json").read_text())
+
+    def events(self):
+        return [r["data"] for r in event_journal.read_all(self.journal_path)] if self.journal_path.exists() else []
+
+    def test_the_timeout_fails_only_silent_installs(self):
+        with self.subTest("one second under the timeout is not failed"):
+            self.machine()
+            self.clock = T0 + self.TIMEOUT - timedelta(seconds=1)
+            failed = self.tracker.check_timeouts()
+            self.assertNotIn("failed_at", self.info())
+            self.assertEqual(self.events(), [])
+            self.assertEqual(failed, [])
+
+        with self.subTest("well past the timeout is failed, with its guard removed so the retry installs"):
+            self.at(46)
+            watcher.write_guard(self.queue_dir, MAC)
+            failed = self.tracker.check_timeouts()
+            info = self.info()
+            self.assertEqual((info["failure_source"], info["stage"]), ("timeout", "unknown"))
+            self.assertTrue(info["failure_reason"].strip())
+            self.assertFalse(self.guard().exists())
+            (event,) = self.events()
+            self.assertEqual((event["type"], event["name"], event["mac"], event["source"]), ("install-failed", "t-1", MAC, "timeout"))
+            self.assertEqual(failed, ["t-1"])
+
+        with self.subTest("a second sweep does not announce the same failure again"):
+            self.at(60)
+            failed = self.tracker.check_timeouts()
+            self.assertEqual(len(self.events()), 1)
+            self.assertEqual(failed, [])
+
+    def test_a_live_install_is_not_timed_out_from_its_assignment_time(self):
+        self.machine(stage="tooling", progress_at=self.iso(40))
+        self.at(46)
+        failed = self.tracker.check_timeouts()
+        self.assertNotIn("failed_at", self.info())
+        self.assertEqual(self.events(), [])
+        self.assertEqual(failed, [])
+
+    def test_machines_that_are_not_installing_are_never_timed_out(self):
+        cases = {
+            "an install that reported done": {"stage": "done", "progress_at": self.iso(10)},
+            "a completed install": {"completed_at": self.iso(20)},
+            "an install already failed": {"failed_at": self.iso(5), "failure_source": "installer", "failure_reason": "x"},
+            "a machine armed for retry": {"armed": True},
+        }
+        for label, extra in cases.items():
+            with self.subTest(label):
+                self.entries.clear()
+                self.machine(**extra)
+                self.at(300)
+                before = self.info()
+                failed = self.tracker.check_timeouts()
+                self.assertEqual(self.info(), before)
+                self.assertEqual(self.events(), [])
+                self.assertEqual(failed, [])
+
+        with self.subTest("a USB machine has nothing the sweep can measure"):
+            self.entries[:] = [{"name": "u-1", "assigned": True, "flashed_via": "usb"}]
+            self.seed(self.entries)
+            failed = self.tracker.check_timeouts()
+            self.assertEqual(queue_store.read(self.queue_dir), self.entries)
+            self.assertEqual(self.events(), [])
+            self.assertEqual(failed, [])
+
+    def test_the_timeout_spares_machines_on_first_deploy_or_restart(self):
+        with self.subTest("a machine assigned before install reports existed is never timed out"):
+            self.entries.clear()
+            self.machine()
+            info = self.info()
+            del info["attempt"]
+            (self.queue_dir / MAC / "machine-info.json").write_text(json.dumps(info))
+            self.at(600)
+            failed = self.tracker.check_timeouts()
+            self.assertNotIn("failed_at", self.info())
+            self.assertEqual(failed, [])
+
+        with self.subTest("a freshly started watcher gives every machine a full window"):
+            self.entries.clear()
+            self.machine()
+            self.at(600)
+            restarted = self.make_tracker()
+            self.at(600 + 44)
+            early = restarted.check_timeouts()
+            self.assertNotIn("failed_at", self.info())
+            self.at(600 + 45)
+            late = restarted.check_timeouts()
+            self.assertIn("failed_at", self.info())
+            self.assertEqual((early, late), ([], ["t-1"]))
+
+        with self.subTest("one unreadable record does not stop the sweep"):
+            self.entries.clear()
+            self.machine(name="bad-1", mac="aa:bb:cc:dd:ee:01", assigned_at="not a time")
+            self.machine(name="t-1")
+            self.at(46)
+            failed = self.tracker.check_timeouts()
+            self.assertNotIn("failed_at", self.info("aa:bb:cc:dd:ee:01"))
+            self.assertIn("failed_at", self.info())
+            self.assertEqual(failed, ["t-1"])
+
+    def test_a_broken_event_journal_never_loses_or_repeats_a_failure(self):
+        attempts = []
+
+        def broken(event_type, data):
+            attempts.append(event_type)
+            raise OSError("journal unwritable")
+
+        self.machine()
+        tracker = self.make_tracker(emit=broken)
+        self.at(46)
+
+        first = tracker.check_timeouts()
+        recorded = self.info()
+        second = tracker.check_timeouts()
+
+        self.assertIn("failed_at", recorded)
+        self.assertEqual(attempts, ["install-failed"], "the second sweep must not try to emit again")
+        self.assertEqual((first, second), (["t-1"], []))
 
 
 class InfoLockTest(RepoLayoutTest):

@@ -362,11 +362,18 @@ class PxeTracker:
     NO_SLOT_LOG_INTERVAL = timedelta(minutes=5)
 
     def __init__(self, queue_dir: Path, *, now: Optional[Callable[[], datetime]] = None, log: Callable[..., None] = print,
-                 emit: Optional[Callable[[str, dict], None]] = None):
+                 emit: Optional[Callable[[str, dict], None]] = None, install_timeout: Optional[timedelta] = None):
         self.queue_dir = queue_dir.resolve()
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.log = log
         self.emit = emit or (lambda _type, _data: None)
+        # How long an install may go without any sign of life before it is
+        # failed; None turns the sweep off.
+        self.install_timeout = install_timeout
+        # No install is failed before one full timeout has passed since the
+        # watcher started, so a restart (or a host that was off) never fails
+        # machines that simply weren't being watched.
+        self.started_at = self.now()
         # Only throttles the "no slot" log line; carries no assignment state.
         self._no_slot_logged: dict[str, datetime] = {}
 
@@ -432,6 +439,51 @@ class PxeTracker:
                 self.log(f"[{self._stamp()}] Install complete: {info['name']} ({mac}) rebooted after {int(elapsed.total_seconds())}s")
                 self._emit("install-complete", info, duration_seconds=elapsed.total_seconds())
         return "guard" if wrote else "guard-exists"
+
+    def check_timeouts(self) -> list:
+        """Fail PXE installs that have shown no sign of life for the install
+        timeout. Returns the names it failed.
+
+        A machine counts as alive from its assignment or last progress report,
+        whichever is later. Machines assigned before installers reported
+        progress (no `attempt`), finished or already failed installs, ones
+        that reported `done`, and ones armed for retry are left alone. USB
+        machines have no assignment time to measure from, so only their own
+        reports can fail them.
+        """
+        if not self.install_timeout:
+            return []
+        now = self.now()
+        try:
+            entries = queue_store.read(self.queue_dir)
+        except (OSError, json.JSONDecodeError):
+            return []
+        minutes = int(self.install_timeout.total_seconds() // 60)
+        failed = []
+        for raw in entries:
+            mac = raw.get("mac")
+            if not (raw.get("assigned") and mac):
+                continue
+            try:
+                info = read_info(self.queue_dir, mac)
+                if info is None or "attempt" not in info:
+                    continue
+                if info.get("completed_at") or info.get("failed_at") or info.get("armed") or info.get("stage") == "done":
+                    continue
+                activity = last_activity(info)
+                if activity is None or now - max(activity, self.started_at) < self.install_timeout:
+                    continue
+                result = apply_failure(
+                    self.queue_dir, name=raw["name"], mac=mac, stage=info.get("stage") or "unknown",
+                    reason=f"no installer activity for {minutes} minutes", source="timeout", now=now,
+                    emit=self.emit, log=self.log, stale_before=now - self.install_timeout)
+            except Exception as e:  # one bad record must not stop the sweep
+                self.log(f"[{self._stamp()}] WARNING: timeout check skipped {raw.get('name')}: {e}")
+                continue
+            if result == "recorded":
+                self.log(f"[{self._stamp()}] Install timed out: {raw['name']} ({mac}) silent for {minutes} minutes")
+                failed.append(raw["name"])
+        return failed
 
     def _rearm(self, mac: str, current: datetime) -> str:
         """Start a new attempt: drop the guard, clear the last attempt's record,
@@ -599,12 +651,24 @@ def feed_packets(stream, handle_packet: Callable[[list[str]], None]) -> None:
         handle_packet(current)
 
 
+TIMEOUT_SWEEP_INTERVAL = 30.0
+
+
+def run_timeout_checks(tracker: PxeTracker, stop_event: threading.Event, interval: float = TIMEOUT_SWEEP_INTERVAL) -> None:
+    """Sweep for silent installs until stop_event is set. A failed sweep is logged, never fatal."""
+    while not stop_event.wait(interval):
+        try:
+            tracker.check_timeouts()
+        except Exception as e:
+            tracker.log(f"WARNING: timeout check failed: {e}")
+
+
 def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: Optional[str] = None,
-          events_log: Optional[Path] = None):
+          events_log: Optional[Path] = None, install_timeout: Optional[timedelta] = None):
     """Sniff DHCP Discover packets via tcpdump (or replay a capture) and assign names."""
     queue_dir = queue_dir.resolve()
     emit = event_journal.EventJournal(events_log, owner_ref=queue_dir).emit if events_log else None
-    tracker = PxeTracker(queue_dir, emit=emit)
+    tracker = PxeTracker(queue_dir, emit=emit, install_timeout=install_timeout)
 
     try:
         unassigned, total = queue_store.summary(queue_dir)
@@ -615,6 +679,10 @@ def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: O
     print(f"  Queue directory: {queue_dir}")
     print(f"  Access log:      {access_log}")
     print(f"  Events log:      {events_log or '(disabled)'}")
+    if install_timeout and replay is None:
+        print(f"  Install timeout: {int(install_timeout.total_seconds() // 60)} minutes without installer activity")
+    else:
+        print("  Install timeout: (disabled)")
     print(f"  Machines waiting: {unassigned} of {total}")
     if unassigned == 0:
         print("  No machines queued — run `just provision` to add some.")
@@ -627,6 +695,15 @@ def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: O
 
     tailer = LogTailer(access_log, on_log_line)
     tailer.start()
+
+    sweep_stop = threading.Event()
+
+    def stop_threads() -> None:
+        tailer.stop()
+        sweep_stop.set()
+
+    if install_timeout and replay is None:
+        threading.Thread(target=run_timeout_checks, args=(tracker, sweep_stop), name="timeout-sweep", daemon=True).start()
 
     mac_pattern = re.compile(r"Request from ([0-9a-f:]{17})", re.IGNORECASE)
 
@@ -642,7 +719,7 @@ def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: O
     if replay is not None:
         stream = sys.stdin if replay == "-" else open(replay)
         feed_packets(stream, handle_packet)
-        tailer.stop()
+        stop_threads()
         print_summary(queue_dir)
         return
 
@@ -652,7 +729,7 @@ def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: O
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def shutdown(signum, frame):
-        tailer.stop()
+        stop_threads()
         proc.terminate()
         print("\n")
         print_summary(queue_dir)
@@ -664,7 +741,7 @@ def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: O
     feed_packets(proc.stdout, handle_packet)
     rc = proc.wait()
     err = proc.stderr.read().strip()
-    tailer.stop()
+    stop_threads()
     print(f"tcpdump exited rc={rc}{': ' + err if err else ''}", file=sys.stderr)
     sys.exit(1)
 
@@ -700,6 +777,8 @@ def main():
                         help="JSONL journal of lifecycle events read by the API (default: ../logs/events.jsonl)")
     parser.add_argument("--replay", metavar="FILE",
                         help="Read tcpdump -v output from FILE (or - for stdin) instead of sniffing; no root needed")
+    parser.add_argument("--install-timeout-minutes", type=int, default=45, metavar="N",
+                        help="Fail an install with no installer activity for N minutes; 0 turns the timeout off (default: 45)")
     parser.add_argument("--rearm", metavar="MAC",
                         help="Make a machine reinstall on its next PXE boot, then exit; no root needed")
     args = parser.parse_args()
@@ -730,7 +809,8 @@ def main():
         print("ERROR: Could not detect default network interface.", file=sys.stderr)
         print("  Specify one with --interface", file=sys.stderr)
         sys.exit(1)
-    watch(interface, args.queue_dir, args.access_log, events_log=args.events_log)
+    install_timeout = timedelta(minutes=args.install_timeout_minutes) if args.install_timeout_minutes > 0 else None
+    watch(interface, args.queue_dir, args.access_log, events_log=args.events_log, install_timeout=install_timeout)
 
 
 if __name__ == "__main__":

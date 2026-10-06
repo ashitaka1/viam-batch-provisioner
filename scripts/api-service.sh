@@ -7,6 +7,7 @@
 # Usage:
 #   scripts/api-service.sh start | stop | status
 #   scripts/api-service.sh port        # print the configured API port
+#   scripts/api-service.sh install-timeout   # print the install timeout in minutes
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,7 +18,7 @@ BONJOUR_PID="${LOG_DIR}/bonjour.pid"
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 # shellcheck source=lib/site-env.sh
-source "${REPO_ROOT}/scripts/lib/site-env.sh" || die "bad port setting in config/site.env"
+source "${REPO_ROOT}/scripts/lib/site-env.sh" || die "bad setting in config/site.env"
 
 responding() {
     curl -fsS --max-time 2 "http://localhost:${API_PORT}/api/v1/status" >/dev/null 2>&1
@@ -93,5 +94,6 @@ case "${1:-}" in
     status) cmd_status ;;
     port)   echo "$API_PORT" ;;
     http-port) echo "$HTTP_PORT" ;;
-    *) echo "Usage: $0 start | stop | status | port | http-port" >&2; exit 1 ;;
+    install-timeout) echo "$INSTALL_TIMEOUT_MINUTES" ;;
+    *) echo "Usage: $0 start | stop | status | port | http-port | install-timeout" >&2; exit 1 ;;
 esac

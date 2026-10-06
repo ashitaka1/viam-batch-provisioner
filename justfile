@@ -45,7 +45,7 @@ serve:
     sudo dnsmasq {{dnsmasq_args}} --dhcp-range="$DHCP_RANGE"
     echo "Starting PXE watcher (Ctrl-C to stop all; HTTP requests: just logs)..."
     echo ""
-    sudo "$(command -v python3)" {{justfile_directory()}}/pxe-watcher/watcher.py
+    sudo "$(command -v python3)" {{justfile_directory()}}/pxe-watcher/watcher.py --install-timeout-minutes "$(./scripts/api-service.sh install-timeout)"
 
 # Stop all PXE services
 stop:
@@ -115,7 +115,7 @@ test:
 
 # Start PXE watcher only (assigns names to MACs as machines boot)
 watch:
-    sudo "$(command -v python3)" pxe-watcher/watcher.py
+    sudo "$(command -v python3)" pxe-watcher/watcher.py --install-timeout-minutes "$(./scripts/api-service.sh install-timeout)"
 
 # Start the provisioner REST/SSE API only (foreground, as the operator)
 api:

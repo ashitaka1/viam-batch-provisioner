@@ -14,6 +14,8 @@
         <string>@REPO@/http-server/machines</string>
         <string>--access-log</string>
         <string>@REPO@/logs/access.log</string>
+        <string>--install-timeout-minutes</string>
+        <string>@INSTALL_TIMEOUT_MINUTES@</string>
     </array>
     <key>WorkingDirectory</key>
     <string>@REPO@</string>

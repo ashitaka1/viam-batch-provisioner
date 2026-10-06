@@ -1,7 +1,7 @@
 # Settings from config/site.env for scripts that must not `source` it.
 # Expects REPO_ROOT. Defines read_setting, server_name, pid_alive and
-# exports API_PORT and HTTP_PORT with their defaults. Returns non-zero if a
-# port setting is not a number.
+# exports API_PORT, HTTP_PORT and INSTALL_TIMEOUT_MINUTES with their defaults.
+# Returns non-zero if one of them is not a number.
 
 SITE_CONFIG="${SITE_CONFIG:-${REPO_ROOT}/config/site.env}"
 
@@ -22,9 +22,15 @@ API_PORT="${API_PORT:-$(read_setting API_PORT)}"
 API_PORT="${API_PORT:-8235}"
 HTTP_PORT="${HTTP_PORT:-$(read_setting HTTP_PORT)}"
 HTTP_PORT="${HTTP_PORT:-8234}"
-export API_PORT HTTP_PORT
+INSTALL_TIMEOUT_MINUTES="${INSTALL_TIMEOUT_MINUTES:-$(read_setting INSTALL_TIMEOUT_MINUTES)}"
+INSTALL_TIMEOUT_MINUTES="${INSTALL_TIMEOUT_MINUTES:-45}"
+export API_PORT HTTP_PORT INSTALL_TIMEOUT_MINUTES
 
 [[ "$API_PORT" =~ ^[0-9]+$ && "$HTTP_PORT" =~ ^[0-9]+$ ]] || {
     echo "ERROR: API_PORT/HTTP_PORT must be numbers (got '$API_PORT' / '$HTTP_PORT')" >&2
+    false
+}
+[[ "$INSTALL_TIMEOUT_MINUTES" =~ ^[0-9]+$ ]] || {
+    echo "ERROR: INSTALL_TIMEOUT_MINUTES must be a number of minutes, 0 to turn it off (got '$INSTALL_TIMEOUT_MINUTES')" >&2
     false
 }

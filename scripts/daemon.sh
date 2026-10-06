@@ -24,7 +24,7 @@ LABELS=(com.viam.provisioner.dnsmasq com.viam.provisioner.watcher com.viam.provi
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 # shellcheck source=lib/site-env.sh
-source "${REPO_ROOT}/scripts/lib/site-env.sh" || die "bad port setting in config/site.env"
+source "${REPO_ROOT}/scripts/lib/site-env.sh" || die "bad setting in config/site.env"
 
 installed() {
     [[ -f "${DAEMON_DIR}/com.viam.provisioner.watcher.plist" ]]
@@ -53,6 +53,7 @@ render() {
         -e "s|@USER@|${OPERATOR}|g" \
         -e "s|@API_PORT@|${API_PORT}|g" \
         -e "s|@HTTP_PORT@|${HTTP_PORT}|g" \
+        -e "s|@INSTALL_TIMEOUT_MINUTES@|${INSTALL_TIMEOUT_MINUTES}|g" \
         -e "s|@SERVER_NAME@|${SERVER_NAME}|g" \
         "${TEMPLATE_DIR}/${label}.plist.tpl" > "${RENDER_DIR}/${label}.plist"
 }
