@@ -16,8 +16,13 @@
 # else by each ethernet NIC's MAC address in turn until the server accepts one
 # (PXE). Only the NIC the server assigned answers 200.
 #
-# REPORT_STATE_DIR, REPORT_CMDLINE and REPORT_SYS_NET point the script at
-# fixtures in tests.
+# `done` and failure reports are tried up to three times when the server can't
+# be reached or errors: `done` is what keeps a finished install from being
+# timed out, and a failure is the report that matters most. A 4xx answer is
+# the server saying no, so it is never retried.
+#
+# REPORT_STATE_DIR, REPORT_CMDLINE, REPORT_SYS_NET and REPORT_RETRY_DELAY point
+# the script at fixtures in tests.
 
 SERVER="$1"
 KIND="$2"
@@ -26,6 +31,7 @@ REASON="$4"
 STATE_DIR="${REPORT_STATE_DIR:-/tmp}"
 CMDLINE="${REPORT_CMDLINE:-/proc/cmdline}"
 SYS_NET="${REPORT_SYS_NET:-/sys/class/net}"
+RETRY_DELAY="${REPORT_RETRY_DELAY:-2}"
 MARKER="$STATE_DIR/viam-install-stage"
 
 [ -n "$SERVER" ] || exit 0
@@ -53,6 +59,11 @@ command -v curl >/dev/null 2>&1 || exit 0
 
 REASON=$(printf '%s' "$REASON" | tr -c 'A-Za-z0-9 ._:/=,()-' ' ' | cut -c1-400)
 
+ATTEMPTS=1
+if [ "$KIND" = failed ] || [ "$STAGE" = done ]; then
+    ATTEMPTS=3
+fi
+
 # post <name|mac> <value>: true when the server accepted the report.
 post() {
     body="{\"kind\":\"$KIND\",\"stage\":\"$STAGE\",\"$1\":\"$2\""
@@ -60,12 +71,22 @@ post() {
         body="$body,\"reason\":\"$REASON\""
     fi
     body="$body}"
-    curl -sf --connect-timeout 3 --max-time 5 \
-        -H 'Content-Type: application/json' -d "$body" \
-        "http://$SERVER/api/v1/install-reports" >/dev/null 2>&1
+    tries=0
+    while [ "$tries" -lt "$ATTEMPTS" ]; do
+        code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 --max-time 5 \
+            -H 'Content-Type: application/json' -d "$body" \
+            "http://$SERVER/api/v1/install-reports" 2>/dev/null)
+        case "$code" in
+            2??) return 0 ;;
+            4??) return 1 ;;
+        esac
+        tries=$((tries + 1))
+        [ "$tries" -lt "$ATTEMPTS" ] && sleep "$RETRY_DELAY"
+    done
+    return 1
 }
 
-NAME=$(tr ' ' '\n' < "$CMDLINE" 2>/dev/null | sed -n 's/^viam_hostname=//p' | head -n 1 | tr -cd 'a-z0-9-')
+NAME=$(tr ' ' '\n' < "$CMDLINE" 2>/dev/null | sed -n 's/^viam_hostname=//p' | head -n 1 | tr -cd 'A-Za-z0-9._-')
 if [ -n "$NAME" ]; then
     post name "$NAME"
 else

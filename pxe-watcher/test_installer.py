@@ -28,18 +28,26 @@ except ImportError:
     HAVE_YAML = False
 
 STUB_CURL = """#!/bin/sh
-# Records the JSON body of each call. Fails every call when STUB_EXIT is set,
-# and any call whose body contains STUB_FAIL_FOR.
+# Stands in for curl: records each call's JSON body and prints the HTTP status
+# curl would print for -w '%{http_code}'.
+#   STUB_EXIT        the connection fails: print 000 and exit with this code
+#   STUB_FAIL_FIRST  answer 502 to the first N calls
+#   STUB_FAIL_FOR    answer 404 to calls whose body contains this text
 body=""
 while [ $# -gt 0 ]; do
     if [ "$1" = "-d" ]; then body="$2"; shift; fi
     shift
 done
 printf '%s\\n' "$body" >> "$STUB_DIR/bodies"
-if [ -n "$STUB_EXIT" ]; then exit "$STUB_EXIT"; fi
-if [ -n "$STUB_FAIL_FOR" ]; then
-    case "$body" in *"$STUB_FAIL_FOR"*) exit 22 ;; esac
+if [ -n "$STUB_EXIT" ]; then printf 000; exit "$STUB_EXIT"; fi
+if [ -n "$STUB_FAIL_FIRST" ]; then
+    calls=$(wc -l < "$STUB_DIR/bodies" | tr -d ' ')
+    if [ "$calls" -le "$STUB_FAIL_FIRST" ]; then printf 502; exit 0; fi
 fi
+if [ -n "$STUB_FAIL_FOR" ]; then
+    case "$body" in *"$STUB_FAIL_FOR"*) printf 404; exit 0 ;; esac
+fi
+printf 200
 exit 0
 """
 
@@ -75,6 +83,7 @@ class InstallReportScriptTest(unittest.TestCase):
             "REPORT_STATE_DIR": str(self.state),
             "REPORT_CMDLINE": str(self.cmdline),
             "REPORT_SYS_NET": str(self.net),
+            "REPORT_RETRY_DELAY": "0",
         }
         environment.update(env)
         return subprocess.run(["/bin/sh", str(SCRIPT), "10.1.0.5:8234", *args],
@@ -94,13 +103,14 @@ class InstallReportScriptTest(unittest.TestCase):
             self.assertFalse(pwned.exists())
             self.assertEqual((body["kind"], body["stage"], body["name"]), ("failed", "tooling", "lab-7"))
             self.assertIn("hi", body["reason"])
+            self.assertIsNotNone(SAFE_REASON.fullmatch(body["reason"]), f"unsafe characters in {body['reason']!r}")
             self.assertEqual(result.returncode, 0)
 
         (self.tmp / "bodies").unlink()
         with self.subTest("nothing outside the safe character set reaches the body, and the length is capped"):
             result = self.run_script("failed", "tooling", "x" * 1000 + "\té☃ " + "y" * 50)
             (body,) = self.bodies()
-            self.assertRegex(body["reason"], SAFE_REASON)
+            self.assertIsNotNone(SAFE_REASON.fullmatch(body["reason"]), f"unsafe characters in {body['reason']!r}")
             self.assertLessEqual(len(body["reason"]), 400)
             self.assertEqual(result.returncode, 0)
 
@@ -136,13 +146,34 @@ class InstallReportScriptTest(unittest.TestCase):
             self.assertGreaterEqual(len(self.bodies()), 1)
             self.assertEqual(result.returncode, 0)
 
-        with self.subTest("a missing curl does not fail the script"):
-            tools = self.tmp / "tools"
-            tools.mkdir()
-            for tool in ("tr", "sed", "cut", "head", "cat"):
-                (tools / tool).symlink_to(shutil.which(tool))
-            result = self.run_script("progress", "identity", path=str(tools))
+    def test_a_name_with_uppercase_dots_or_underscores_is_reported_as_it_is(self):
+        self.cmdline.write_text("ip=dhcp viam_hostname=Lab_7.x ---\n")
+        self.run_script("progress", "identity")
+        (body,) = self.bodies()
+        self.assertEqual(body["name"], "Lab_7.x")
+
+    def test_the_final_reports_survive_a_briefly_unavailable_server_but_a_refusal_is_final(self):
+        self.cmdline.write_text("ip=dhcp viam_hostname=lab-7 ---\n")
+
+        with self.subTest("done is retried until the server answers, so a good install is not timed out"):
+            result = self.run_script("progress", "done", STUB_FAIL_FIRST="2")
+            self.assertEqual(len(self.bodies()), 3)
             self.assertEqual(result.returncode, 0)
+
+        (self.tmp / "bodies").unlink()
+        with self.subTest("a failure report is retried too"):
+            self.run_script("failed", "tooling", "boom", STUB_FAIL_FIRST="1")
+            self.assertEqual(len(self.bodies()), 2)
+
+        (self.tmp / "bodies").unlink()
+        with self.subTest("an ordinary progress report is sent once"):
+            self.run_script("progress", "tooling", STUB_FAIL_FIRST="1")
+            self.assertEqual(len(self.bodies()), 1)
+
+        (self.tmp / "bodies").unlink()
+        with self.subTest("a refusal from the server is not retried"):
+            self.run_script("failed", "tooling", "boom", STUB_FAIL_FOR="lab-7")
+            self.assertEqual(len(self.bodies()), 1)
 
     def test_the_stage_survives_a_failed_report_and_fills_in_auto(self):
         self.cmdline.write_text("ip=dhcp viam_hostname=lab-7 ---\n")
