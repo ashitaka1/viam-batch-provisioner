@@ -103,6 +103,7 @@ class PxeTrackerTest(RepoLayoutTest):
         self.assertFalse(self.guard().exists())
         self.assertEqual(result, "retry")
 
+        watcher.apply_progress(self.queue_dir, name="t-1", mac=MAC, stage="done", now=self.clock, emit=None)
         self.advance(61)
         result = self.tracker.on_pxe(MAC)
         self.assertEqual(self.guard().read_text(), "exit\n")
@@ -419,9 +420,10 @@ class EmitTest(RepoLayoutTest):
         self.assertEqual(self.tracker.on_pxe(MAC), "guard-exists")
         self.assertEqual(len(self.events), 1, self.events)
 
-    def test_repeat_pxe_without_prior_guard_emits_guard_and_complete(self):
+    def test_repeat_pxe_after_progress_but_no_hostname_fetch_emits_guard_and_complete(self):
         self.seed([{"name": "t-1", "assigned": False}])
         self.tracker.on_pxe(MAC)
+        watcher.apply_progress(self.queue_dir, name="t-1", mac=MAC, stage="tooling", now=self.clock, emit=None)
         self.events.clear()
 
         self.advance(61)
@@ -770,6 +772,7 @@ class RetryTest(RepoLayoutTest):
         self.break_install("failed")
         self.advance(600)
         self.tracker.on_pxe(MAC)  # the reboot that starts the new attempt
+        watcher.apply_progress(self.queue_dir, name="t-1", mac=MAC, stage="tooling", now=self.clock, emit=None)
         self.events.clear()
         self.advance(661)
 
@@ -808,6 +811,57 @@ class RetryTest(RepoLayoutTest):
             self.assertEqual(self.types(), ["install-started", "guard-installed"])
             self.assertTrue(result)
 
+
+    def test_a_machine_that_boots_again_before_the_installer_ran_is_retried_not_completed(self):
+        # Secure Boot rejecting GRUB, say: the machine falls through to its old
+        # disk, and someone network-boots it again after fixing the BIOS.
+        self.seed([{"name": "t-1", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        self.events.clear()
+        self.advance(300)
+
+        result = self.tracker.on_pxe(MAC)
+
+        info = self.info()
+        self.assertEqual((info["attempt"], info["assigned_at"]), (2, self.iso(300)))
+        for key in self.RETRY_KEYS:
+            self.assertNotIn(key, info)
+        self.assertFalse(self.guard().exists())
+        self.assertEqual(self.types(), ["install-failed", "machine-assigned"])
+        failed = self.events[0][1]
+        self.assertEqual((failed["stage"], failed["source"]), ("installer", "reboot"))
+        self.assertEqual(result, "rearmed")
+
+    def test_a_reboot_after_installer_activity_still_completes(self):
+        def progress():
+            watcher.apply_progress(self.queue_dir, name="t-1", mac=MAC, stage="tooling", now=self.clock, emit=None)
+
+        def legacy():
+            info = self.info()
+            del info["attempt"]
+            (self.queue_dir / MAC / "machine-info.json").write_text(json.dumps(info))
+
+        cases = {
+            "a progress report, though the hostname fetch was missed": progress,
+            "a hostname fetch, though every progress report was lost": lambda: self.tracker.on_hostname_fetch(MAC),
+            "a machine assigned before installers reported keeps the old rule": legacy,
+        }
+        for label, activity in cases.items():
+            with self.subTest(label):
+                self.forget()
+                self.seed([{"name": "t-1", "assigned": False}])
+                self.tracker.on_pxe(MAC)
+                activity()
+                self.events.clear()
+                self.advance(300)
+
+                result = self.tracker.on_pxe(MAC)
+
+                self.assertEqual(self.info()["completed_at"], self.iso(300))
+                self.assertTrue(self.guard().exists())
+                self.assertIn("install-complete", self.types())
+                self.assertNotIn("install-failed", self.types())
+                self.assertIn(result, ("guard", "guard-exists"))
 
     # A report from the API can land between the watcher's check and its write.
 

@@ -205,6 +205,11 @@ machine's boot order puts the disk first, use the one-time boot menu to PXE. A
 USB-flashed machine has no PXE boot to restart it, so a progress report after
 its failure means the stick was booted again and clears the failure.
 
+A boot that never reaches the installer, for example because Secure Boot
+rejected GRUB and the machine fell through to its old disk, is caught when you
+network-boot the machine again: the server records the failure and starts a
+fresh install instead of treating the reboot as a finished one.
+
 An install that goes silent is failed by the server after
 `INSTALL_TIMEOUT_MINUTES` (default 45, `0` turns it off). Any report counts as
 a sign of life, and the final `done` report exempts a machine from the

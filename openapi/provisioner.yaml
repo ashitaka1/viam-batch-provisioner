@@ -594,7 +594,12 @@ components:
 
     InstallFailed:
       type: object
-      description: The installer reported a failure, or the server saw no activity for the install timeout. An installer failure replaces an earlier timeout failure and is announced again.
+      description: |
+        The installer reported a failure (`source: installer`), the server saw no
+        activity for the install timeout (`timeout`), or the machine network-booted
+        again before its installer reported anything (`reboot`; a new attempt
+        starts at once, so a `machine-assigned` follows). An installer failure
+        replaces an earlier timeout failure and is announced again.
       required: [id, type, timestamp, name, stage, reason, source]
       additionalProperties: false
       properties:
@@ -608,7 +613,7 @@ components:
           description: Absent for USB-flashed machines.
         stage: {$ref: '#/components/schemas/InstallStage'}
         reason: {type: string, maxLength: 500}
-        source: {type: string, enum: [installer, timeout]}
+        source: {type: string, enum: [installer, timeout, reboot]}
 
     InstallComplete:
       type: object

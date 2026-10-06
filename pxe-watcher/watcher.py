@@ -414,6 +414,12 @@ class PxeTracker:
         elapsed = current - first
         if elapsed < REPEAT_PXE_THRESHOLD:
             return "retry"
+        # Past the window with no sign the installer ever ran: the boot failed
+        # (Secure Boot rejected GRUB, the ISO download died) and the machine
+        # is being network-booted again. Machines assigned before installers
+        # reported (no `attempt`) keep the rule below.
+        if info is not None and "attempt" in info and not self._installer_seen(mac, info):
+            return self._boot_failed(mac, info, current)
         wrote = write_guard(self.queue_dir, mac)
         if wrote:
             self.log(f"[{self._stamp()}] Repeat PXE: MAC {mac} ({int(elapsed.total_seconds())}s after first) → GRUB guard installed")
@@ -484,6 +490,20 @@ class PxeTracker:
                 self.log(f"[{self._stamp()}] Install timed out: {raw['name']} ({mac}) silent for {minutes} minutes")
                 failed.append(raw["name"])
         return failed
+
+    def _installer_seen(self, mac: str, info: dict) -> bool:
+        """Whether this attempt's installer showed any sign of running: a
+        progress report, or the hostname fetch that writes the guard."""
+        return "stage" in info or "progress_at" in info or (_guard_dir(self.queue_dir) / f"{mac}.cfg").exists()
+
+    def _boot_failed(self, mac: str, info: dict, current: datetime) -> str:
+        """Record a boot that never reached the installer, then start a new attempt."""
+        apply_failure(
+            self.queue_dir, name=info["name"], mac=mac, stage="installer",
+            reason="network-booted again before the installer reported anything", source="reboot",
+            now=current, emit=self.emit, log=self.log)
+        self.log(f"[{self._stamp()}] Boot failed: {info['name']} ({mac}) booted again before the installer ran")
+        return self._rearm(mac, current)
 
     def _rearm(self, mac: str, current: datetime) -> str:
         """Start a new attempt: drop the guard, clear the last attempt's record,

@@ -157,6 +157,27 @@ class SchemaValidationTest(unittest.TestCase):
             with self.subTest(event=record["type"], mac=record["data"].get("mac")):
                 self.validate(record["data"], "MachineEvent")
 
+    def test_a_failed_boot_validates_against_spec(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            queue_dir = root / "http-server" / "machines"
+            queue_dir.mkdir(parents=True)
+            (root / "logs").mkdir()
+            (queue_dir / "queue.json").write_text(json.dumps([{"name": "e-1", "assigned": False}]))
+            journal = event_journal.EventJournal(root / "logs" / "events.jsonl", now=lambda: T0)
+            clock = {"now": T0}
+            tracker = watcher.PxeTracker(queue_dir, now=lambda: clock["now"], log=lambda *_: None, emit=journal.emit)
+
+            tracker.on_pxe(MAC)
+            clock["now"] = T0 + timedelta(minutes=5)
+            tracker.on_pxe(MAC)  # booted again before the installer ever reported
+
+            records = [event_journal.parse_line(l) for l in (root / "logs" / "events.jsonl").read_text().splitlines()]
+            self.assertEqual([r["type"] for r in records], ["machine-assigned", "install-failed", "machine-assigned"])
+            for record in records:
+                with self.subTest(type=record["type"]):
+                    self.validate(record["data"], "MachineEvent")
+
     def test_events_validate_against_spec(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
