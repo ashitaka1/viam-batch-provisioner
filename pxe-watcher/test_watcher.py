@@ -273,6 +273,31 @@ class LogTailerTest(unittest.TestCase):
         self.expect(["partx", "tail-no-newline"])
 
 
+class LogTailerSurvivalTest(unittest.TestCase):
+    def test_a_failing_callback_does_not_end_the_tailer(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "access.log"
+            path.write_text("")
+            received = []
+
+            def flaky(line):
+                if line == "bad":
+                    raise RuntimeError("callback failed")
+                received.append(line)
+
+            tailer = watcher.LogTailer(path, flaky, poll=0.02)
+            tailer.start()
+            try:
+                self.assertTrue(tailer.ready.wait(5))
+                with open(path, "a") as f:
+                    f.write("bad\ngood\n")
+                ok = wait_until(lambda: received == ["good"])
+                self.assertTrue(ok, f"expected ['good'], received {received!r}")
+            finally:
+                tailer.stop()
+                tailer.join(timeout=5)
+
+
 class LogTailerFlagsTest(unittest.TestCase):
     def setUp(self):
         self._tmp = TemporaryDirectory()
@@ -554,9 +579,10 @@ class FailureStateTest(RepoLayoutTest):
         # From here on the failure is the installer's, so late progress is ignored.
         before = self.info()
         self.events.clear()
-        self.assertEqual(self.progress("done"), "ignored")
+        late = self.progress("done")
         self.assertEqual(self.info(), before)
         self.assertEqual(self.events, [])
+        self.assertEqual(late, "ignored")
 
     def test_late_progress_after_a_failure(self):
         with self.subTest("an installer failure ignores late progress completely"):
@@ -783,6 +809,54 @@ class RetryTest(RepoLayoutTest):
             self.assertTrue(result)
 
 
+    # A report from the API can land between the watcher's check and its write.
+
+    def landing_first(self, report):
+        """update_info that first lets `report` happen, as if the API got there first."""
+        real_update = watcher.update_info
+        fired = []
+
+        def update(*args, **kwargs):
+            if not fired:
+                fired.append(True)
+                report()
+            return real_update(*args, **kwargs)
+
+        return update
+
+    def test_a_completion_never_overwrites_a_failure_that_lands_first(self):
+        self.installing()
+        self.advance(300)
+        self.events.clear()
+
+        with mock.patch.object(watcher, "update_info", self.landing_first(self.report_failure)):
+            result = self.tracker.on_pxe(MAC)
+
+        info = self.info()
+        self.assertIn("failed_at", info)
+        self.assertNotIn("completed_at", info)
+        self.assertNotIn("install-complete", self.types())
+        self.assertEqual(result, "guard-exists")
+
+    def test_a_hostname_fetch_never_erases_an_installer_failure_that_lands_first(self):
+        self.installing()
+        self.advance(300)
+        self.report_failure(source="timeout")
+
+        def installer_report():
+            watcher.apply_failure(
+                self.queue_dir, name="t-1", mac=MAC, stage="identity", reason="real error", source="installer",
+                now=self.clock, emit=None, log=lambda *_: None)
+
+        with mock.patch.object(watcher, "update_info", self.landing_first(installer_report)):
+            result = self.tracker.on_hostname_fetch(MAC)
+
+        info = self.info()
+        self.assertEqual((info["failure_source"], info["failure_reason"]), ("installer", "real error"))
+        self.assertFalse(self.guard().exists())
+        self.assertFalse(result)
+
+
 class TimeoutSweepTest(RepoLayoutTest):
     """The sweep that fails PXE installs which have gone silent."""
 
@@ -852,6 +926,16 @@ class TimeoutSweepTest(RepoLayoutTest):
             self.assertEqual(len(self.events()), 1)
             self.assertEqual(failed, [])
 
+    def test_a_timeout_failure_names_the_stage_the_installer_was_in(self):
+        self.machine(stage="tooling", progress_at=self.iso(10))
+        self.at(60)
+
+        self.tracker.check_timeouts()
+
+        (event,) = self.events()
+        self.assertEqual(self.info()["stage"], "tooling")
+        self.assertEqual(event["stage"], "tooling")
+
     def test_a_live_install_is_not_timed_out_from_its_assignment_time(self):
         self.machine(stage="tooling", progress_at=self.iso(40))
         self.at(46)
@@ -906,7 +990,7 @@ class TimeoutSweepTest(RepoLayoutTest):
             self.at(600 + 44)
             early = restarted.check_timeouts()
             self.assertNotIn("failed_at", self.info())
-            self.at(600 + 45)
+            self.at(600 + 46)
             late = restarted.check_timeouts()
             self.assertIn("failed_at", self.info())
             self.assertEqual((early, late), ([], ["t-1"]))
@@ -975,6 +1059,31 @@ class InfoLockTest(RepoLayoutTest):
         with self.lock(1.0):
             pass
         self.assertTrue(json.loads((self.queue_dir / MAC / "machine-info.json").read_text())["touched"])
+
+    def test_the_lock_is_held_until_the_new_record_is_written(self):
+        in_write, release = threading.Event(), threading.Event()
+        real_write = watcher.write_info
+
+        def slow_write(queue_dir, mac, info):
+            in_write.set()
+            release.wait(5)
+            real_write(queue_dir, mac, info)
+
+        def touch(info):
+            info["touched"] = True
+            return True
+
+        with mock.patch.object(watcher, "write_info", slow_write):
+            worker = threading.Thread(target=watcher.update_info, args=(self.queue_dir, MAC, touch))
+            worker.start()
+            try:
+                self.assertTrue(in_write.wait(5), "write never started")
+                with self.assertRaises(TimeoutError):
+                    with self.lock(0.1):
+                        pass
+            finally:
+                release.set()
+                worker.join(5)
 
     def test_the_lock_is_released_when_the_update_raises(self):
         def boom(info):

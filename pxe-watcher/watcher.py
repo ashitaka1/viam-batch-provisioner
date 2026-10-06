@@ -119,7 +119,7 @@ def write_info(queue_dir: Path, mac: str, info: dict) -> None:
     queue_store.atomic_write_json(queue_dir / mac / "machine-info.json", info, owner_ref=queue_dir, indent=2)
 
 
-def update_info(queue_dir: Path, mac: str, mutate: Callable[[dict], bool], timeout: Optional[float] = 10.0) -> Optional[dict]:
+def update_info(queue_dir: Path, mac: str, mutate: Callable[[dict], bool]) -> Optional[dict]:
     """Read-modify-write one machine's machine-info.json under info.lock.
 
     The root watcher and the operator-run API both write this file, so every
@@ -128,7 +128,7 @@ def update_info(queue_dir: Path, mac: str, mutate: Callable[[dict], bool], timeo
     stands afterwards, or None if the MAC has no machine-info.json. Raises
     TimeoutError if the lock can't be taken.
     """
-    with queue_store.locked_file(queue_dir / INFO_LOCK, queue_dir, timeout=timeout):
+    with queue_store.locked_file(queue_dir / INFO_LOCK, queue_dir, timeout=10.0):
         info = read_info(queue_dir, mac)
         if info is None:
             return None
@@ -196,7 +196,7 @@ def apply_failure(queue_dir: Path, *, name: str, mac: Optional[str], stage: str,
     after that moment is left alone: the timeout lost a race with a report.
     """
     when = now.isoformat(timespec="seconds")
-    outcome = {"result": "duplicate"}
+    outcome = {"result": "duplicate"}  # what a mutate that records nothing leaves
 
     if mac is not None:
         def mutate(info: dict) -> bool:
@@ -209,7 +209,6 @@ def apply_failure(queue_dir: Path, *, name: str, mac: Optional[str], stage: str,
                     outcome["result"] = "ignored"
                     return False
             if info.get("failed_at") and not (info.get("failure_source") == "timeout" and source == "installer"):
-                outcome["result"] = "duplicate"
                 return False
             info.update(failed_at=when, failure_reason=reason, failure_source=source, stage=stage)
             outcome["result"] = "recorded"
@@ -220,7 +219,6 @@ def apply_failure(queue_dir: Path, *, name: str, mac: Optional[str], stage: str,
     else:
         def mutate_entry(entry: dict) -> bool:
             if entry.get("failed_at"):
-                outcome["result"] = "duplicate"
                 return False
             entry.update(failed_at=when, failure_reason=reason, stage=stage)
             outcome["result"] = "recorded"
@@ -381,13 +379,7 @@ class PxeTracker:
         return datetime.now().strftime("%H:%M:%S")
 
     def _emit(self, event_type: str, info: dict, **extra) -> None:
-        """Record a lifecycle event. A failing journal never blocks provisioning."""
-        data = {"name": info["name"], "mac": info["mac"], "timestamp": self.now().isoformat(timespec="seconds")}
-        data.update(extra)
-        try:
-            self.emit(event_type, data)
-        except Exception as e:
-            self.log(f"[{self._stamp()}] WARNING: could not record {event_type} for {info['mac']}: {e}")
+        _emit_event(self.emit, self.log, event_type, _event(info["name"], info["mac"], self.now(), **extra))
 
     def on_pxe(self, mac: str) -> str:
         current = self.now()
@@ -413,8 +405,8 @@ class PxeTracker:
         # A machine that failed, or that `just unguard` armed, is starting a
         # new attempt. The elapsed-time rule below can't tell that from a
         # reboot after a finished install, so this is decided first.
-        known = read_info(self.queue_dir, mac)
-        if known is not None and (known.get("failed_at") or known.get("armed")):
+        info = read_info(self.queue_dir, mac)
+        if info is not None and (info.get("failed_at") or info.get("armed")):
             return self._rearm(mac, current)
 
         # Within the threshold it's a firmware DHCP retry during the initial
@@ -425,19 +417,27 @@ class PxeTracker:
         wrote = write_guard(self.queue_dir, mac)
         if wrote:
             self.log(f"[{self._stamp()}] Repeat PXE: MAC {mac} ({int(elapsed.total_seconds())}s after first) → GRUB guard installed")
-        info = read_info(self.queue_dir, mac)
         if info is not None:
             if wrote:
                 self._emit("guard-installed", info, reason="repeat-pxe")
             # The first PXE after the window is the post-install reboot. The
             # guard is usually already there from the hostname fetch, so
             # completion is tracked in machine-info.json, stamped before the
-            # event so a failed emit can't cause a duplicate later.
-            if "completed_at" not in info:
-                info["completed_at"] = current.isoformat(timespec="seconds")
-                write_info(self.queue_dir, mac, info)
-                self.log(f"[{self._stamp()}] Install complete: {info['name']} ({mac}) rebooted after {int(elapsed.total_seconds())}s")
-                self._emit("install-complete", info, duration_seconds=elapsed.total_seconds())
+            # event so a failed emit can't cause a duplicate later. A failure
+            # reported since the read above wins over the completion.
+            stamped = []
+
+            def stamp(current_info: dict) -> bool:
+                if any(key in current_info for key in ("completed_at", "failed_at", "armed")):
+                    return False
+                current_info["completed_at"] = current.isoformat(timespec="seconds")
+                stamped.append(True)
+                return True
+
+            completed = update_info(self.queue_dir, mac, stamp)
+            if completed is not None and stamped:
+                self.log(f"[{self._stamp()}] Install complete: {completed['name']} ({mac}) rebooted after {int(elapsed.total_seconds())}s")
+                self._emit("install-complete", completed, duration_seconds=elapsed.total_seconds())
         return "guard" if wrote else "guard-exists"
 
     def check_timeouts(self) -> list:
@@ -506,20 +506,24 @@ class PxeTracker:
 
     def on_hostname_fetch(self, mac: str) -> bool:
         """The installer fetched its hostname: the install reached late-commands."""
-        known = read_info(self.queue_dir, mac)
-        if known is not None and known.get("failed_at"):
-            if known.get("failure_source") != "timeout":
+        refused = []
+
+        def clear_timeout_failure(info: dict) -> bool:
+            if not info.get("failed_at"):
+                return False
+            if info.get("failure_source") != "timeout":
                 # The installer itself reported this install failed. A fetch
                 # still in flight must not bring the guard back, or the retry
                 # would boot an empty disk.
+                refused.append(True)
                 return False
+            for key in INFO_FAILURE_KEYS:  # the timeout guessed wrong
+                info.pop(key, None)
+            return True
 
-            def clear(info: dict) -> bool:
-                for key in INFO_FAILURE_KEYS:
-                    info.pop(key, None)
-                return True
-
-            update_info(self.queue_dir, mac, clear)  # the timeout guessed wrong
+        update_info(self.queue_dir, mac, clear_timeout_failure)
+        if refused:
+            return False
         wrote = write_guard(self.queue_dir, mac)
         if wrote:
             self.log(f"[{self._stamp()}] Hostname fetched by MAC {mac} → GRUB guard installed")
@@ -608,7 +612,10 @@ class LogTailer(threading.Thread):
                 if self._pending.endswith(b"\n"):
                     line = self._pending[:-1].decode("utf-8", errors="replace")
                     self._pending = b""
-                    self.on_line(line)
+                    try:
+                        self.on_line(line)
+                    except Exception as e:  # one bad line must not end the tailing for good
+                        print(f"WARNING: log line handler failed: {e}", file=sys.stderr)
                 continue
             if self._rotated():
                 self._close()
@@ -714,7 +721,10 @@ def watch(interface: Optional[str], queue_dir: Path, access_log: Path, replay: O
         match = mac_pattern.search(packet_text)
         if not match:
             return
-        tracker.on_pxe(match.group(1).lower())
+        try:
+            tracker.on_pxe(match.group(1).lower())
+        except Exception as e:  # one bad machine record must not stop the watcher seeing the rest
+            print(f"WARNING: handling PXE request failed: {e}", file=sys.stderr)
 
     if replay is not None:
         stream = sys.stdin if replay == "-" else open(replay)
@@ -777,8 +787,9 @@ def main():
                         help="JSONL journal of lifecycle events read by the API (default: ../logs/events.jsonl)")
     parser.add_argument("--replay", metavar="FILE",
                         help="Read tcpdump -v output from FILE (or - for stdin) instead of sniffing; no root needed")
-    parser.add_argument("--install-timeout-minutes", type=int, default=45, metavar="N",
-                        help="Fail an install with no installer activity for N minutes; 0 turns the timeout off (default: 45)")
+    parser.add_argument("--install-timeout-minutes", type=int, default=0, metavar="N",
+                        help="Fail an install with no installer activity for N minutes (default: 0, off). "
+                             "`just serve` and the launchd daemon pass INSTALL_TIMEOUT_MINUTES from site.env, which defaults to 45.")
     parser.add_argument("--rearm", metavar="MAC",
                         help="Make a machine reinstall on its next PXE boot, then exit; no root needed")
     args = parser.parse_args()

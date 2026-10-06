@@ -185,7 +185,7 @@ def write_slot_file(slot_dir: Path, credentials: dict) -> None:
 
 
 def _copy_failure(out: dict, source: dict) -> None:
-    for key in ("failed_at", "failure_reason", "stage"):
+    for key in queue_store.FAILURE_KEYS:
         if source.get(key):
             out[key] = source[key]
 

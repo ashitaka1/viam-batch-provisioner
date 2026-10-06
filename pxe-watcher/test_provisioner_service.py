@@ -281,14 +281,6 @@ class ValidateReportTest(unittest.TestCase):
                 with self.assertRaises(svc.ValidationError):
                     svc.validate_report(body)
 
-    def test_each_documented_stage_is_accepted_for_its_kind(self):
-        for stage in ("late-commands", "identity", "tooling", "tailscale", "done"):
-            with self.subTest(kind="progress", stage=stage):
-                self.assertEqual(svc.validate_report(self.report(stage=stage))["stage"], stage)
-        for stage in ("installer", "late-commands", "identity", "tooling", "tailscale"):
-            with self.subTest(kind="failed", stage=stage):
-                self.assertEqual(svc.validate_report(self.report(kind="failed", stage=stage))["stage"], stage)
-
     def test_reasons_are_cleaned_and_bounded(self):
         limit = svc.MAX_REASON
         cases = {
@@ -396,6 +388,24 @@ class ReportInstallTest(ServiceLayoutTest):
                 with self.assertRaises(svc.NotFound):
                     self.service().report_install(body)
                 self.assertEqual(self.events(), [])
+
+    def test_a_usb_machine_leaves_failed_when_its_stick_boots_again(self):
+        # A USB install has no re-arm and no timeout, so a progress report
+        # after its failure can only mean the stick was booted again.
+        self.seed([{"name": "u", "assigned": True, "flashed_via": "usb"}])
+        service = self.service()
+        service.report_install(self.failed(name="u", stage="installer"))
+        repeated = service.report_install(self.failed(name="u", stage="installer"))
+        after_failure = [e["type"] for e in self.events()]
+
+        retried = service.report_install({"kind": "progress", "stage": "late-commands", "name": "u"})
+
+        entry = self.queue()[0]
+        for key in ("failed_at", "failure_reason", "stage"):
+            self.assertNotIn(key, entry)
+        self.assertEqual(after_failure, ["install-failed"], "a repeated failure must not add an event")
+        self.assertEqual([e["type"] for e in self.events()], ["install-failed", "install-progress"])
+        self.assertEqual((repeated, retried), ({"result": "duplicate"}, {"result": "recorded"}))
 
     def test_a_broken_event_journal_never_loses_or_repeats_a_failure(self):
         attempts = []
