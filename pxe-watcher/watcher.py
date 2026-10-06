@@ -58,6 +58,9 @@ INFO_LOCK = "info.lock"
 # What a failure leaves in machine-info.json, cleared when it is recovered from.
 INFO_FAILURE_KEYS = ("failed_at", "failure_reason", "failure_source")
 
+# Everything a new attempt clears: the last attempt's outcome and progress.
+RETRY_KEYS = ("completed_at",) + INFO_FAILURE_KEYS + ("stage", "progress_at", "armed")
+
 # The hostname fetch writes the GRUB guard, and it happens in the `identity`
 # section of the installer. A machine reporting one of these stages is past it.
 GUARD_STAGES = ("tooling", "tailscale", "done")
@@ -287,6 +290,26 @@ def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str
     return "recorded"
 
 
+def arm_retry(queue_dir: Path, mac: str) -> bool:
+    """Make a machine reinstall on its next PXE boot, however long from now.
+
+    This is `just unguard`. It clears the record of the last attempt, flags
+    the machine so the next PXE sighting starts a new attempt instead of being
+    taken for a reboot after a finished install, and removes the guard. False
+    if the MAC has no machine-info.json.
+    """
+    def mutate(info: dict) -> bool:
+        for key in RETRY_KEYS:
+            info.pop(key, None)
+        info["armed"] = True
+        return True
+
+    if update_info(queue_dir, mac, mutate) is None:
+        return False
+    remove_guard(queue_dir, mac)
+    return True
+
+
 def assign_machine(queue_dir: Path, mac: str, now: Optional[datetime] = None) -> Optional[dict]:
     """Assign the next queued name to a MAC address.
 
@@ -317,10 +340,13 @@ def assign_machine(queue_dir: Path, mac: str, now: Optional[datetime] = None) ->
             viam_json_dst.write_text(viam_json_src.read_text())
             queue_store.chown_like(viam_json_dst, queue_dir)
 
+    # This is the first write of the MAC's machine-info.json, so it takes no
+    # lock: the API can't address a MAC that has no machine-info yet.
     info = {
         "name": name,
         "mac": mac,
         "assigned_at": (now or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
+        "attempt": 1,
     }
     write_info(queue_dir, mac, info)
     return info
@@ -377,6 +403,13 @@ class PxeTracker:
                 self.log(f"[{self._stamp()}] {unassigned} machine(s) still waiting")
             return "assigned"
 
+        # A machine that failed, or that `just unguard` armed, is starting a
+        # new attempt. The elapsed-time rule below can't tell that from a
+        # reboot after a finished install, so this is decided first.
+        known = read_info(self.queue_dir, mac)
+        if known is not None and (known.get("failed_at") or known.get("armed")):
+            return self._rearm(mac, current)
+
         # Within the threshold it's a firmware DHCP retry during the initial
         # PXE. After it, a post-install reboot: install the GRUB guard.
         elapsed = current - first
@@ -400,8 +433,41 @@ class PxeTracker:
                 self._emit("install-complete", info, duration_seconds=elapsed.total_seconds())
         return "guard" if wrote else "guard-exists"
 
+    def _rearm(self, mac: str, current: datetime) -> str:
+        """Start a new attempt: drop the guard, clear the last attempt's record,
+        and restart the retry window from now."""
+        remove_guard(self.queue_dir, mac)
+
+        def mutate(info: dict) -> bool:
+            for key in RETRY_KEYS:
+                info.pop(key, None)
+            info["assigned_at"] = current.isoformat(timespec="seconds")
+            info["attempt"] = int(info.get("attempt", 1)) + 1
+            return True
+
+        info = update_info(self.queue_dir, mac, mutate)
+        if info is None:
+            return "retry"
+        self.log(f"[{self._stamp()}] Retry: MAC {mac} ({info['name']}) starts attempt {info['attempt']}")
+        self._emit("machine-assigned", info)
+        return "rearmed"
+
     def on_hostname_fetch(self, mac: str) -> bool:
         """The installer fetched its hostname: the install reached late-commands."""
+        known = read_info(self.queue_dir, mac)
+        if known is not None and known.get("failed_at"):
+            if known.get("failure_source") != "timeout":
+                # The installer itself reported this install failed. A fetch
+                # still in flight must not bring the guard back, or the retry
+                # would boot an empty disk.
+                return False
+
+            def clear(info: dict) -> bool:
+                for key in INFO_FAILURE_KEYS:
+                    info.pop(key, None)
+                return True
+
+            update_info(self.queue_dir, mac, clear)  # the timeout guessed wrong
         wrote = write_guard(self.queue_dir, mac)
         if wrote:
             self.log(f"[{self._stamp()}] Hostname fetched by MAC {mac} → GRUB guard installed")
@@ -634,12 +700,21 @@ def main():
                         help="JSONL journal of lifecycle events read by the API (default: ../logs/events.jsonl)")
     parser.add_argument("--replay", metavar="FILE",
                         help="Read tcpdump -v output from FILE (or - for stdin) instead of sniffing; no root needed")
+    parser.add_argument("--rearm", metavar="MAC",
+                        help="Make a machine reinstall on its next PXE boot, then exit; no root needed")
     args = parser.parse_args()
 
     try:
         sys.stdout.reconfigure(line_buffering=True)
     except AttributeError:
         pass
+
+    if args.rearm:
+        if arm_retry(args.queue_dir.resolve(), args.rearm):
+            print(f"{args.rearm} will reinstall on its next PXE boot")
+            return
+        print(f"ERROR: no machine record for {args.rearm}", file=sys.stderr)
+        sys.exit(1)
 
     if args.replay is not None:
         watch(None, args.queue_dir, args.access_log, replay=args.replay, events_log=args.events_log)

@@ -236,27 +236,10 @@ unguard slot:
         esac
         exit 1
     }
-    rm -f "netboot/grub/provisioned/$MAC.cfg"
-    # Restart the repeat-PXE window so the watcher doesn't re-guard on the
-    # next boot, and forget the completion so the reinstall reports
-    # install-complete again. The machine-info file must stay: without it
-    # the watcher treats the MAC as new.
-    INFO="http-server/machines/$MAC/machine-info.json"
-    if [ -f "$INFO" ]; then
-        python3 -c "
-    import json, sys
-    from datetime import datetime, timezone
-    from pathlib import Path
-    sys.path.insert(0, 'pxe-watcher')
-    import queue_store
-    p = Path(sys.argv[1])
-    info = json.loads(p.read_text())
-    info['assigned_at'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
-    info.pop('completed_at', None)
-    queue_store.atomic_write_json(p, info, indent=2)
-    " "$INFO"
-    fi
-    echo "Unguarded $MAC. Reboot the target; the running watcher picks it up."
+    # Removes the guard and flags the machine, so its next PXE boot starts a new
+    # attempt however long from now it happens. The running watcher picks it up.
+    python3 pxe-watcher/watcher.py --rearm "$MAC"
+    echo "Reboot the target. If its boot order puts the disk first, use the one-time boot menu to PXE."
 
 # Reset queue (mark all slots unassigned, re-use same batch)
 reset:

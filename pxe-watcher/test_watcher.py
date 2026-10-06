@@ -406,28 +406,6 @@ class EmitTest(RepoLayoutTest):
         ])
         self.assertEqual(self.info()["completed_at"], self.clock.isoformat())
 
-    def test_unguard_state_rearms_install_complete(self):
-        self.install()
-        self.events.clear()
-
-        # Mirrors the revised `just unguard`: drop the guard, forget completion,
-        # restart the retry window.
-        self.guard().unlink()
-        info = self.info()
-        info.pop("completed_at")
-        self.advance(400)
-        info["assigned_at"] = self.clock.isoformat()
-        self.write_info(info)
-
-        self.advance(430)
-        self.assertEqual(self.tracker.on_pxe(MAC), "retry")
-        self.assertEqual(self.events, [])
-
-        self.advance(520)
-        self.assertEqual(self.tracker.on_pxe(MAC), "guard")
-        self.assertEqual(self.types(), ["guard-installed", "install-complete"])
-        self.assertEqual(self.events[1][1]["duration_seconds"], 120.0)
-
     def test_emit_failure_does_not_block_state_changes(self):
         def boom(_type, _data):
             raise OSError("journal unwritable")
@@ -518,7 +496,7 @@ class FailureStateTest(RepoLayoutTest):
     def types(self):
         return [t for t, _ in self.events]
 
-    def fail(self, source="installer", stage="tooling", reason="curl failed", **kwargs):
+    def report_failure(self, source="installer", stage="tooling", reason="curl failed", **kwargs):
         return watcher.apply_failure(
             self.queue_dir, name="t-1", mac=MAC, stage=stage, reason=reason, source=source,
             now=self.clock, emit=lambda t, d: self.events.append((t, d)), log=lambda *_: None, **kwargs)
@@ -532,8 +510,8 @@ class FailureStateTest(RepoLayoutTest):
         with self.subTest("a duplicate report emits one event and leaves the machine failed"):
             self.forget()
             self.machine(guard=True)
-            self.fail(reason="first")
-            result = self.fail(reason="second")
+            self.report_failure(reason="first")
+            result = self.report_failure(reason="second")
             self.assertIn("failed_at", self.info())
             self.assertFalse(self.guard().exists())
             self.assertEqual(self.types(), ["install-failed"])
@@ -543,7 +521,7 @@ class FailureStateTest(RepoLayoutTest):
             self.forget()
             self.machine(guard=True, completed_at=self.iso(300))
             before = self.info()
-            result = self.fail()
+            result = self.report_failure()
             self.assertEqual(self.info(), before)
             self.assertTrue(self.guard().exists())
             self.assertEqual(self.events, [])
@@ -551,18 +529,18 @@ class FailureStateTest(RepoLayoutTest):
 
         with self.subTest("an unknown machine writes nothing"):
             self.forget()
-            result = self.fail()
+            result = self.report_failure()
             self.assertFalse((self.queue_dir / MAC).exists())
             self.assertEqual(self.events, [])
             self.assertEqual(result, "unknown")
 
     def test_the_real_error_replaces_a_timeout_failure(self):
         self.machine(guard=True)
-        self.fail(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
+        self.report_failure(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
         self.events.clear()
         self.advance(60)
 
-        result = self.fail(source="installer", stage="tooling", reason="curl failed")
+        result = self.report_failure(source="installer", stage="tooling", reason="curl failed")
 
         info = self.info()
         self.assertEqual((info["failure_source"], info["failure_reason"], info["stage"]), ("installer", "curl failed", "tooling"))
@@ -583,7 +561,7 @@ class FailureStateTest(RepoLayoutTest):
         with self.subTest("an installer failure ignores late progress completely"):
             self.forget()
             self.machine(guard=True)
-            self.fail(source="installer", stage="tooling")
+            self.report_failure(source="installer", stage="tooling")
             before = self.info()
             self.events.clear()
             self.advance(60)
@@ -596,7 +574,7 @@ class FailureStateTest(RepoLayoutTest):
         with self.subTest("a timeout failure is cleared and the guard comes back once past the hostname fetch"):
             self.forget()
             self.machine(guard=True)
-            self.fail(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
+            self.report_failure(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
             self.events.clear()
             self.advance(60)
             result = self.progress("tooling")
@@ -611,7 +589,7 @@ class FailureStateTest(RepoLayoutTest):
         with self.subTest("a timeout failure cleared before the hostname fetch gets no guard early"):
             self.forget()
             self.machine(guard=False)
-            self.fail(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
+            self.report_failure(source="timeout", stage="unknown", reason="no installer activity for 45 minutes")
             self.advance(60)
             result = self.progress("late-commands")
             info = self.info()
@@ -658,7 +636,7 @@ class FailureStateTest(RepoLayoutTest):
             self.forget()
             self.machine(guard=True, progress_at=self.iso(100))
             before = self.info()
-            result = self.fail(source="timeout", stage="unknown", reason="no installer activity", stale_before=cutoff)
+            result = self.report_failure(source="timeout", stage="unknown", reason="no installer activity", stale_before=cutoff)
             self.assertEqual(self.info(), before)
             self.assertTrue(self.guard().exists())
             self.assertEqual(self.events, [])
@@ -667,11 +645,141 @@ class FailureStateTest(RepoLayoutTest):
         with self.subTest("activity before the cutoff is a silent install"):
             self.forget()
             self.machine(guard=True, progress_at=self.iso(10))
-            result = self.fail(source="timeout", stage="unknown", reason="no installer activity", stale_before=cutoff)
+            result = self.report_failure(source="timeout", stage="unknown", reason="no installer activity", stale_before=cutoff)
             self.assertIn("failed_at", self.info())
             self.assertFalse(self.guard().exists())
             self.assertEqual(self.types(), ["install-failed"])
             self.assertEqual(result, "recorded")
+
+
+class RetryTest(RepoLayoutTest):
+    """A machine whose install failed, or that `just unguard` re-armed, reinstalls on its next boot."""
+
+    RETRY_KEYS = ("completed_at", "failed_at", "failure_reason", "failure_source", "stage", "progress_at", "armed")
+
+    def setUp(self):
+        super().setUp()
+        self.clock = T0
+        self.events = []
+        self.tracker = watcher.PxeTracker(
+            self.queue_dir, now=lambda: self.clock, log=lambda *_: None,
+            emit=lambda t, d: self.events.append((t, d)))
+
+    def advance(self, seconds):
+        self.clock = T0 + timedelta(seconds=seconds)
+
+    def iso(self, seconds=0):
+        return (T0 + timedelta(seconds=seconds)).isoformat(timespec="seconds")
+
+    def info(self):
+        return json.loads((self.queue_dir / MAC / "machine-info.json").read_text())
+
+    def types(self):
+        return [t for t, _ in self.events]
+
+    def forget(self):
+        shutil.rmtree(self.queue_dir)
+        self.queue_dir.mkdir(parents=True)
+        if self.guard_dir.exists():
+            shutil.rmtree(self.guard_dir)
+        self.events.clear()
+        self.advance(0)
+
+    def installing(self):
+        """Assigned and past its hostname fetch, so the guard is in place."""
+        self.seed([{"name": "t-1", "assigned": False}])
+        self.tracker.on_pxe(MAC)
+        self.tracker.on_hostname_fetch(MAC)
+
+    def report_failure(self, source="installer"):
+        return watcher.apply_failure(
+            self.queue_dir, name="t-1", mac=MAC, stage="tooling", reason="curl failed", source=source,
+            now=self.clock, emit=None, log=lambda *_: None)
+
+    def break_install(self, how):
+        """Put a machine in the state a retry starts from, then forget the events so far."""
+        self.installing()
+        self.advance(300)
+        if how == "failed":
+            self.report_failure()
+        else:
+            self.tracker.on_pxe(MAC)  # the post-install reboot completes it
+            watcher.arm_retry(self.queue_dir, MAC)
+        self.events.clear()
+
+    def test_a_failed_machine_reinstalls_on_its_next_boot(self):
+        for how in ("failed", "armed"):
+            with self.subTest(trigger=how):
+                self.forget()
+                self.break_install(how)
+                self.advance(900)
+
+                result = self.tracker.on_pxe(MAC)
+
+                info = self.info()
+                self.assertEqual(info["assigned_at"], self.iso(900))
+                self.assertEqual(info["attempt"], 2)
+                for key in self.RETRY_KEYS:
+                    self.assertNotIn(key, info)
+                self.assertFalse(self.guard().exists())
+                self.assertEqual(self.types(), ["machine-assigned"])
+                self.assertEqual(result, "rearmed")
+
+    def test_one_reboot_starts_only_one_new_attempt(self):
+        self.break_install("failed")
+        results = []
+        for seconds in (600, 603, 612, 659):
+            self.advance(seconds)
+            results.append(self.tracker.on_pxe(MAC))
+
+        info = self.info()
+        self.assertEqual(info["attempt"], 2)
+        self.assertNotIn("completed_at", info)
+        self.assertFalse(self.guard().exists())
+        self.assertEqual(self.types(), ["machine-assigned"])
+        self.assertEqual(results, ["rearmed", "retry", "retry", "retry"])
+
+    def test_a_retried_install_reports_the_right_duration(self):
+        self.break_install("failed")
+        self.advance(600)
+        self.tracker.on_pxe(MAC)  # the reboot that starts the new attempt
+        self.events.clear()
+        self.advance(661)
+
+        result = self.tracker.on_pxe(MAC)
+
+        self.assertEqual(self.info()["completed_at"], self.iso(661))
+        self.assertTrue(self.guard().exists())
+        self.assertEqual(self.types(), ["guard-installed", "install-complete"])
+        self.assertEqual(self.events[1][1]["duration_seconds"], 61.0)
+        self.assertEqual(result, "guard")
+
+    def test_a_late_hostname_fetch_after_a_failure(self):
+        with self.subTest("after an installer failure the guard stays off and the failure stands"):
+            self.forget()
+            self.installing()
+            self.advance(300)
+            self.report_failure(source="installer")
+            self.events.clear()
+            result = self.tracker.on_hostname_fetch(MAC)
+            self.assertFalse(self.guard().exists())
+            self.assertIn("failed_at", self.info())
+            self.assertEqual(self.events, [])
+            self.assertFalse(result)
+
+        with self.subTest("after a timeout failure the guard comes back and the failure clears"):
+            self.forget()
+            self.installing()
+            self.advance(300)
+            self.report_failure(source="timeout")
+            self.events.clear()
+            result = self.tracker.on_hostname_fetch(MAC)
+            info = self.info()
+            for key in ("failed_at", "failure_reason", "failure_source"):
+                self.assertNotIn(key, info)
+            self.assertTrue(self.guard().exists())
+            self.assertEqual(self.types(), ["install-started", "guard-installed"])
+            self.assertTrue(result)
 
 
 class InfoLockTest(RepoLayoutTest):
