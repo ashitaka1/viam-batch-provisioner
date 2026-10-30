@@ -5,6 +5,7 @@ let usage = """
     usage: provisioner-probe browse
            provisioner-probe check <base-url>
            provisioner-probe watch <base-url>
+           provisioner-probe notify <base-url>
     """
 
 func fail(_ message: String) -> Never {
@@ -81,11 +82,23 @@ func watch(_ client: ProvisionerClient) async {
     }
 }
 
+/// Prints the notifications the app would post, until interrupted.
+func notify(_ client: ProvisionerClient) async {
+    struct PrintingPoster: NotificationPoster {
+        func post(_ notification: InstallNotification) async throws {
+            print("notification \(notification.identifier): \(notification.title)",
+                  notification.subtitle.map { "| \($0)" } ?? "", "|", notification.body)
+        }
+    }
+    await InstallNotifier(poster: PrintingPoster()).run(QueueFeed(source: client).updates())
+}
+
 setvbuf(stdout, nil, _IOLBF, 0)
 var arguments = CommandLine.arguments.dropFirst()
 switch arguments.popFirst() {
 case "browse": await browse()
 case "check": await check(client(arguments))
 case "watch": await watch(client(arguments))
+case "notify": await notify(client(arguments))
 default: fail(usage)
 }
