@@ -1,0 +1,3 @@
+config/site.env
+config/environments/
+http-server/config/tailscale.key
