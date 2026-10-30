@@ -59,6 +59,8 @@ just flash-batch
 # Insert cards, power on. ~5 minutes per Pi.
 ```
 
+To flash one card: `just flash /dev/disk4 my-pi-1`.
+
 ### Provisioning x86 machines (PXE)
 
 ```bash
@@ -105,7 +107,13 @@ just serve-usb                  # HTTP server for ISO + credentials
 interface preferred), confirms with the operator, then walks the queue one
 machine at a time: prompts you to plug in a stick, auto-detects the new
 device, shows what will be wiped, asks for `yes`, writes the stick, and
-labels it on disk.
+labels it on disk. To flash one stick: `just flash-usb /dev/disk5 my-machine-1`.
+
+## After provisioning
+
+- **SSH**: `ssh <name>`, through the `~/.ssh/config` Host block the setup wizard offers to add
+- **Viam**: machines appear at app.viam.com (`full` mode)
+- **Tailscale**: machines join your tailnet (if an auth key is configured)
 
 ## One-time BIOS setup (x86 only)
 
@@ -145,22 +153,10 @@ IP baked into its own grub.cfg.
 ```
 flash-pi-sd.sh → write OS image → mount boot partition (FAT32) →
 write cloud-init user-data + network config → first boot runs
-Phase 2 service for packages + Viam + Tailscale
+network-setup service for packages + Viam + Tailscale
 ```
 
-### Components
-
-| Component | Role |
-|-----------|------|
-| **dnsmasq** (native) | Proxy DHCP for PXE discovery + TFTP for GRUB/kernel/initrd |
-| **nginx** (Docker) | HTTP server for Ubuntu ISO, autoinstall configs, credentials |
-| **pxe-watcher** | Sniffs DHCP for PXE clients, assigns hostnames by arrival order, writes GRUB guards (on hostname fetch or repeat PXE), appends lifecycle events to `logs/events.jsonl` (the API appends installer reports to it too) |
-| **queue_store.py** | Sole writer of `queue.json`: locked, atomic append/assign used by the watcher, the API and scripts |
-| **provisioner_api.py** | REST + SSE server (stdlib) implementing `openapi/provisioner.yaml`; runs as the operator on port 8235 |
-| **daemon.sh** | Installs dnsmasq, watcher, API and Bonjour as launchd daemons (`just serve-daemon`) |
-| **provision-batch.sh** | Creates Viam machines + retrieves credentials (full mode); appends to the queue |
-| **flash-pi-sd.sh** | Writes Pi OS to SD card with cloud-init config |
-| **setup-wizard.sh** | Interactive environment configuration |
+Components, data layout and invariants are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ### Security model
 
@@ -203,7 +199,8 @@ autoinstall runs them, a failure. A failure marks the machine `failed` and
 removes its PXE guard, so rebooting it over the network installs again. If the
 machine's boot order puts the disk first, use the one-time boot menu to PXE. A
 USB-flashed machine has no PXE boot to restart it, so a progress report after
-its failure means the stick was booted again and clears the failure.
+its failure means the stick was booted again and clears the failure. `just
+status` does not show failures; read them from the API.
 
 A boot that never reaches the installer, for example because Secure Boot
 rejected GRUB and the machine fell through to its old disk, is caught when you
@@ -296,6 +293,13 @@ Installed automatically:
 | Advantech MIC-770 V3 | Intel Core i-series, dual Intel NICs (I219 + I210) | Fully validated |
 | Raspberry Pi 5 | ARM64 | Fully validated |
 | Raspberry Pi 4 | ARM64 | Untested (should work) |
+
+## Known issues
+
+- Intel BE200 WiFi (device 7740) on newer Meerkats has no firmware in Ubuntu 24.04, so WiFi doesn't come up ([#3](https://github.com/ashitaka1/viam-batch-provisioner/issues/3)).
+- The Minisforum UM890 Pro's BIOS ignores the boot order the installer sets; set NVMe above Network in its Fixed Boot Order by hand ([#4](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)).
+
+Open issues: https://github.com/ashitaka1/viam-batch-provisioner/issues
 
 ## License
 
