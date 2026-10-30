@@ -4,7 +4,7 @@ Date: 2026-10-02
 
 ## Status
 
-Accepted
+Accepted; amended by decision 30, which makes the server daemon the helper's XPC peer
 
 ## Context
 

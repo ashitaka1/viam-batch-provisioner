@@ -4,7 +4,7 @@ Date: 2026-10-02
 
 ## Status
 
-Accepted
+Accepted; amended by decision 30, which moves the server out of the app process
 
 ## Context
 
