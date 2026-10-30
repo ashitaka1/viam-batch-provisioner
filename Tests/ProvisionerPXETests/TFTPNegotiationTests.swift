@@ -29,7 +29,27 @@ import Testing
         #expect(result.acknowledged == [TFTPOption(name: "timeout", value: "3")])
     }
 
-    @Test(arguments: ["0", "300", "x"])
+    @Test(arguments: [1, 255])
+    func timeoutBounds(seconds: Int) {
+        #expect(negotiate([("timeout", String(seconds))]).timeoutSeconds == seconds)
+    }
+
+    @Test func blksizeNotANumber() {
+        let result = negotiate([("blksize", "x")])
+        #expect(result.blockSize == 512)
+        #expect(result.acknowledged.isEmpty)
+    }
+
+    @Test func severalOptionsInRequestOrder() {
+        let result = negotiate([("tsize", "0"), ("blksize", "1468"), ("timeout", "2")])
+        #expect(result.acknowledged == [
+            TFTPOption(name: "tsize", value: "1234"),
+            TFTPOption(name: "blksize", value: "1468"),
+            TFTPOption(name: "timeout", value: "2"),
+        ])
+    }
+
+    @Test(arguments: ["0", "256", "x"])
     func timeoutOutOfRange(value: String) {
         let result = negotiate([("timeout", value)])
         #expect(result.timeoutSeconds == nil)

@@ -48,9 +48,20 @@ import Testing
         ("request on 67", pxeDiscover(messageType: 3), .dhcp),
         ("discover on 4011", pxeDiscover(), .pxe),
         ("server reply", { var p = pxeDiscover(); p.op = 2; return p }(), .dhcp),
+        ("no option 93", { var p = pxeDiscover(); p.options.removeAll { $0.code == 93 }; return p }(), .dhcp),
+        ("short option 93", { var p = pxeDiscover(); p.options = p.options.map { $0.code == 93 ? DHCPOption(code: 93, data: [7]) : $0 }; return p }(), .dhcp),
+        ("not Ethernet", { var p = pxeDiscover(); p.htype = 6; return p }(), .dhcp),
+        ("long hardware address", { var p = pxeDiscover(); p.hlen = 8; return p }(), .dhcp),
     ])
     func ignores(label: String, packet: DHCPPacket, listener: DHCPListener) {
         #expect(responder.reply(to: packet, on: listener) == nil, "answered: \(label)")
+    }
+
+    @Test func malformedUUIDNotReported() throws {
+        var discover = pxeDiscover()
+        discover.options = discover.options.map { $0.code == 97 ? DHCPOption(code: 97, data: [0, 1, 2]) : $0 }
+        let (_, client) = try #require(responder.reply(to: discover, on: .dhcp))
+        #expect(client?.uuid == nil)
     }
 
     @Test func noUUID() throws {

@@ -15,6 +15,16 @@ import Testing
         #expect(TFTPPacket(buffer: packet.encoded()) == packet)
     }
 
+    @Test(arguments: [
+        (TFTPPacket.ack(block: 1), [0, 4, 0, 1]),
+        (.data(block: 258, payload: ByteBuffer(bytes: [7, 8])), [0, 3, 1, 2, 7, 8]),
+        (.optionAck([TFTPOption(name: "tsize", value: "1234")]), [0, 6] + Array("tsize\u{0}1234\u{0}".utf8)),
+        (.error(code: 1, message: "File not found"), [0, 5, 0, 1] + Array("File not found\u{0}".utf8)),
+    ] as [(TFTPPacket, [UInt8])])
+    func encodesRFCBytes(packet: TFTPPacket, bytes: [UInt8]) {
+        #expect(Array(packet.encoded().readableBytesView) == bytes)
+    }
+
     @Test func decodesRRQWithOptions() {
         let bytes: [UInt8] = [0, 1] + Array("grubx64.efi\0octet\0BLKSIZE\u{0}1468\0tsize\u{0}0\0".utf8)
         #expect(TFTPPacket(buffer: ByteBuffer(bytes: bytes)) == .readRequest(

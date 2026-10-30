@@ -8,6 +8,27 @@ import Testing
         #expect(DHCPPacket(buffer: discover.encoded()) == discover)
     }
 
+    /// Field offsets from RFC 2131 figure 1, written out by hand.
+    @Test func encodesAtRFCOffsets() {
+        var packet = pxeDiscover()
+        packet.op = 2
+        packet.yiaddr = 0x0A00_0001
+        packet.siaddr = 0xC0A8_0705
+        packet.file = "grubx64.efi"
+        packet.options = [DHCPOption(code: 53, data: [2])]
+        let bytes = Array(packet.encoded().readableBytesView)
+
+        #expect(bytes[0] == 2)
+        #expect(Array(bytes[4..<8]) == [0xDE, 0xAD, 0xBE, 0xEF])
+        #expect(Array(bytes[16..<20]) == [10, 0, 0, 1], "yiaddr")
+        #expect(Array(bytes[20..<24]) == [192, 168, 7, 5], "siaddr")
+        #expect(Array(bytes[28..<34]) == fixtureMAC)
+        #expect(Array(bytes[108..<119]) == Array("grubx64.efi".utf8))
+        #expect(bytes[119] == 0)
+        #expect(Array(bytes[236..<240]) == [99, 130, 83, 99])
+        #expect(Array(bytes[240...]) == [53, 1, 2, 255])
+    }
+
     @Test func parsesForgedDiscover() throws {
         var bytes: [UInt8] = [1, 1, 6, 0]          // op, htype, hlen, hops
         bytes += [0x12, 0x34, 0x56, 0x78]          // xid
@@ -32,18 +53,19 @@ import Testing
         #expect(packet.option(60) == vendor)
     }
 
-    @Test(arguments: truncatedPackets)
-    func rejectsTruncated(bytes: [UInt8]) {
+    @Test(arguments: malformedPackets)
+    func rejectsMalformed(bytes: [UInt8]) {
         #expect(DHCPPacket(buffer: ByteBuffer(bytes: bytes)) == nil, "accepted \(bytes.count) bytes")
     }
 }
 
-private let truncatedPackets: [[UInt8]] = {
+private let malformedPackets: [[UInt8]] = {
     let header = [UInt8](repeating: 0, count: 236)
     let cookie: [UInt8] = [99, 130, 83, 99]
     return [
         [UInt8](repeating: 1, count: 100),
         header + [1, 2, 3, 4],
         header + cookie + [60, 20, 1, 2, 3],
+        header + cookie + [60],
     ]
 }()

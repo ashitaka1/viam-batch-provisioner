@@ -79,6 +79,10 @@ struct TFTPClientError: Error, CustomStringConvertible {
 final class UDPTestClient: Sendable {
     let channel: Channel
     let inbox = Inbox<AddressedEnvelope<ByteBuffer>>()
+    private let duplicates = NIOLockedValueBox(0)
+
+    /// DATA blocks the last `fetch` received more than once.
+    var duplicateBlocks: Int { duplicates.withLockedValue { $0 } }
 
     var port: Int { channel.localAddress!.port! }
     var address: SocketAddress { channel.localAddress! }
@@ -113,6 +117,7 @@ final class UDPTestClient: Sendable {
 
     /// Reads a file over TFTP: RRQ, OACK → ACK 0, ACK each DATA, stop on a short block.
     func fetch(_ filename: String, options: [TFTPOption] = [], port: Int) async throws -> Data {
+        duplicates.withLockedValue { $0 = 0 }
         try await send(TFTPPacket.readRequest(filename: filename, mode: "octet", options: options).encoded(), to: port)
         var blockSize = 512
         var received = Data()
@@ -128,7 +133,10 @@ final class UDPTestClient: Sendable {
                 try await send(TFTPPacket.ack(block: 0).encoded(), to: envelope.remoteAddress)
             case let .data(block, payload):
                 try await send(TFTPPacket.ack(block: block).encoded(), to: envelope.remoteAddress)
-                guard block == expected else { continue }
+                guard block == expected else {
+                    duplicates.withLockedValue { $0 += 1 }
+                    continue
+                }
                 expected &+= 1
                 received.append(contentsOf: payload.readableBytesView)
                 if payload.readableBytes < blockSize { return received }

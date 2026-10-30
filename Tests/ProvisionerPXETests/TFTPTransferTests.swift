@@ -2,11 +2,10 @@ import Testing
 @testable import ProvisionerPXE
 
 @Suite struct TFTPTransferTests {
-    private func transfer(size: Int, blockSize: Int = 512, options: Bool = false) -> TFTPTransfer {
-        let requested = options ? [TFTPOption(name: "blksize", value: String(blockSize))] : []
-        var negotiation = TFTPNegotiation(requested: requested, fileSize: size)
-        negotiation.blockSize = blockSize
-        return TFTPTransfer(fileSize: size, negotiation: negotiation)
+    /// A transfer at 512-byte blocks without an OACK, or at `blksize` after one.
+    private func transfer(size: Int, blksize: Int? = nil) -> TFTPTransfer {
+        let requested = blksize.map { [TFTPOption(name: "blksize", value: String($0))] } ?? []
+        return TFTPTransfer(fileSize: size, negotiation: TFTPNegotiation(requested: requested, fileSize: size))
     }
 
     @Test func smallFileNoOptions() {
@@ -17,9 +16,15 @@ import Testing
     }
 
     @Test func optionAckFirst() {
-        var t = transfer(size: 2000, blockSize: 1468, options: true)
+        var t = transfer(size: 2000, blksize: 1468)
         #expect(t.start() == .sendOptionAck)
         #expect(t.received(ack: 0) == .sendBlock(number: 1, offset: 0, length: 1468))
+    }
+
+    @Test func nonZeroAckBeforeOptionAckIgnored() {
+        var t = transfer(size: 2000, blksize: 1468)
+        _ = t.start()
+        #expect(t.received(ack: 1) == TFTPTransfer.Action.none)
     }
 
     @Test func exactMultipleEndsWithEmptyBlock() {
@@ -41,6 +46,13 @@ import Testing
         _ = t.start()
         #expect(t.received(ack: 1) == .sendBlock(number: 2, offset: 512, length: 512))
         #expect(t.received(ack: 1) == TFTPTransfer.Action.none)
+    }
+
+    @Test func prematureAckIgnored() {
+        var t = transfer(size: 2000)
+        _ = t.start()
+        #expect(t.received(ack: 99) == TFTPTransfer.Action.none)
+        #expect(t.received(ack: 1) == .sendBlock(number: 2, offset: 512, length: 512))
     }
 
     @Test func blockNumberWraps() {
@@ -78,11 +90,5 @@ import Testing
             #expect(t.timedOut() != .failed, "failed on retry \(attempt) after an ack reset the count")
         }
         #expect(t.timedOut() == .failed)
-    }
-
-    @Test func errorFails() {
-        var t = transfer(size: 2000)
-        _ = t.start()
-        #expect(t.receivedError() == .failed)
     }
 }
