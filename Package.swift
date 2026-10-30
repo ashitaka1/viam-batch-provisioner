@@ -9,6 +9,7 @@ let package = Package(
         .executable(name: "provisioner-pxe", targets: ["provisioner-pxe"]),
         .library(name: "ProvisionerAPI", targets: ["ProvisionerAPI"]),
         .library(name: "ProvisionerKit", targets: ["ProvisionerKit"]),
+        .executable(name: "provisioner-probe", targets: ["provisioner-probe"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
@@ -57,6 +58,10 @@ let package = Package(
             plugins: [
                 .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),
             ]
+        ),
+        .executableTarget(
+            name: "provisioner-probe",
+            dependencies: ["ProvisionerKit"]
         ),
         .testTarget(
             name: "ProvisionerKitTests",
