@@ -113,6 +113,10 @@ test:
     [[ -x .venv/bin/python3 ]] && PY=.venv/bin/python3
     "$PY" -m unittest discover -s pxe-watcher -p 'test_*.py'
 
+# Run the Swift package tests
+test-swift:
+    swift test
+
 # --- Debug helpers (individual services; `just serve` runs them together) ---
 
 # Start PXE watcher only (assigns names to MACs as machines boot)

@@ -53,3 +53,7 @@ dnsmasq.log
 *~
 .mcp.json
 
+# Swift build output
+.build/
+.swiftpm/
+
