@@ -60,7 +60,7 @@ signal(SIGINT, SIG_IGN)
 let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
 interrupt.setEventHandler {
     Task {
-        try? await server.stop()
+        await server.stop()
     }
 }
 interrupt.resume()

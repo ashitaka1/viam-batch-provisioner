@@ -29,7 +29,13 @@ import Testing
         #expect(result.acknowledged == [TFTPOption(name: "timeout", value: "3")])
     }
 
-    @Test(arguments: [1, 255])
+    @Test func blksizeCappedAtLimit() {
+        let result = TFTPNegotiation(requested: [TFTPOption(name: "blksize", value: "16384")], fileSize: 1, maxBlockSize: 1468)
+        #expect(result.blockSize == 1468)
+        #expect(result.acknowledged == [TFTPOption(name: "blksize", value: "1468")])
+    }
+
+    @Test(arguments: [1, 10])
     func timeoutBounds(seconds: Int) {
         #expect(negotiate([("timeout", String(seconds))]).timeoutSeconds == seconds)
     }
@@ -49,7 +55,7 @@ import Testing
         ])
     }
 
-    @Test(arguments: ["0", "256", "x"])
+    @Test(arguments: ["0", "11", "255", "x"])
     func timeoutOutOfRange(value: String) {
         let result = negotiate([("timeout", value)])
         #expect(result.timeoutSeconds == nil)

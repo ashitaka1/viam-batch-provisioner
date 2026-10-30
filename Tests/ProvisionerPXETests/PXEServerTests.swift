@@ -23,7 +23,7 @@ private final class Harness: Sendable {
     let kernel = randomData(100_000)
     let bootloader = randomData(4096)
 
-    init(tftpTimeout: TimeAmount) async throws {
+    init(tftpTimeout: TimeAmount, maxTransfers: Int = 64) async throws {
         base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         root = base.appendingPathComponent("root")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("grub"), withIntermediateDirectories: true)
@@ -38,6 +38,7 @@ private final class Harness: Sendable {
         configuration.tftpPort = 0
         configuration.offerDestination = client.address
         configuration.tftpTimeout = tftpTimeout
+        configuration.maxTransfers = maxTransfers
         server = PXEServer(configuration: configuration)
         try await server.start()
         ports = server.boundPorts!
@@ -52,7 +53,7 @@ private final class Harness: Sendable {
     }
 
     func shutdown() async {
-        try? await server.stop()
+        await server.stop()
         await client.close()
         try? FileManager.default.removeItem(at: base)
     }
@@ -61,9 +62,10 @@ private final class Harness: Sendable {
 /// Runs `body` against a fresh harness and shuts it down whether or not `body` throws.
 private func withHarness(
     tftpTimeout: TimeAmount = .seconds(1),
+    maxTransfers: Int = 64,
     _ body: (Harness) async throws -> Void
 ) async throws {
-    let harness = try await Harness(tftpTimeout: tftpTimeout)
+    let harness = try await Harness(tftpTimeout: tftpTimeout, maxTransfers: maxTransfers)
     do {
         try await body(harness)
     } catch {
@@ -266,7 +268,73 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
     @Test func stopReleasesPortsAndFinishesClients() async throws {
         let harness = try await Harness(tftpTimeout: .seconds(1))
         let tftp = harness.ports.tftp
-        try await harness.server.stop()
+        await harness.server.stop()
+
+        #expect(await harness.clientsFinished.next() != nil, "clients stream still open after stop")
+        let rebound = try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+            .bind(host: "127.0.0.1", port: tftp)
+            .get()
+        try await rebound.close()
+        await harness.shutdown()
+    }
+
+    /// lo0's MTU (16384) is above macOS's 9216-byte UDP datagram limit, so this also checks that cap.
+    @Test func fetchesWithOversizedBlksize() async throws {
+        try await withHarness { harness in
+            let data = try await harness.client.fetch("vmlinuz", options: [TFTPOption(name: "blksize", value: "16384")], port: harness.ports.tftp)
+            #expect(data == harness.kernel, "got \(data.count) of \(harness.kernel.count) bytes")
+        }
+    }
+
+    @Test func stopEndsActiveTransfers() async throws {
+        try await withHarness { harness in
+            try await harness.client.send(readRequest("grubx64.efi"), to: harness.ports.tftp)
+            let first = try #require(await harness.client.receive())
+            await harness.server.stop()
+            try await harness.client.send(TFTPPacket.ack(block: 1).encoded(), to: first.remoteAddress)
+            #expect(await harness.client.receive(timeout: .milliseconds(300)) == nil, "transfer kept sending after stop()")
+        }
+    }
+
+    @Test func repeatedRequestReplacesTransfer() async throws {
+        try await withHarness { harness in
+            try await harness.client.send(readRequest("grubx64.efi"), to: harness.ports.tftp)
+            let first = try #require(await harness.client.receive())
+            try await harness.client.send(readRequest("grubx64.efi"), to: harness.ports.tftp)
+            let second = try #require(await harness.client.receive())
+            #expect(second.remoteAddress != first.remoteAddress)
+
+            try await harness.client.send(TFTPPacket.ack(block: 1).encoded(), to: first.remoteAddress)
+            #expect(await harness.client.receive(timeout: .milliseconds(300)) == nil, "the replaced transfer is still running")
+        }
+    }
+
+    @Test func refusesBeyondTransferLimit() async throws {
+        try await withHarness(maxTransfers: 2) { harness in
+            var clients: [UDPTestClient] = []
+            for _ in 0..<3 {
+                let client = try await UDPTestClient()
+                clients.append(client)
+                try await client.send(readRequest("grubx64.efi"), to: harness.ports.tftp)
+            }
+            var replies: [TFTPPacket?] = []
+            for client in clients {
+                replies.append(await client.receive().flatMap { TFTPPacket(buffer: $0.data) })
+                await client.close()
+            }
+            let started = replies.filter { if case .data(block: 1, _) = $0 { true } else { false } }.count
+            let refused = replies.filter { if case .error(code: 0, _) = $0 { true } else { false } }.count
+            #expect(started == 2 && refused == 1, "replies \(replies)")
+        }
+    }
+
+    /// No public seam can make NIO close a listening channel underneath the server (as it does on a
+    /// read error when the NIC goes away), so this closes one through the internal list.
+    @Test func stopSurvivesAChannelAlreadyClosed() async throws {
+        let harness = try await Harness(tftpTimeout: .seconds(1))
+        let tftp = harness.ports.tftp
+        try await harness.server.listeningChannels[0].close()
+        await harness.server.stop()
 
         #expect(await harness.clientsFinished.next() != nil, "clients stream still open after stop")
         let rebound = try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton)

@@ -90,6 +90,7 @@ final class UDPTestClient: Sendable {
     init() async throws {
         let inbox = inbox
         channel = try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+            .channelOption(.recvAllocator, value: FixedSizeRecvByteBufferAllocator(capacity: 65536))
             .channelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandler(InboxHandler(inbox: inbox))

@@ -16,6 +16,8 @@ public struct PXEConfiguration: Sendable {
     public var offerDestination: SocketAddress?
     /// Retransmit interval for a TFTP transfer whose client did not negotiate one.
     public var tftpTimeout: TimeAmount = .seconds(1)
+    /// Concurrent TFTP transfers; a read request beyond this gets an error.
+    public var maxTransfers = 64
 
     public init(interface: String, tftpRoot: URL) {
         self.interface = interface
@@ -31,6 +33,7 @@ public final class PXEServer: Sendable {
     private let group: any EventLoopGroup
     private let clientsContinuation: AsyncStream<PXEClient>.Continuation
     private let channels = NIOLockedValueBox<[any Channel]>([])
+    private let tftpListener = NIOLockedValueBox<TFTPListenerHandler?>(nil)
 
     public init(configuration: PXEConfiguration, group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) {
         self.configuration = configuration
@@ -61,7 +64,11 @@ public final class PXEServer: Sendable {
                 let handler = DHCPHandler(listener: listener, responder: responder, offerDestination: offerDestination, report: report)
                 bound.append(try await bindDHCP(port: port, interfaceIndex: interface.index, handler: handler))
             }
-            let listener = TFTPListenerHandler(root: TFTPRoot(configuration.tftpRoot), host: host, defaultTimeout: configuration.tftpTimeout)
+            let listener = TFTPListenerHandler(
+                root: TFTPRoot(configuration.tftpRoot), host: host, defaultTimeout: configuration.tftpTimeout,
+                mtu: interface.mtu, maxTransfers: configuration.maxTransfers
+            )
+            tftpListener.withLockedValue { $0 = listener }
             bound.append(try await DatagramBootstrap(group: group)
                 .channelInitializer { channel in
                     channel.eventLoop.makeCompletedFuture { try channel.pipeline.syncOperations.addHandler(listener) }
@@ -75,14 +82,20 @@ public final class PXEServer: Sendable {
         channels.withLockedValue { $0 = bound }
     }
 
-    public func stop() async throws {
+    /// The DHCP, PXE and TFTP listening channels, in that order.
+    var listeningChannels: [any Channel] {
+        channels.withLockedValue { $0 }
+    }
+
+    public func stop() async {
         let bound = channels.withLockedValue { channels in
             defer { channels = [] }
             return channels
         }
         for channel in bound {
-            try await channel.close()
+            try? await channel.close()
         }
+        tftpListener.withLockedValue { $0 }?.closeTransfers()
         clientsContinuation.finish()
     }
 
