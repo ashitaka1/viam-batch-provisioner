@@ -44,6 +44,12 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 | `scripts/flash-usb.sh`, `flash-usb-batch.sh` | x86 USB stick flashing |
 | `scripts/tail-http-logs.sh` | Pretty-prints `logs/access.log` (`just logs`); writes nothing |
 | `scripts/setup-wizard.sh` | Creates `config/site.env` and per-environment files |
+| `Package.swift` | Swift package for the v2 server; the `ProvisionerPXE` library and the `provisioner-pxe` dev executable |
+| `Sources/ProvisionerPXE/PXEServer.swift` | Binds the DHCP (67), PXE (4011) and TFTP (69) sockets on one interface and publishes each answered client on `clients` |
+| `Sources/ProvisionerPXE/DHCP/` | BOOTP/DHCP codec and `ProxyDHCPResponder`, which answers PXE discovers with the boot server and filename (RFC 4578) |
+| `Sources/ProvisionerPXE/TFTP/` | TFTP codec (RFC 1350), option negotiation (RFC 2347-2349), `TFTPRoot` path confinement, per-transfer state machine and handlers |
+| `Sources/ProvisionerPXE/NetworkInterface.swift` | Looks up an interface's address, index and MTU by BSD name |
+| `Tests/ProvisionerPXETests/` | Unit tests per component; `PXEServerTests` drives a running server over loopback UDP |
 
 ## Data model
 
@@ -74,6 +80,8 @@ All under `http-server/machines/` unless noted. Every file the root watcher crea
 - **The timeout is off unless passed.** The watcher's `--install-timeout-minutes` defaults to off; `just serve` and the plist pass `INSTALL_TIMEOUT_MINUTES`.
 - **Daemons run on a stable interpreter.** System or Homebrew `python3` ≥ 3.9, never the venv; the code avoids 3.10-only syntax. The serving interface is baked into the plist at install. dnsmasq is stopped by pid file.
 - **dnsmasq's proxy range follows the serving interface**, computed by `pxe-subnet.sh` at `just serve` or daemon install. `PXE_PROXY_SUBNET` overrides it.
+- **The Swift PXE server serves only inside its TFTP root.** `TFTPRoot` rejects paths that resolve outside it. Block size is capped by the interface MTU, and concurrent transfers by `maxTransfers`; a request beyond the cap gets a TFTP error.
+- **The Swift DHCP sockets bind 0.0.0.0 pinned to the interface.** They use `IP_BOUND_IF`, because on macOS a socket bound to a unicast address never receives broadcast discovers. See `docs/decisions/0028-bind-dhcp-to-interface.md`.
 - **NIC names are discovered at install time.** The autoinstall config hardcodes no interface names.
 
 ## Boundaries
