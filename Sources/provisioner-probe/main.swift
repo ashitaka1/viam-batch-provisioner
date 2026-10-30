@@ -20,8 +20,12 @@ func client(_ arguments: ArraySlice<String>) -> ProvisionerClient {
 /// Lists Bonjour-advertised servers for five seconds.
 func browse() async {
     let browsing = Task {
-        for await servers in ServerBrowser().servers() {
-            print("servers:", servers.map { "\($0.name) \($0.baseURL)" })
+        do {
+            for try await servers in ServerBrowser().servers() {
+                print("servers:", servers.map { "\($0.name) \($0.baseURL)" })
+            }
+        } catch {
+            fail("browse failed: \(error)")
         }
     }
     try? await Task.sleep(for: .seconds(5))
