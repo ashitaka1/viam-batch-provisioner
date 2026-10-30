@@ -117,6 +117,22 @@ class ProvisionTest(ServiceLayoutTest):
         self.assertTrue(entries["full"]["has_credentials"])
         self.assertFalse(entries["bare"]["has_credentials"])
 
+    def test_ignores_environment(self):
+        environment = {
+            "provision_mode": "os-only",
+            "username": "viam",
+            "password_hash": "$6$salt$hash",
+            "ssh_public_key": "ssh-ed25519 AAAA test",
+            "timezone": "America/New_York",
+            "packages": ["htop"],
+            "wifi": {"ssid": "lab", "password": "pw", "country": "US"},
+            "tailscale_auth_key": "tskey-test",
+        }
+        results = self.service().provision([{"name": "env", "credentials": CREDS, "environment": environment}])
+
+        self.assertEqual(results, [{"name": "env", "result": "added"}])
+        self.assertEqual(json.loads(self.slot_file("env").read_text()), CREDS)
+
     def test_partial_stage_failure_leaves_nothing(self):
         self.seed([{"name": "x", "assigned": False}])
         before = (self.queue_dir / "queue.json").read_bytes()

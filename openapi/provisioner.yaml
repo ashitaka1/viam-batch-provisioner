@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Viam Provisioner API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Control plane for a provisioning server. Clients queue machines (name plus
     optional per-machine Viam credentials), read queue state, and follow
@@ -324,6 +324,64 @@ components:
           $ref: '#/components/schemas/Name'
         credentials:
           $ref: '#/components/schemas/ViamCredentials'
+        environment:
+          $ref: '#/components/schemas/Environment'
+
+    Environment:
+      type: object
+      description: |
+        Settings the server renders into this machine's install config. The
+        Python server ignores this object and renders from config/site.env.
+      required: [provision_mode, username, password_hash, ssh_public_key, timezone]
+      additionalProperties: false
+      properties:
+        provision_mode:
+          type: string
+          enum: [full, agent, os-only]
+          description: |
+            full installs viam-agent with the machine's credentials; agent installs
+            viam-agent without credentials; os-only installs no Viam software.
+        username:
+          type: string
+          minLength: 1
+        password_hash:
+          type: string
+          minLength: 1
+          description: crypt(3) SHA-512 hash of the account password
+        ssh_public_key:
+          type: string
+          minLength: 1
+          description: Public key contents, authorized for the account
+        timezone:
+          type: string
+          minLength: 1
+          description: IANA time zone name
+        packages:
+          type: array
+          description: Extra apt packages. Absent or empty means none.
+          items:
+            type: string
+            minLength: 1
+        wifi:
+          $ref: '#/components/schemas/Wifi'
+        tailscale_auth_key:
+          type: string
+          minLength: 1
+
+    Wifi:
+      type: object
+      description: Absent password means an open network. country is the regulatory domain, used by Raspberry Pi images.
+      required: [ssid]
+      additionalProperties: false
+      properties:
+        ssid:
+          type: string
+          minLength: 1
+        password:
+          type: string
+        country:
+          type: string
+          pattern: '^[A-Z]{2}$'
 
     ProvisionResult:
       type: object
