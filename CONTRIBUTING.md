@@ -31,7 +31,7 @@ just test-swift
 
 Runs `swift test` over `Sources/ProvisionerPXE` (Swift 6, macOS 13+, SwiftNIO). The tests bind unprivileged loopback ports.
 
-`swift run provisioner-pxe --interface en0 --root http-server/tftp` serves proxy DHCP and TFTP on the default ports 67, 4011 and 69 (sudo) and prints each PXE client it answers. `--dhcp-port`, `--pxe-port` and `--tftp-port` override the ports; `--offer-to <ip>:<port>` redirects offers away from the broadcast address, for testing without privileges. It runs beside no dnsmasq: stop `just dhcp` first.
+`swift run provisioner-pxe --interface en0 --root netboot` serves proxy DHCP and TFTP on the default ports 67, 4011 and 69 (sudo) and prints each PXE client it answers. `--dhcp-port`, `--pxe-port` and `--tftp-port` override the ports; `--offer-to <ip>:<port>` redirects offers away from the broadcast address, for testing without privileges. It runs beside no dnsmasq: stop `just dhcp` first.
 
 ## Run pieces alone
 
