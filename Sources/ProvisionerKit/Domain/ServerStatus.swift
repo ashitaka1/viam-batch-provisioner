@@ -1,5 +1,5 @@
 public import Foundation
-package import ProvisionerAPI
+internal import ProvisionerAPI
 
 public enum ServiceState: String, Sendable, Equatable {
     case up, down, unknown

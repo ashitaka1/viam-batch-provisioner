@@ -1,5 +1,5 @@
 public import Foundation
-package import ProvisionerAPI
+internal import ProvisionerAPI
 
 public struct ProvisionRequest: Sendable, Equatable {
     public var name: String

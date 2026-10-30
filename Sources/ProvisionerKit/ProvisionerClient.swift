@@ -1,7 +1,7 @@
 public import Foundation
 package import OpenAPIRuntime
 import OpenAPIURLSession
-package import ProvisionerAPI
+internal import ProvisionerAPI
 
 public struct ProvisionResult: Sendable, Equatable {
     public var name: String

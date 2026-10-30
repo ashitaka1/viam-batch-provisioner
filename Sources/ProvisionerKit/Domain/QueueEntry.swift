@@ -1,5 +1,5 @@
 public import Foundation
-package import ProvisionerAPI
+internal import ProvisionerAPI
 
 public enum EntryStatus: String, Sendable, Equatable, CaseIterable {
     case queued, flashed, assigned, installing, installed, failed

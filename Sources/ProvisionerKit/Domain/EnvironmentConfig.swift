@@ -1,4 +1,4 @@
-package import ProvisionerAPI
+internal import ProvisionerAPI
 
 public enum ProvisionMode: String, Sendable, Equatable, CaseIterable {
     case full

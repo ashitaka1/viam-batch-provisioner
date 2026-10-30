@@ -1,4 +1,4 @@
-public import Foundation
+package import Foundation
 
 package enum WireCoding {
     package static var decoder: JSONDecoder {
