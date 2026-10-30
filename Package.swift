@@ -9,12 +9,13 @@ let package = Package(
         .executable(name: "provisioner-pxe", targets: ["provisioner-pxe"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.65.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
     ],
     targets: [
         .target(
             name: "ProvisionerPXE",
             dependencies: [
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
             ]
@@ -27,6 +28,7 @@ let package = Package(
             name: "ProvisionerPXETests",
             dependencies: [
                 "ProvisionerPXE",
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
             ]
