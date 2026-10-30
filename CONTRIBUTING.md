@@ -29,7 +29,9 @@ The daemons run the watcher and API on `/usr/bin/python3` or Homebrew's, which m
 just test-swift
 ```
 
-Runs `swift test` over `Sources/ProvisionerPXE` (Swift 6, macOS 13+, SwiftNIO). The tests bind unprivileged loopback ports.
+Runs `swift test` over the root package (Swift 6, macOS 14+). The ProvisionerPXE tests bind unprivileged loopback ports.
+
+`swift-openapi-generator` generates `ProvisionerAPI`'s types and `ProvisionerKit`'s client from `openapi/provisioner.yaml` at build time, through the `openapi.yaml` symlinks in each target's directory.
 
 `swift run provisioner-pxe --interface en0 --root netboot` serves proxy DHCP and TFTP on the default ports 67, 4011 and 69 (sudo) and prints each PXE client it answers. `--dhcp-port`, `--pxe-port` and `--tftp-port` override the ports; `--offer-to <ip>:<port>` redirects offers away from the broadcast address, for testing without privileges. It runs beside no dnsmasq: stop `just dhcp` first.
 

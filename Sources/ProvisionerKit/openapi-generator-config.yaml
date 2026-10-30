@@ -1,0 +1,6 @@
+generate:
+  - client
+accessModifier: package
+namingStrategy: idiomatic
+additionalImports:
+  - ProvisionerAPI
