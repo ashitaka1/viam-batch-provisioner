@@ -54,27 +54,22 @@ struct QueueFeedTests {
         }
     }
 
-    @Test func resyncRestartsFromNewSnapshot() async {
-        let sleep = RecordingSleep()
+    @Test func resyncRestartsFromNewSnapshotWithoutWaiting() async {
         let source = FakeFeedSource(
             snapshots: [snapshot(50), snapshot(3, "m1")],
             streams: [.frames([resync(latest: 3)]), .frames([assigned(4)])])
 
-        await following(feed(source, sleep)) { updates in
+        await following(QueueFeed(source: source, sleep: source.sleep)) { updates in
             let got = await updates.first(3)
 
             #expect(trace(got) == ["s0", "s1", "e4"])
-            #expect(await source.afterIDs.first(2) == [50, 3])
-            // The resync reconnect waits for nothing; the only sleep is the one after the
-            // second stream ends, which follows the updates above.
-            let firstSleepAfterResync = await sleep.durations.first(1)
-            #expect(firstSleepAfterResync == [.seconds(3)])
+            #expect(await source.log.first(4) == ["queue", "after 50", "queue", "after 3"])
         }
     }
 
     @Test func undecodableFrameIsSkippedAndIDAdvances() async {
         let future = ServerSentEvent(id: "11", event: "future-thing", data: #"{"id":11,"type":"future-thing"}"#)
-        let source = FakeFeedSource(snapshots: [snapshot(10), snapshot(11)], streams: [.frames([future])])
+        let source = FakeFeedSource(snapshots: [snapshot(10), snapshot(20)], streams: [.frames([future])])
 
         await following(feed(source)) { updates in
             let got = await updates.first(2)
@@ -82,6 +77,28 @@ struct QueueFeedTests {
             #expect(trace(got) == ["s0", "s0"])
             #expect(await source.afterIDs.first(2) == [10, 11])
         }
+    }
+
+    @Test func failureToOpenTheStreamBacksOff() async {
+        let source = FakeFeedSource(
+            snapshots: [snapshot(1), snapshot(1)], streams: [.refuse(FakeError(label: "busy")), .frames([assigned(2)])])
+
+        await following(QueueFeed(source: source, sleep: source.sleep)) { updates in
+            let got = await updates.first(3)
+
+            #expect(trace(got) == ["s0", "s0", "e2"])
+            #expect(await source.log.first(5) == ["queue", "after 1", "sleep 3.0 seconds", "queue", "after 1"])
+        }
+    }
+
+    @Test func releasingTheUpdatesStopsTheFeed() async {
+        let source = FakeFeedSource(snapshots: [snapshot(1)], streams: [])
+
+        await following(feed(source)) { updates in
+            _ = await updates.first(1)
+        }
+
+        #expect(await source.log.first(3) == ["queue", "after 1", "cancelled"])
     }
 
     @Test func unreachableServerRetriesWithCappedBackoff() async {
@@ -122,6 +139,21 @@ struct QueueFeedTests {
         }
     }
 
+    /// `FeedState` with the error reduced to something comparable.
+    private enum State: Equatable {
+        case connecting, live
+        case waiting(Duration, String)
+
+        init(_ state: FeedState) {
+            switch state {
+            case .connecting: self = .connecting
+            case .live: self = .live
+            case .waiting(let delay, let error):
+                self = .waiting(delay, (error as? FakeError)?.label ?? String(describing: type(of: error)))
+            }
+        }
+    }
+
     @Test func statesReportWaitingWithTheErrorThenLive() async {
         let source = FakeFeedSource(
             snapshots: [.failure(FakeError(label: "refused")), snapshot(1)], streams: [.frames([])])
@@ -131,14 +163,20 @@ struct QueueFeedTests {
         await following(feed) { updates in
             _ = await updates.first(1)
 
-            let seen = await states.first(4).map { state -> String in
-                switch state {
-                case .connecting: "connecting"
-                case .live: "live"
-                case .waiting(let delay, let error): "waiting \(delay) \((error as? FakeError)?.label ?? "?")"
-                }
-            }
-            #expect(seen == ["connecting", "waiting 3.0 seconds refused", "connecting", "live"])
+            #expect(await states.first(5).map(State.init) == [
+                .connecting, .waiting(.seconds(3), "refused"), .connecting, .live, .waiting(.seconds(3), "StreamClosed"),
+            ])
+        }
+    }
+
+    @Test func lateSubscriberGetsTheLatestState() async {
+        let source = FakeFeedSource(snapshots: [snapshot(1)], streams: [.framesThenStayOpen([assigned(2)])])
+        let feed = feed(source)
+
+        await following(feed) { updates in
+            _ = await updates.first(2)
+
+            #expect(await feed.states.first(1).map(State.init) == [.live])
         }
     }
 }

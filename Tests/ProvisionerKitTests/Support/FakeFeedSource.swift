@@ -15,6 +15,8 @@ final class FakeFeedSource: QueueFeedSource {
         case frames([ServerSentEvent])
         /// Yields the frames, then fails with the error.
         case framesThenFail([ServerSentEvent], FakeError)
+        /// Yields the frames, then stays open until cancelled.
+        case framesThenStayOpen([ServerSentEvent])
         /// Fails to open.
         case refuse(FakeError)
     }
@@ -22,19 +24,32 @@ final class FakeFeedSource: QueueFeedSource {
     private struct Script {
         var snapshots: [Result<QueueSnapshot, FakeError>]
         var streams: [Stream]
+        var open: [AsyncThrowingStream<ServerSentEvent, any Error>.Continuation] = []
     }
 
     private let script: OSAllocatedUnfairLock<Script>
     private let afterContinuation: AsyncStream<Int>.Continuation
+    private let logContinuation: AsyncStream<String>.Continuation
     /// Every `after` id the feed opened `/events` with, in order.
     let afterIDs: AsyncStream<Int>
+    /// Everything the feed did to this source, in order: "queue", "after <id>",
+    /// "sleep <duration>" (through `sleep`), and "cancelled" when a call
+    /// suspended past the end of the script is cancelled.
+    let log: AsyncStream<String>
 
     init(snapshots: [Result<QueueSnapshot, FakeError>], streams: [Stream]) {
         script = .init(initialState: Script(snapshots: snapshots, streams: streams))
         (afterIDs, afterContinuation) = AsyncStream.makeStream()
+        (log, logContinuation) = AsyncStream.makeStream()
+    }
+
+    /// A sleep that returns at once and records itself in `log`.
+    var sleep: @Sendable (Duration) async throws -> Void {
+        { [logContinuation] in logContinuation.yield("sleep \($0)") }
     }
 
     func queue() async throws -> QueueSnapshot {
+        logContinuation.yield("queue")
         guard let next = script.withLock({ $0.snapshots.isEmpty ? nil : $0.snapshots.removeFirst() }) else {
             try await suspendUntilCancelled()
         }
@@ -43,6 +58,7 @@ final class FakeFeedSource: QueueFeedSource {
 
     func eventFrames(after id: Int) async throws -> AsyncThrowingStream<ServerSentEvent, any Error> {
         afterContinuation.yield(id)
+        logContinuation.yield("after \(id)")
         guard let next = script.withLock({ $0.streams.isEmpty ? nil : $0.streams.removeFirst() }) else {
             try await suspendUntilCancelled()
         }
@@ -54,6 +70,11 @@ final class FakeFeedSource: QueueFeedSource {
                 frames.forEach { c.yield($0) }
                 c.finish()
             }
+        case .framesThenStayOpen(let frames):
+            let (stream, c) = AsyncThrowingStream.makeStream(of: ServerSentEvent.self)
+            frames.forEach { c.yield($0) }
+            script.withLock { $0.open.append(c) }
+            return stream
         case .framesThenFail(let frames, let error):
             return AsyncThrowingStream { c in
                 frames.forEach { c.yield($0) }
@@ -66,6 +87,7 @@ final class FakeFeedSource: QueueFeedSource {
         let (never, keep) = AsyncStream<Never>.makeStream()
         for await _ in never {}
         keep.finish()
+        logContinuation.yield("cancelled")
         throw CancellationError()
     }
 }

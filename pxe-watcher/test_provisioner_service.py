@@ -117,7 +117,7 @@ class ProvisionTest(ServiceLayoutTest):
         self.assertTrue(entries["full"]["has_credentials"])
         self.assertFalse(entries["bare"]["has_credentials"])
 
-    def test_ignores_environment(self):
+    def test_accepts_and_ignores_environment(self):
         environment = {
             "provision_mode": "os-only",
             "username": "viam",
