@@ -1,0 +1,2 @@
+Error: Not logged in: run the following command to login:
+	viam login

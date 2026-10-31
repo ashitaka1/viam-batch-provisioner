@@ -91,7 +91,8 @@ let package = Package(
         ),
         .testTarget(
             name: "ProvisionerPairHostTests",
-            dependencies: ["ProvisionerPairHost", "ProvisionerKit"]
+            dependencies: ["ProvisionerPairHost", "ProvisionerKit"],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "ProvisionerKitTests",
