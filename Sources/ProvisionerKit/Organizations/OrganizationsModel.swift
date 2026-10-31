@@ -128,7 +128,9 @@ public final class OrganizationsModel {
             pairing = .validating(orgName: payload.orgName)
 
             let credential = OrgCredential(payload, addedAt: now())
-            switch await validator.validate(credential) {
+            let result = await validator.validate(credential)
+            guard isCurrent(client) else { return }
+            switch result {
             case .valid:
                 do {
                     try store.save(credential)

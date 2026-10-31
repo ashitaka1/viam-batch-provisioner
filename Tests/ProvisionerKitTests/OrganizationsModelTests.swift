@@ -222,3 +222,59 @@ final class MadeClients: @unchecked Sendable {
     #expect(model.rows.map(\.credential.orgID) == ["o2"])
     #expect(try store.all().map(\.orgID) == ["o2"])
 }
+
+/// A validator that holds its answer until the test releases it.
+actor GatedValidator: CredentialValidator {
+    private var waiter: CheckedContinuation<ValidationResult, Never>?
+    private var started: [CheckedContinuation<Void, Never>] = []
+
+    func validate(_ credential: OrgCredential) async -> ValidationResult {
+        await withCheckedContinuation { waiter = $0; for s in started { s.resume() }; started = [] }
+    }
+
+    func waitUntilValidating() async {
+        if waiter != nil { return }
+        await withCheckedContinuation { started.append($0) }
+    }
+
+    func answer(_ result: ValidationResult) {
+        waiter?.resume(returning: result)
+        waiter = nil
+    }
+}
+
+struct FailingStore: OrgCredentialStore {
+    struct Failure: Error {}
+    func all() throws -> [OrgCredential] { [] }
+    func save(_ credential: OrgCredential) throws { throw Failure() }
+    func remove(orgID: String) throws {}
+}
+
+@MainActor @Test func cancelDuringValidationStoresNothing() async throws {
+    let client = FakePairingClient()
+    let validator = GatedValidator()
+    let store = InMemoryOrgCredentialStore()
+    let model = OrganizationsModel(store: store, validator: validator, makeClient: { _ in client }, now: { now })
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver()
+    await validator.waitUntilValidating()
+    await model.cancelPairing()
+    await validator.answer(.valid(orgName: "Acme"))
+    await pairing.value
+    #expect(try store.all().isEmpty, "a cancelled pairing must not keep the key")
+    #expect(model.rows.isEmpty)
+    #expect(model.pairing == nil)
+    let reported = await client.reportedOutcomes
+    #expect(reported.isEmpty, "reported \(reported)")
+}
+
+@MainActor @Test func savingFailureReportsRejectedAndShowsNoRow() async throws {
+    let client = FakePairingClient()
+    let model = OrganizationsModel(store: FailingStore(), validator: FakeValidator(results: [:]), makeClient: { _ in client }, now: { now })
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver()
+    await pairing.value
+    #expect(model.rows.isEmpty)
+    #expect(await client.reportedOutcomes == [.rejected])
+    guard case .failed = model.pairing else { Issue.record("expected .failed, got \(String(describing: model.pairing))"); return }
+}
