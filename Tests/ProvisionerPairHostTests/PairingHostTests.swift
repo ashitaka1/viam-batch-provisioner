@@ -85,7 +85,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     return events
 }
 
-@Test func helloRepliesWithOrgAndEmitsCode() async throws {
+@Test(.timeLimit(.minutes(1))) func helloRepliesWithOrgAndEmitsCode() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
     let reply = try await host.hello(app.hello)
@@ -95,24 +95,24 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     #expect(await events.next() == .connected(code: try app.secrets(reply).code))
 }
 
-@Test func firstHelloWinsSecondIsRefused() async throws {
+@Test(.timeLimit(.minutes(1))) func firstHelloWinsSecondIsRefused() async throws {
     let host = makeHost()
     _ = try await host.hello(AppSide(nonce: host.nonce).hello)
     await #expect(throws: PairingHostError.alreadyConnected) { try await host.hello(AppSide(nonce: host.nonce).hello) }
 }
 
-@Test func wrongNonceRefused() async {
+@Test(.timeLimit(.minutes(1))) func wrongNonceRefused() async {
     let host = makeHost()
     await #expect(throws: PairingHostError.wrongNonce) { try await host.hello(AppSide(nonce: .random()).hello) }
 }
 
-@Test func otherAppKeyCannotFetch() async throws {
+@Test(.timeLimit(.minutes(1))) func otherAppKeyCannotFetch() async throws {
     let host = makeHost()
     _ = try await AppSide(nonce: host.nonce).connect(host)
     await #expect(throws: PairingHostError.unknownSession) { try await host.awaitKey(AppSide(nonce: host.nonce).session) }
 }
 
-@Test func keyWaitsForRelease() async throws {
+@Test(.timeLimit(.minutes(1))) func keyWaitsForRelease() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
     let secrets = try await app.connect(host)
@@ -124,7 +124,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     #expect(try secrets.open(Data(base64Encoded: sealed.sealed)!) == payload)
 }
 
-@Test func keyRequestedAfterReleaseReturnsAtOnce() async throws {
+@Test(.timeLimit(.minutes(1))) func keyRequestedAfterReleaseReturnsAtOnce() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
     let secrets = try await app.connect(host)
@@ -132,12 +132,12 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     #expect(try secrets.open(Data(base64Encoded: try await host.awaitKey(app.session).sealed)!) == payload)
 }
 
-@Test func releaseBeforeConnectionIsRefused() async {
+@Test(.timeLimit(.minutes(1))) func releaseBeforeConnectionIsRefused() async {
     let host = makeHost()
     await #expect(throws: PairingHostError.unknownSession) { try await host.release(payload) }
 }
 
-@Test func cancelBeforeReleaseFailsAwaitKey() async throws {
+@Test(.timeLimit(.minutes(1))) func cancelBeforeReleaseFailsAwaitKey() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
     _ = try await app.connect(host)
@@ -148,7 +148,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     await #expect(throws: PairingHostError.cancelled) { try await host.release(payload) }
 }
 
-@Test func appCancelEmitsEvent() async throws {
+@Test(.timeLimit(.minutes(1))) func appCancelEmitsEvent() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
     _ = try await app.connect(host)
@@ -156,7 +156,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     #expect(await collect(host).last == .cancelledByApp)
 }
 
-@Test func resultEndsSession() async throws {
+@Test(.timeLimit(.minutes(1))) func resultEndsSession() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
     _ = try await app.connect(host)
@@ -165,7 +165,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     #expect(await collect(host).last == .result(.rejected, message: "bad key"))
 }
 
-@Test func timeoutBeforeConnectionEndsSession() async {
+@Test(.timeLimit(.minutes(1))) func timeoutBeforeConnectionEndsSession() async {
     let timer = ManualTimer()
     let host = makeHost(timer: timer)
     await timer.fire()
@@ -173,7 +173,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     await #expect(throws: PairingHostError.timedOut) { try await host.hello(AppSide(nonce: host.nonce).hello) }
 }
 
-@Test func timeoutAfterReleaseReportsMintedKey() async throws {
+@Test(.timeLimit(.minutes(1))) func timeoutAfterReleaseReportsMintedKey() async throws {
     let timer = ManualTimer()
     let host = makeHost(timer: timer)
     let app = AppSide(nonce: host.nonce)
@@ -185,7 +185,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     #expect(await host.released, "the host remembers a key was released, so the command can name it")
 }
 
-@Test func resultAfterTimeoutIsRefused() async throws {
+@Test(.timeLimit(.minutes(1))) func resultAfterTimeoutIsRefused() async throws {
     let timer = ManualTimer()
     let host = makeHost(timer: timer)
     let app = AppSide(nonce: host.nonce)
@@ -195,7 +195,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     await #expect(throws: PairingHostError.timedOut) { try await host.report(app.result(.stored)) }
 }
 
-@Test func revealMustMatchCommitment() async throws {
+@Test(.timeLimit(.minutes(1))) func revealMustMatchCommitment() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
     _ = try await host.hello(app.hello)
@@ -203,7 +203,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     await #expect(throws: PairingHostError.commitmentMismatch) { try await host.reveal(substitute.reveal) }
 }
 
-@Test func noCodeBeforeReveal() async throws {
+@Test(.timeLimit(.minutes(1))) func noCodeBeforeReveal() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
     _ = try await host.hello(app.hello)
@@ -211,12 +211,12 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     await #expect(throws: PairingHostError.unknownSession) { try await host.awaitKey(app.session) }
 }
 
-@Test func revealWithoutHelloIsRefused() async {
+@Test(.timeLimit(.minutes(1))) func revealWithoutHelloIsRefused() async {
     let host = makeHost()
     await #expect(throws: PairingHostError.unknownSession) { try await host.reveal(AppSide(nonce: host.nonce).reveal) }
 }
 
-@Test func releaseGivesTheResultItsOwnWindow() async throws {
+@Test(.timeLimit(.minutes(1))) func releaseGivesTheResultItsOwnWindow() async throws {
     let timer = ManualTimer()
     let host = makeHost(timer: timer)
     let app = AppSide(nonce: host.nonce)

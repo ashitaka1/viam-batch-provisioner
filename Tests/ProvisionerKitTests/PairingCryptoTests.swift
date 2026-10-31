@@ -70,7 +70,8 @@ private let payload = PairingPayload(
     #expect(nonce.bytes.count == 16)
     #expect(PairingNonce(base64URL: nonce.base64URL) == nonce)
     #expect(!nonce.base64URL.contains("+") && !nonce.base64URL.contains("/") && !nonce.base64URL.contains("="))
-    #expect(PairingNonce(base64URL: "c2hvcnQ") == nil, "an 5-byte nonce is not a nonce")
+    #expect(PairingNonce(base64URL: "c2hvcnQ") == nil, "a 5-byte nonce is not a nonce")
+    #expect(PairingNonce(base64URL: "AAAAAAAAAAAAAAAAAAAAAAA") == nil, "a 17-byte nonce is not a nonce")
 }
 
 // The code must depend on a value the app fixed before seeing the command's key,

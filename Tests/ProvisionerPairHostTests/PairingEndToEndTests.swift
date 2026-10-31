@@ -4,8 +4,9 @@ import ProvisionerKit
 @testable import ProvisionerPairHost
 import Testing
 
-private func withServer(_ body: (PairingHost, PairingHTTPServer) async throws -> Void) async throws {
-    let host = makeHost()
+private func withServer(timer: ManualTimer = ManualTimer(),
+                        _ body: (PairingHost, PairingHTTPServer) async throws -> Void) async throws {
+    let host = makeHost(timer: timer)
     let server = try await PairingHTTPServer.start(host: host)
     do {
         try await body(host, server)
@@ -20,7 +21,7 @@ private func link(_ host: PairingHost, _ server: PairingHTTPServer) -> PairingLi
     PairingLink(host: "127.0.0.1", port: server.port, nonce: host.nonce)
 }
 
-@Test func pairsOverLoopback() async throws {
+@Test(.timeLimit(.minutes(1))) func pairsOverLoopback() async throws {
     try await withServer { host, server in
         let client = PairingClient(link: link(host, server))
         var events = host.events.makeAsyncIterator()
@@ -39,14 +40,14 @@ private func link(_ host: PairingHost, _ server: PairingHTTPServer) -> PairingLi
     }
 }
 
-@Test func secondClientIsRefused() async throws {
+@Test(.timeLimit(.minutes(1))) func secondClientIsRefused() async throws {
     try await withServer { host, server in
         _ = try await PairingClient(link: link(host, server)).hello()
         await #expect(throws: PairingClientError.alreadyPaired) { try await PairingClient(link: link(host, server)).hello() }
     }
 }
 
-@Test func commandCancelReachesWaitingApp() async throws {
+@Test(.timeLimit(.minutes(1))) func commandCancelReachesWaitingApp() async throws {
     try await withServer { host, server in
         let client = PairingClient(link: link(host, server))
         _ = try await client.hello()
@@ -57,7 +58,7 @@ private func link(_ host: PairingHost, _ server: PairingHTTPServer) -> PairingLi
     }
 }
 
-@Test func appCancelReachesCommand() async throws {
+@Test(.timeLimit(.minutes(1))) func appCancelReachesCommand() async throws {
     try await withServer { host, server in
         let client = PairingClient(link: link(host, server))
         _ = try await client.hello()
@@ -66,12 +67,13 @@ private func link(_ host: PairingHost, _ server: PairingHTTPServer) -> PairingLi
     }
 }
 
-@Test func unknownPathIs404() async throws {
+@Test(.timeLimit(.minutes(1))) func unknownPathIs404() async throws {
     try await withServer { host, server in
         var request = URLRequest(url: link(host, server).baseURL.appending(path: "nope"))
         request.httpMethod = "POST"
         let (_, response) = try await URLSession.shared.data(for: request)
-        #expect((response as? HTTPURLResponse)?.statusCode == 404)
+        let status = (response as? HTTPURLResponse)?.statusCode
+        #expect(status == 404, "status \(String(describing: status))")
     }
 }
 
@@ -91,10 +93,57 @@ private func externalIPv4() -> String? {
     return nil
 }
 
-@Test(.enabled(if: externalIPv4() != nil, "no non-loopback IPv4 address"))
+@Test(.timeLimit(.minutes(1)), .enabled(if: externalIPv4() != nil, "no non-loopback IPv4 address"))
 func listenerBindsLoopbackOnly() async throws {
     try await withServer { host, server in
         let external = PairingLink(host: externalIPv4()!, port: server.port, nonce: host.nonce)
-        await #expect(throws: PairingClientError.self) { try await PairingClient(link: external).hello() }
+        do {
+            _ = try await PairingClient(link: external).hello()
+            Issue.record("connected to the listener through \(external.host)")
+        } catch PairingClientError.transport {
+        } catch {
+            Issue.record("expected a transport error, got \(error)")
+        }
+    }
+}
+
+/// POSTs a raw body and returns the status code.
+private func post(_ link: PairingLink, _ path: String, _ body: Data) async throws -> Int? {
+    var request = URLRequest(url: link.baseURL.appending(path: path))
+    request.httpMethod = "POST"
+    request.httpBody = body
+    let (_, response) = try await URLSession.shared.data(for: request)
+    return (response as? HTTPURLResponse)?.statusCode
+}
+
+@Test(.timeLimit(.minutes(1))) func timedOutSessionReachesAppAsTimeout() async throws {
+    let timer = ManualTimer()
+    try await withServer(timer: timer) { host, server in
+        await timer.fire()
+        _ = await collect(host)
+        await #expect(throws: PairingClientError.timedOut) { try await PairingClient(link: link(host, server)).hello() }
+    }
+}
+
+@Test(.timeLimit(.minutes(1))) func wrongNonceReachesAppAsInvalidSession() async throws {
+    try await withServer { host, server in
+        let stale = PairingLink(host: "127.0.0.1", port: server.port, nonce: .random())
+        await #expect(throws: PairingClientError.invalidSession) { try await PairingClient(link: stale).hello() }
+    }
+}
+
+@Test(.timeLimit(.minutes(1))) func keyRequestFromAnotherAppIs403() async throws {
+    try await withServer { host, server in
+        _ = try await PairingClient(link: link(host, server)).hello()
+        let other = AppSide(nonce: host.nonce).session
+        let status = try await post(link(host, server), "pair/key", JSONEncoder().encode(other))
+        #expect(status == 403, "status \(String(describing: status))")
+    }
+}
+
+@Test(.timeLimit(.minutes(1))) func garbageBodyIs400() async throws {
+    try await withServer { host, server in
+        let status = try await post(link(host, server), "pair/hello", Data("not json".utf8))
+        #expect(status == 400, "status \(String(describing: status))")
     }
 }

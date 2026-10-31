@@ -90,7 +90,7 @@ final class MadeClients: @unchecked Sendable {
     func next() -> FakePairingClient { lock.withLock { count += 1; return queue.removeFirst() } }
 }
 
-@MainActor @Test func pairingFlowStoresAfterValidation() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func pairingFlowStoresAfterValidation() async throws {
     let client = FakePairingClient()
     let store = InMemoryOrgCredentialStore()
     let (model, _) = makeModel(store: store, clients: [client])
@@ -107,7 +107,7 @@ final class MadeClients: @unchecked Sendable {
     #expect(await client.reportedOutcomes == [.stored])
 }
 
-@MainActor @Test func rejectedKeyIsNotStored() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func rejectedKeyIsNotStored() async throws {
     let client = FakePairingClient()
     let store = InMemoryOrgCredentialStore()
     let (model, _) = makeModel(store: store, validator: FakeValidator(results: ["o1": .rejected("bad key")]), clients: [client])
@@ -121,7 +121,7 @@ final class MadeClients: @unchecked Sendable {
     guard case .failed = model.pairing else { Issue.record("expected .failed, got \(String(describing: model.pairing))"); return }
 }
 
-@MainActor @Test func unreachableDuringPairingStoresNothing() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func unreachableDuringPairingStoresNothing() async throws {
     let client = FakePairingClient()
     let store = InMemoryOrgCredentialStore()
     let (model, _) = makeModel(store: store, validator: FakeValidator(results: ["o1": .unreachable("offline")]), clients: [client])
@@ -133,7 +133,7 @@ final class MadeClients: @unchecked Sendable {
     #expect(await client.reportedOutcomes == [.rejected])
 }
 
-@MainActor @Test func unreachableDoesNotMarkRejected() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func unreachableDoesNotMarkRejected() async throws {
     let store = InMemoryOrgCredentialStore([stored("o1", "Acme")])
     let (model, _) = makeModel(store: store, validator: FakeValidator(results: ["o1": .unreachable("offline")]), clients: [])
     await model.load()
@@ -141,7 +141,7 @@ final class MadeClients: @unchecked Sendable {
     #expect(try store.all().map(\.orgID) == ["o1"], "the key is kept")
 }
 
-@MainActor @Test func secondLinkIgnoredDuringPairing() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func secondLinkIgnoredDuringPairing() async throws {
     let client = FakePairingClient()
     let (model, made) = makeModel(clients: [client, FakePairingClient(orgID: "o2", orgName: "Other")])
     _ = model.handle(url: link.url)
@@ -151,10 +151,10 @@ final class MadeClients: @unchecked Sendable {
     #expect(model.pairing == .confirm(orgName: "Acme", code: "4729"))
 }
 
-@MainActor @Test func linkAfterFinishedPairingStartsNewOne() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func linkAfterFinishedPairingStartsNewOne() async throws {
     let first = FakePairingClient()
     let second = FakePairingClient(orgID: "o2", orgName: "Beta", code: "1111")
-    let (model, _) = makeModel(validator: FakeValidator(results: [:], fallback: .valid(orgName: "x")), clients: [first, second])
+    let (model, _) = makeModel(clients: [first, second])
     let pairing = try #require(model.handle(url: link.url))
     await first.deliver()
     await pairing.value
@@ -163,7 +163,7 @@ final class MadeClients: @unchecked Sendable {
     #expect(model.pairing == .confirm(orgName: "Beta", code: "1111"))
 }
 
-@MainActor @Test func cancelTellsCommand() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func cancelTellsCommand() async throws {
     let client = FakePairingClient()
     let (model, _) = makeModel(clients: [client])
     let pairing = try #require(model.handle(url: link.url))
@@ -174,7 +174,7 @@ final class MadeClients: @unchecked Sendable {
     #expect(model.pairing == nil)
 }
 
-@MainActor @Test func commandDeclineShowsFailure() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func commandDeclineShowsFailure() async throws {
     let client = FakePairingClient()
     let (model, _) = makeModel(clients: [client])
     let pairing = try #require(model.handle(url: link.url))
@@ -183,7 +183,7 @@ final class MadeClients: @unchecked Sendable {
     #expect(model.pairing == .failed("Pairing was cancelled in Terminal."))
 }
 
-@MainActor @Test func repairReplacesRow() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func repairReplacesRow() async throws {
     let first = FakePairingClient()
     let second = FakePairingClient()
     let store = InMemoryOrgCredentialStore()
@@ -198,14 +198,14 @@ final class MadeClients: @unchecked Sendable {
     #expect(try store.all().count == 1)
 }
 
-@MainActor @Test func badLinkShowsFailure() {
+@MainActor @Test(.timeLimit(.minutes(1))) func badLinkShowsFailure() {
     let (model, made) = makeModel(clients: [])
     #expect(model.handle(url: URL(string: "viam-provisioner://pair?host=127.0.0.1&port=5&nonce=bad")!) == nil)
     #expect(model.pairing == .failed("This pairing link isn't valid."))
     #expect(made.count == 0)
 }
 
-@MainActor @Test func loadChecksEveryOrg() async {
+@MainActor @Test(.timeLimit(.minutes(1))) func loadChecksEveryOrg() async {
     let store = InMemoryOrgCredentialStore([stored("o1", "Acme"), stored("o2", "Beta")])
     let validator = FakeValidator(results: ["o1": .valid(orgName: "Acme"), "o2": .rejected("revoked")])
     let (model, _) = makeModel(store: store, validator: validator, clients: [])
@@ -214,7 +214,7 @@ final class MadeClients: @unchecked Sendable {
     #expect(model.rows.map(\.status) == [.checked(now), .rejected("revoked")])
 }
 
-@MainActor @Test func removeDeletesRowAndKey() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func removeDeletesRowAndKey() async throws {
     let store = InMemoryOrgCredentialStore([stored("o1", "Acme"), stored("o2", "Beta")])
     let (model, _) = makeModel(store: store, clients: [])
     await model.load()
@@ -250,7 +250,7 @@ struct FailingStore: OrgCredentialStore {
     func remove(orgID: String) throws {}
 }
 
-@MainActor @Test func cancelDuringValidationStoresNothing() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func cancelDuringValidationStoresNothing() async throws {
     let client = FakePairingClient()
     let validator = GatedValidator()
     let store = InMemoryOrgCredentialStore()
@@ -268,7 +268,7 @@ struct FailingStore: OrgCredentialStore {
     #expect(reported.isEmpty, "reported \(reported)")
 }
 
-@MainActor @Test func savingFailureReportsRejectedAndShowsNoRow() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func savingFailureReportsRejectedAndShowsNoRow() async throws {
     let client = FakePairingClient()
     let model = OrganizationsModel(store: FailingStore(), validator: FakeValidator(results: [:]), makeClient: { _ in client }, now: { now })
     let pairing = try #require(model.handle(url: link.url))

@@ -10,6 +10,7 @@ import Testing
 /// tests can run in parallel.
 final class StubProtocol: URLProtocol, @unchecked Sendable {
     struct Reply {
+        var status = 200
         var headers: [String: String] = ["content-type": "application/grpc-web+proto"]
         var body = Data()
         var error: URLError?
@@ -34,7 +35,7 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didFailWithError: error)
             return
         }
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/2", headerFields: reply.headers)!
+        let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: "HTTP/2", headerFields: reply.headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: reply.body)
         client?.urlProtocolDidFinishLoading(self)
@@ -234,4 +235,63 @@ final class Locked<Value>: @unchecked Sendable {
     private let lock = NSLock()
     init(_ value: Value) { self.value = value }
     func withLock<R>(_ body: (inout Value) -> R) -> R { lock.withLock { body(&value) } }
+}
+
+// MARK: - Malformed responses and other statuses
+
+private func validate(_ reply: @escaping (URLRequest) -> StubProtocol.Reply) async -> ValidationResult {
+    let base = StubProtocol.register { request, _ in
+        request.url!.path.hasSuffix("Authenticate") ? ok(authenticated()) : reply(request)
+    }
+    return await ViamCredentialValidator(baseURL: base, session: session).validate(credential)
+}
+
+private func call(_ reply: @escaping (URLRequest) -> StubProtocol.Reply) async throws {
+    let base = StubProtocol.register { request, _ in
+        request.url!.path.hasSuffix("Authenticate") ? ok(authenticated()) : reply(request)
+    }
+    _ = try await ViamAppClient(keyID: "kid", key: "kval", baseURL: base, session: session).organization(id: "o1")
+}
+
+@Test(arguments: [3, 5]) func unknownOrgIsRejection(code: Int) async {
+    #expect(await validate { _ in trailerStatus(code, "no such org") } == .rejected("no such org"))
+}
+
+@Test func httpErrorIsTransport() async {
+    await #expect(throws: ViamError.transport("HTTP 503")) {
+        try await call { _ in StubProtocol.Reply(status: 503) }
+    }
+}
+
+@Test func truncatedFrameIsMalformed() async {
+    await #expect(throws: ViamError.malformedResponse) {
+        try await call { _ in StubProtocol.Reply(body: frame(0, Data([1, 2, 3, 4, 5])).prefix(7)) }
+    }
+}
+
+@Test func shortTrailingBytesAreMalformed() async {
+    await #expect(throws: ViamError.malformedResponse) {
+        try await call { _ in
+            var reply = ok(organization("o1", "Acme"))
+            reply.body.append(contentsOf: [0, 0])
+            return reply
+        }
+    }
+}
+
+@Test func okWithoutMessageIsMalformed() async {
+    await #expect(throws: ViamError.malformedResponse) {
+        try await call { _ in StubProtocol.Reply(body: frame(0x80, Data("grpc-status:0\r\n".utf8))) }
+    }
+}
+
+@Test func missingStatusIsMalformed() async {
+    await #expect(throws: ViamError.malformedResponse) {
+        try await call { _ in StubProtocol.Reply(body: frame(0, try! organization("o1", "Acme").serializedData())) }
+    }
+}
+
+@Test func malformedResponseIsNotRejection() async {
+    let result = await validate { _ in StubProtocol.Reply(body: Data([0, 0])) }
+    guard case .unreachable = result else { Issue.record("expected .unreachable, got \(result)"); return }
 }

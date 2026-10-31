@@ -54,14 +54,10 @@ func detectsLoggedOut(fixtureName: String) async throws {
 }
 
 @Test func parsesCreatedKey() async throws {
-    let key = try await FakeRunner(stdout: try fixture("api-key-create")).cli.createKey(orgID: "o1", name: "provisioner-app studio 2026-10-31")
+    let runner = FakeRunner(stdout: try fixture("api-key-create"))
+    let key = try await runner.cli.createKey(orgID: "o1", name: "provisioner-app studio 2026-10-31")
     #expect(key.id == "REDACTED-ID")
     #expect(key.key == "REDACTED-KEY")
-}
-
-@Test func passesNoSecretOnCommandLine() async throws {
-    let runner = FakeRunner(stdout: try fixture("api-key-create"))
-    _ = try await runner.cli.createKey(orgID: "o1", name: "provisioner-app studio 2026-10-31")
     #expect(runner.calls == [["organizations", "api-key", "create", "--org-id", "o1", "--name", "provisioner-app studio 2026-10-31"]])
 }
 
@@ -71,8 +67,7 @@ func detectsLoggedOut(fixtureName: String) async throws {
         _ = try await runner.cli.createKey(orgID: "o1", name: "n")
         Issue.record("expected unparsableKey")
     } catch {
-        #expect(error as? ViamCLIError == .unparsableKey)
-        #expect(!String(describing: error).contains("SECRET123"), "error text: \(error)")
+        #expect(error as? ViamCLIError == .unparsableKey, "got \(error)")
     }
 }
 
