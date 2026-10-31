@@ -9,6 +9,7 @@ let package = Package(
         .executable(name: "provisioner-pxe", targets: ["provisioner-pxe"]),
         .library(name: "ProvisionerAPI", targets: ["ProvisionerAPI"]),
         .library(name: "ProvisionerKit", targets: ["ProvisionerKit"]),
+        .library(name: "ViamAPI", targets: ["ViamAPI"]),
         .executable(name: "provisioner-probe", targets: ["provisioner-probe"]),
     ],
     dependencies: [
@@ -16,6 +17,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-openapi-generator.git", from: "1.14.0"),
         .package(url: "https://github.com/apple/swift-openapi-runtime.git", from: "1.13.0"),
         .package(url: "https://github.com/apple/swift-openapi-urlsession.git", from: "1.4.0"),
+        .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0"),
     ],
     targets: [
         .target(
@@ -61,7 +63,22 @@ let package = Package(
         ),
         .executableTarget(
             name: "provisioner-probe",
-            dependencies: ["ProvisionerKit"]
+            dependencies: ["ProvisionerKit", "ViamAPI"]
+        ),
+        .target(
+            name: "ViamAPI",
+            dependencies: [
+                "ProvisionerKit",
+                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+            ]
+        ),
+        .testTarget(
+            name: "ViamAPITests",
+            dependencies: [
+                "ViamAPI",
+                "ProvisionerKit",
+                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+            ]
         ),
         .testTarget(
             name: "ProvisionerKitTests",

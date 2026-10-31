@@ -1,11 +1,13 @@
 import Foundation
 import ProvisionerKit
+import ViamAPI
 
 let usage = """
     usage: provisioner-probe browse
            provisioner-probe check <base-url>
            provisioner-probe watch <base-url>
            provisioner-probe notify <base-url>
+           provisioner-probe viam-org <org-id>    (VIAM_API_KEY_ID and VIAM_API_KEY in the environment)
     """
 
 func fail(_ message: String) -> Never {
@@ -95,10 +97,25 @@ func notify(_ client: ProvisionerClient) async {
 
 setvbuf(stdout, nil, _IOLBF, 0)
 var arguments = CommandLine.arguments.dropFirst()
+/// Reads one org from Viam with an API key, the call the app uses to validate keys.
+func viamOrg(_ arguments: ArraySlice<String>) async {
+    let environment = ProcessInfo.processInfo.environment
+    guard let id = arguments.first, let keyID = environment["VIAM_API_KEY_ID"], let key = environment["VIAM_API_KEY"] else {
+        fail(usage)
+    }
+    do {
+        let org = try await ViamAppClient(keyID: keyID, key: key).organization(id: id)
+        print("org \(org.id): \(org.name)")
+    } catch {
+        fail("viam-org failed: \(error)")
+    }
+}
+
 switch arguments.popFirst() {
 case "browse": await browse()
 case "check": await check(client(arguments))
 case "watch": await watch(client(arguments))
 case "notify": await notify(client(arguments))
+case "viam-org": await viamOrg(arguments)
 default: fail(usage)
 }
