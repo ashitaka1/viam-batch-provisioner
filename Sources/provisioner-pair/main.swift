@@ -158,7 +158,11 @@ func converse() async -> Never {
         case .event(.result(.rejected, let message)):
             await finish("The app couldn't use key \"\(keyName)\": \(message ?? "rejected"). \(deleteHint(keyName))", status: 1)
         case .event(.cancelledByApp): await finish("Cancelled in the app after the key was created. \(deleteHint(keyName))", status: 1)
-        case .event(.timedOut), nil: await finish("Timed out after creating key \"\(keyName)\". \(deleteHint(keyName))", status: 1)
+        case .event(.timedOut), nil:
+            await finish("""
+                Timed out waiting for the app after creating key "\(keyName)". If the app's Settings → Organizations \
+                doesn't list \(org.name), \(deleteHint(keyName).prefix(1).lowercased() + deleteHint(keyName).dropFirst())
+                """, status: 1)
         case .event, .line: continue
         }
     }
