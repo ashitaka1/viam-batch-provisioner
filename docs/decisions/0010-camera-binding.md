@@ -4,7 +4,7 @@ Date: 2026-10-02
 
 ## Status
 
-Accepted
+Accepted; amended by decision 32, under which binding also happens from a client without a camera and is required for provisioning
 
 ## Context
 
