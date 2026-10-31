@@ -53,8 +53,11 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 | `Sources/ProvisionerAPI/` | Types generated from `openapi/provisioner.yaml` by swift-openapi-generator, through the `openapi.yaml` symlink |
 | `Sources/ProvisionerKit/` | Client library. `ProvisionerClient` wraps the generated client; `Domain/` holds the types the app consumes and their mapping to the generated wire types; `WireCoding.swift` holds the ISO 8601 JSON coders; `ProvisionerError` is the error surface |
 | `Sources/ProvisionerKit/QueueFeed.swift` | Snapshot, then the event stream from the snapshot's id; reconnects with backoff, resumes from the last event, resyncs by snapshot |
+| `Sources/ProvisionerKit/InstallNotification.swift` | Maps an install-complete or install-failed `MachineEvent` to the text of a notification; identifier `install.<name>`, so a later outcome replaces the earlier one |
+| `Sources/ProvisionerKit/InstallNotifier.swift` | Consumes `QueueFeed` updates and hands each ending install to a `NotificationPoster`; snapshots post nothing, replayed events post; a failed post is logged |
+| `Sources/ProvisionerKit/UserNotificationPoster.swift` | `NotificationPoster` over `UNUserNotificationCenter`; needs a bundled app |
 | `Sources/ProvisionerKit/ServerBrowser.swift` | Bonjour browse for `_viam-provisioner._tcp` with TXT `api=v1`, and validated manual addresses |
-| `Sources/provisioner-probe/` | Dev executable that exercises `ProvisionerKit` against a live API: `check`, `browse`, `watch` |
+| `Sources/provisioner-probe/` | Dev executable that exercises `ProvisionerKit` against a live API: `check`, `browse`, `watch`, `notify` (prints the notifications the app would post) |
 | `Tests/ProvisionerKitTests/` | Domain mapping, client, feed and browser tests; `Support/` holds a scripted transport and a fake feed source |
 
 ## Data model

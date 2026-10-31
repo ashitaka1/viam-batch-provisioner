@@ -33,7 +33,7 @@ Runs `swift test` over the root package (Swift 6, macOS 14+). The ProvisionerPXE
 
 `swift-openapi-generator` generates `ProvisionerAPI`'s types and `ProvisionerKit`'s client from `openapi/provisioner.yaml` at build time, through the `openapi.yaml` symlinks in each target's directory.
 
-`swift run provisioner-probe` exercises ProvisionerKit against a running API (`scripts/api-service.sh start` runs it with its Bonjour advertisement): `check <base-url>` provisions, reads and removes a throwaway name and exits non-zero on any mismatch; `browse` lists advertised servers for five seconds; `watch <base-url>` prints every queue update and connection state.
+`swift run provisioner-probe` exercises ProvisionerKit against a running API (`scripts/api-service.sh start` runs it with its Bonjour advertisement): `check <base-url>` provisions, reads and removes a throwaway name and exits non-zero on any mismatch; `browse` lists advertised servers for five seconds; `watch <base-url>` prints every queue update and connection state; `notify <base-url>` prints each notification the app would post for an install that completes or fails.
 
 `swift run provisioner-pxe --interface en0 --root netboot` serves proxy DHCP and TFTP on the default ports 67, 4011 and 69 (sudo) and prints each PXE client it answers. `--dhcp-port`, `--pxe-port` and `--tftp-port` override the ports; `--offer-to <ip>:<port>` redirects offers away from the broadcast address, for testing without privileges. It runs beside no dnsmasq: stop `just dhcp` first.
 
