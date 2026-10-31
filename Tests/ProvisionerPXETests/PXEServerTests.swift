@@ -182,8 +182,12 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
                 for _ in 0..<4 {
                     group.addTask {
                         let client = try await UDPTestClient()
-                        let result = await Result {
-                            try await client.fetch("vmlinuz", options: [TFTPOption(name: "blksize", value: "1468")], port: port)
+                        let result: Result<Data, any Error>
+                        do {
+                            result = .success(try await client.fetch(
+                                "vmlinuz", options: [TFTPOption(name: "blksize", value: "1468")], port: port))
+                        } catch {
+                            result = .failure(error)
                         }
                         await client.close()
                         return try result.get()
