@@ -80,6 +80,19 @@ let package = Package(
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ]
         ),
+        .target(
+            name: "ProvisionerPairHost",
+            dependencies: [
+                "ProvisionerKit",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
+            ]
+        ),
+        .testTarget(
+            name: "ProvisionerPairHostTests",
+            dependencies: ["ProvisionerPairHost", "ProvisionerKit"]
+        ),
         .testTarget(
             name: "ProvisionerKitTests",
             dependencies: [
