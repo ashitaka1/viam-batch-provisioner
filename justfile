@@ -117,6 +117,11 @@ test:
 test-swift:
     swift test
 
+# Build, register and open the macOS app (build/Viam Provisioner.app)
+app:
+    ./scripts/bundle-app.sh
+    open "build/Viam Provisioner.app"
+
 # Sign the macOS app in to a Viam organization (uses your viam CLI login)
 pair-app *args:
     swift run -c release provisioner-pair {{args}}
