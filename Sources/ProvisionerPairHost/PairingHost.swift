@@ -1,4 +1,4 @@
-public import Foundation
+import Foundation
 public import ProvisionerKit
 
 public enum PairingHostError: Error, Equatable, Sendable {

@@ -85,8 +85,9 @@ private final class PairingHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         headers.add(name: "connection", value: keepAlive ? "keep-alive" : "close")
         context.write(wrapOutboundOut(.head(HTTPResponseHead(version: .http1_1, status: status, headers: headers))), promise: nil)
         context.write(wrapOutboundOut(.body(.byteBuffer(ByteBuffer(bytes: body)))), promise: nil)
+        let channel = context.channel
         let done = context.writeAndFlush(wrapOutboundOut(.end(nil)))
-        if !keepAlive { done.whenComplete { _ in context.close(promise: nil) } }
+        if !keepAlive { done.whenComplete { _ in channel.close(promise: nil) } }
     }
 
     static func route(host: PairingHost, method: HTTPMethod, path: String, body: Data) async -> (HTTPResponseStatus, Data) {

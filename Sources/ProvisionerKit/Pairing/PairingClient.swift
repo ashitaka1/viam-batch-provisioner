@@ -54,7 +54,7 @@ public actor PairingClient {
 
     /// Best effort: the command may already be gone.
     public func cancel() async {
-        try? await send("pair/cancel", sessionRequest)
+        _ = try? await send("pair/cancel", sessionRequest)
     }
 
     private func post<Response: Decodable>(_ path: String, _ body: some Encodable, timeout: TimeInterval = 10) async throws -> Response {
