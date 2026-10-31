@@ -3,22 +3,40 @@ import ProvisionerKit
 @testable import ProvisionerPairHost
 import Testing
 
-/// A sleep the test ends by hand, standing in for the 120-second session timeout.
+/// Sleeps the test ends by hand, standing in for the session's deadlines.
+/// `fire()` ends every sleep, now and later; `fire(sleep:)` ends one.
 actor ManualTimer {
-    private var waiters: [CheckedContinuation<Void, any Error>] = []
-    private var fired = false
+    private var sleeps: [(duration: Duration, waiter: CheckedContinuation<Void, any Error>?)] = []
+    private var fired: Set<Int> = []
+    private var firedAll = false
 
-    nonisolated var sleep: @Sendable (Duration) async throws -> Void { { _ in try await self.wait() } }
+    nonisolated var sleep: @Sendable (Duration) async throws -> Void { { try await self.wait($0) } }
 
-    private func wait() async throws {
-        if fired { return }
-        try await withCheckedThrowingContinuation { waiters.append($0) }
+    /// The durations asked for, in order.
+    var requested: [Duration] { sleeps.map(\.duration) }
+
+    private func wait(_ duration: Duration) async throws {
+        let index = sleeps.count
+        sleeps.append((duration, nil))
+        if firedAll || fired.contains(index) { return }
+        try await withCheckedThrowingContinuation { sleeps[index].waiter = $0 }
     }
 
     func fire() {
-        fired = true
-        for waiter in waiters { waiter.resume() }
-        waiters = []
+        firedAll = true
+        for index in sleeps.indices { fire(sleep: index) }
+    }
+
+    func fire(sleep index: Int) {
+        fired.insert(index)
+        guard sleeps.indices.contains(index) else { return }
+        sleeps[index].waiter?.resume()
+        sleeps[index].waiter = nil
+    }
+
+    /// Suspends until `count` sleeps have been requested.
+    func waitForSleeps(_ count: Int) async {
+        while sleeps.count < count { await Task.yield() }
     }
 }
 
@@ -27,14 +45,29 @@ let payload = PairingPayload(orgID: "o1", orgName: "Acme", keyID: "kid", key: "k
 /// The app's half of a session, driven directly against the host.
 struct AppSide {
     let keys = PairingKeyPair()
+    let appNonce = PairingNonce.random()
     let nonce: PairingNonce
 
-    var hello: PairingHello { PairingHello(nonce: nonce.base64URL, appPublicKey: keys.publicKey.base64EncodedString()) }
+    var hello: PairingHello {
+        PairingHello(nonce: nonce.base64URL,
+                     commitment: PairingCommitment.make(appPublicKey: keys.publicKey, appNonce: appNonce).base64EncodedString())
+    }
+    var reveal: PairingReveal {
+        PairingReveal(nonce: nonce.base64URL, appPublicKey: keys.publicKey.base64EncodedString(), appNonce: appNonce.base64URL)
+    }
     var session: PairingSessionRequest { PairingSessionRequest(nonce: nonce.base64URL, appPublicKey: keys.publicKey.base64EncodedString()) }
 
     func secrets(_ reply: PairingHelloReply) throws -> PairingSecrets {
         let command = Data(base64Encoded: reply.commandPublicKey)!
-        return try PairingSecrets(own: keys, peerPublicKey: command, nonce: nonce, commandPublicKey: command, appPublicKey: keys.publicKey)
+        return try PairingSecrets(own: keys, peerPublicKey: command, nonce: nonce, commandPublicKey: command,
+                                  appPublicKey: keys.publicKey, appNonce: appNonce)
+    }
+
+    /// hello then reveal; returns the app's secrets.
+    func connect(_ host: PairingHost) async throws -> PairingSecrets {
+        let reply = try await host.hello(hello)
+        try await host.reveal(reveal)
+        return try secrets(reply)
     }
 
     func result(_ outcome: PairingResult.Outcome, _ message: String? = nil) -> PairingResult {
@@ -57,6 +90,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     let app = AppSide(nonce: host.nonce)
     let reply = try await host.hello(app.hello)
     #expect(reply.orgID == "o1" && reply.orgName == "Acme")
+    try await host.reveal(app.reveal)
     var events = host.events.makeAsyncIterator()
     #expect(await events.next() == .connected(code: try app.secrets(reply).code))
 }
@@ -74,14 +108,14 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
 
 @Test func otherAppKeyCannotFetch() async throws {
     let host = makeHost()
-    _ = try await host.hello(AppSide(nonce: host.nonce).hello)
+    _ = try await AppSide(nonce: host.nonce).connect(host)
     await #expect(throws: PairingHostError.unknownSession) { try await host.awaitKey(AppSide(nonce: host.nonce).session) }
 }
 
 @Test func keyWaitsForRelease() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
-    let secrets = try app.secrets(try await host.hello(app.hello))
+    let secrets = try await app.connect(host)
     let fetch = Task { try await host.awaitKey(app.session) }
     // The fetch can't finish before release: release happens only after the waiter is parked.
     await host.waitUntilKeyRequested()
@@ -93,7 +127,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
 @Test func keyRequestedAfterReleaseReturnsAtOnce() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
-    let secrets = try app.secrets(try await host.hello(app.hello))
+    let secrets = try await app.connect(host)
     try await host.release(payload)
     #expect(try secrets.open(Data(base64Encoded: try await host.awaitKey(app.session).sealed)!) == payload)
 }
@@ -106,7 +140,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
 @Test func cancelBeforeReleaseFailsAwaitKey() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
-    _ = try await host.hello(app.hello)
+    _ = try await app.connect(host)
     let fetch = Task { try await host.awaitKey(app.session) }
     await host.waitUntilKeyRequested()
     await host.cancel()
@@ -117,7 +151,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
 @Test func appCancelEmitsEvent() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
-    _ = try await host.hello(app.hello)
+    _ = try await app.connect(host)
     try await host.appCancel(app.session)
     #expect(await collect(host).last == .cancelledByApp)
 }
@@ -125,7 +159,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
 @Test func resultEndsSession() async throws {
     let host = makeHost()
     let app = AppSide(nonce: host.nonce)
-    _ = try await host.hello(app.hello)
+    _ = try await app.connect(host)
     try await host.release(payload)
     try await host.report(app.result(.rejected, "bad key"))
     #expect(await collect(host).last == .result(.rejected, message: "bad key"))
@@ -143,7 +177,7 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     let timer = ManualTimer()
     let host = makeHost(timer: timer)
     let app = AppSide(nonce: host.nonce)
-    _ = try await host.hello(app.hello)
+    _ = try await app.connect(host)
     try await host.release(payload)
     await timer.fire()
     let events = await collect(host)
@@ -155,8 +189,42 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     let timer = ManualTimer()
     let host = makeHost(timer: timer)
     let app = AppSide(nonce: host.nonce)
-    _ = try await host.hello(app.hello)
+    _ = try await app.connect(host)
     await timer.fire()
     _ = await collect(host)
     await #expect(throws: PairingHostError.timedOut) { try await host.report(app.result(.stored)) }
+}
+
+@Test func revealMustMatchCommitment() async throws {
+    let host = makeHost()
+    let app = AppSide(nonce: host.nonce)
+    _ = try await host.hello(app.hello)
+    let substitute = AppSide(nonce: host.nonce)
+    await #expect(throws: PairingHostError.commitmentMismatch) { try await host.reveal(substitute.reveal) }
+}
+
+@Test func noCodeBeforeReveal() async throws {
+    let host = makeHost()
+    let app = AppSide(nonce: host.nonce)
+    _ = try await host.hello(app.hello)
+    await #expect(throws: PairingHostError.unknownSession) { try await host.release(payload) }
+    await #expect(throws: PairingHostError.unknownSession) { try await host.awaitKey(app.session) }
+}
+
+@Test func revealWithoutHelloIsRefused() async {
+    let host = makeHost()
+    await #expect(throws: PairingHostError.unknownSession) { try await host.reveal(AppSide(nonce: host.nonce).reveal) }
+}
+
+@Test func releaseGivesTheResultItsOwnWindow() async throws {
+    let timer = ManualTimer()
+    let host = makeHost(timer: timer)
+    let app = AppSide(nonce: host.nonce)
+    _ = try await app.connect(host)
+    try await host.release(payload)
+    await timer.waitForSleeps(2)
+    #expect(await timer.requested == [.seconds(120), .seconds(30)])
+    await timer.fire(sleep: 0)   // the original deadline passes while the app validates
+    try await host.report(app.result(.stored))
+    #expect(await collect(host).last == .result(.stored, message: nil), "the stored result still counts")
 }

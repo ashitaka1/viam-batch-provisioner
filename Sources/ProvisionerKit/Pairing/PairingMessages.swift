@@ -1,4 +1,4 @@
-public import Foundation
+import Foundation
 
 /// The credential the command hands the app, sealed with the session key.
 public struct PairingPayload: Codable, Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
@@ -22,14 +22,29 @@ public struct PairingPayload: Codable, Sendable, Equatable, CustomStringConverti
 
 // Wire messages. Public keys and sealed bytes are standard base64.
 
-/// App → command: the first request of a session.
+/// App → command: the first request of a session. Carries only the app's
+/// commitment; its key and nonce follow in `PairingReveal`.
 public struct PairingHello: Codable, Sendable, Equatable {
     public var nonce: String
-    public var appPublicKey: String
+    public var commitment: String
 
-    public init(nonce: String, appPublicKey: String) {
+    public init(nonce: String, commitment: String) {
+        self.nonce = nonce
+        self.commitment = commitment
+    }
+}
+
+/// App → command, after the hello reply: what the commitment bound.
+public struct PairingReveal: Codable, Sendable, Equatable {
+    public var nonce: String
+    public var appPublicKey: String
+    /// base64url
+    public var appNonce: String
+
+    public init(nonce: String, appPublicKey: String, appNonce: String) {
         self.nonce = nonce
         self.appPublicKey = appPublicKey
+        self.appNonce = appNonce
     }
 }
 

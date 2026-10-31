@@ -5,7 +5,7 @@ import NIOPosix
 import ProvisionerKit
 
 /// Serves one `PairingHost` over HTTP/1.1:
-/// `POST /pair/hello`, `/pair/key` (held open until the key is released or the
+/// `POST /pair/hello`, `/pair/reveal`, `/pair/key` (held open until the key is released or the
 /// session ends), `/pair/result`, `/pair/cancel`, each with a JSON body.
 public final class PairingHTTPServer: Sendable {
     private let channel: any Channel
@@ -96,6 +96,9 @@ private final class PairingHTTPHandler: ChannelInboundHandler, @unchecked Sendab
             switch path {
             case "/pair/hello":
                 return (.ok, try encode(await host.hello(decode(PairingHello.self, body))))
+            case "/pair/reveal":
+                try await host.reveal(decode(PairingReveal.self, body))
+                return (.noContent, Data())
             case "/pair/key":
                 return (.ok, try encode(await host.awaitKey(decode(PairingSessionRequest.self, body))))
             case "/pair/result":
@@ -118,7 +121,7 @@ private final class PairingHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         switch error {
         case .wrongNonce: .notFound
         case .alreadyConnected: .conflict
-        case .unknownSession: .forbidden
+        case .unknownSession, .commitmentMismatch: .forbidden
         case .cancelled, .finished: .gone
         case .timedOut: .requestTimeout
         }

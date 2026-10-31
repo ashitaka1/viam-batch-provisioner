@@ -17,6 +17,7 @@ public actor PairingClient {
     private let link: PairingLink
     private let session: URLSession
     private let keys = PairingKeyPair()
+    private let appNonce = PairingNonce.random()
     private var secrets: PairingSecrets?
 
     public init(link: PairingLink, session: URLSession = .shared) {
@@ -29,12 +30,16 @@ public actor PairingClient {
         PairingSessionRequest(nonce: link.nonce.base64URL, appPublicKey: appPublicKey)
     }
 
-    /// Exchanges keys. Returns the org being paired and the code to show.
+    /// Commits to the app's key, receives the command's, then reveals. Returns
+    /// the org being paired and the code to show.
     public func hello() async throws -> (orgID: String, orgName: String, code: String) {
-        let reply: PairingHelloReply = try await post("pair/hello", PairingHello(nonce: link.nonce.base64URL, appPublicKey: appPublicKey))
+        let commitment = PairingCommitment.make(appPublicKey: keys.publicKey, appNonce: appNonce)
+        let reply: PairingHelloReply = try await post(
+            "pair/hello", PairingHello(nonce: link.nonce.base64URL, commitment: commitment.base64EncodedString()))
         guard let commandKey = Data(base64Encoded: reply.commandPublicKey) else { throw PairingError.invalidPeerKey }
         let secrets = try PairingSecrets(own: keys, peerPublicKey: commandKey, nonce: link.nonce,
-                                         commandPublicKey: commandKey, appPublicKey: keys.publicKey)
+                                         commandPublicKey: commandKey, appPublicKey: keys.publicKey, appNonce: appNonce)
+        try await send("pair/reveal", PairingReveal(nonce: link.nonce.base64URL, appPublicKey: appPublicKey, appNonce: appNonce.base64URL))
         self.secrets = secrets
         return (reply.orgID, reply.orgName, secrets.code)
     }

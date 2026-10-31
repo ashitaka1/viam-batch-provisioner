@@ -37,12 +37,30 @@ public struct PairingKeyPair: Sendable {
 
     public init() { privateKey = .init() }
 
+    init(rawPrivateKey: Data) throws { privateKey = try .init(rawRepresentation: rawPrivateKey) }
+
     public var publicKey: Data { privateKey.publicKey.rawRepresentation }
 }
 
-/// What both sides derive once they hold each other's public keys: the code the
-/// operator compares and the key that seals the payload. A party in the middle
-/// holds different keys with each side, so the two codes differ.
+/// The app's opening move: a hash binding its public key and a fresh nonce,
+/// sent before it sees the command's key and revealed after. A party answering
+/// the app must pick its key without knowing the app's, so it can't search for
+/// a key that makes the codes match (Bluetooth Secure Simple Pairing's numeric
+/// comparison uses the same commit-then-reveal step).
+public enum PairingCommitment {
+    public static func make(appPublicKey: Data, appNonce: PairingNonce) -> Data {
+        Data(SHA256.hash(data: PairingSecrets.label + Data("commit".utf8) + appPublicKey + appNonce.bytes))
+    }
+
+    public static func verify(_ commitment: Data, appPublicKey: Data, appNonce: PairingNonce) -> Bool {
+        make(appPublicKey: appPublicKey, appNonce: appNonce) == commitment
+    }
+}
+
+/// What both sides derive once they hold each other's public keys and the app's
+/// revealed nonce: the code the operator compares and the key that seals the
+/// payload. A party in the middle holds different keys with each side, and the
+/// commitment stops it choosing keys that make the two codes agree.
 public struct PairingSecrets: Sendable {
     static let label = Data("viam-provisioner-pair-v1".utf8)
 
@@ -50,7 +68,7 @@ public struct PairingSecrets: Sendable {
     private let key: SymmetricKey
 
     public init(own: PairingKeyPair, peerPublicKey: Data, nonce: PairingNonce,
-                commandPublicKey: Data, appPublicKey: Data) throws {
+                commandPublicKey: Data, appPublicKey: Data, appNonce: PairingNonce) throws {
         let peer: Curve25519.KeyAgreement.PublicKey
         let shared: SharedSecret
         do {
@@ -59,7 +77,7 @@ public struct PairingSecrets: Sendable {
         } catch {
             throw PairingError.invalidPeerKey
         }
-        let transcript = Self.label + nonce.bytes + commandPublicKey + appPublicKey
+        let transcript = Self.label + nonce.bytes + commandPublicKey + appPublicKey + appNonce.bytes
         code = Self.code(digestPrefix: Array(SHA256.hash(data: transcript).prefix(4)))
         key = shared.hkdfDerivedSymmetricKey(
             using: SHA256.self, salt: nonce.bytes, sharedInfo: transcript + Data("key".utf8), outputByteCount: 32)
