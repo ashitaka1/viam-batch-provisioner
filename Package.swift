@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "ProvisionerKit", targets: ["ProvisionerKit"]),
         .library(name: "ViamAPI", targets: ["ViamAPI"]),
         .executable(name: "provisioner-probe", targets: ["provisioner-probe"]),
+        .executable(name: "provisioner-pair", targets: ["provisioner-pair"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
@@ -88,6 +89,10 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
             ]
+        ),
+        .executableTarget(
+            name: "provisioner-pair",
+            dependencies: ["ProvisionerPairHost", "ProvisionerKit"]
         ),
         .testTarget(
             name: "ProvisionerPairHostTests",
