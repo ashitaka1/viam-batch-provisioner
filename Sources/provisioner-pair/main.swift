@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import ProvisionerKit
 import ProvisionerPairHost
+import SystemConfiguration
 
 let usage = """
     usage: provisioner-pair [--org-id <id>]
@@ -128,7 +129,7 @@ func converse() async -> Never {
     }
 
     let keyName: String = {
-        let shortHost = ProcessInfo.processInfo.hostName.split(separator: ".").first.map(String.init) ?? "mac"
+        let shortHost = SCDynamicStoreCopyLocalHostName(nil).map { $0 as String } ?? "mac"
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
