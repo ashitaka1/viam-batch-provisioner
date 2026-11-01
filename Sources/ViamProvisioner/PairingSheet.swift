@@ -21,10 +21,16 @@ struct PairingSheet: View {
                 cancel
             case .validating(let orgName):
                 ProgressView("Checking the key for \(orgName) with Viam…")
-            case .signedIn(let orgName):
+            case .signedIn(let orgName, let warning):
                 Label("Signed in to \(orgName)", systemImage: "checkmark.circle.fill")
                     .font(.title3)
                     .foregroundStyle(.green)
+                if let warning {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 done
             case .failed(let message):
                 Label(message, systemImage: "exclamationmark.triangle.fill")

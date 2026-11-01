@@ -31,7 +31,8 @@ public final class OrganizationsModel {
         case connecting
         case confirm(orgName: String, code: String)
         case validating(orgName: String)
-        case signedIn(orgName: String)
+        /// `warning` names a replaced key that couldn't be deleted in Viam.
+        case signedIn(orgName: String, warning: String? = nil)
         case failed(String)
 
         var inProgress: Bool {
@@ -48,16 +49,18 @@ public final class OrganizationsModel {
 
     private let store: any OrgCredentialStore
     private let validator: any CredentialValidator
+    private let keyDeleter: any KeyDeleter
     private let makeClient: @Sendable (PairingLink) -> any PairingSessionClient
     private let now: @Sendable () -> Date
     private var client: (any PairingSessionClient)?
     private var pairingTask: Task<Void, Never>?
 
-    public init(store: any OrgCredentialStore, validator: any CredentialValidator,
+    public init(store: any OrgCredentialStore, validator: any CredentialValidator, keyDeleter: any KeyDeleter,
                 makeClient: @escaping @Sendable (PairingLink) -> any PairingSessionClient = { PairingClient(link: $0) },
                 now: @escaping @Sendable () -> Date = Date.init) {
         self.store = store
         self.validator = validator
+        self.keyDeleter = keyDeleter
         self.makeClient = makeClient
         self.now = now
     }
@@ -132,6 +135,7 @@ public final class OrganizationsModel {
             guard isCurrent(client) else { return }
             switch result {
             case .valid:
+                let replaced = (try? store.all())?.first { $0.orgID == credential.orgID && $0.keyID != credential.keyID }
                 do {
                     try store.save(credential)
                 } catch {
@@ -143,7 +147,15 @@ public final class OrganizationsModel {
                 rows.append(Row(credential: credential, status: .checked(now())))
                 rows.sort { $0.credential.orgName < $1.credential.orgName }
                 try? await client.report(.stored, message: nil)
-                finish(client, .signedIn(orgName: payload.orgName))
+                var warning: String?
+                if let replaced {
+                    do {
+                        try await keyDeleter.deleteKey(id: replaced.keyID, using: credential)
+                    } catch {
+                        warning = "The replaced key \"\(replaced.keyName)\" is still in Viam (\(error)). Delete it in Viam's web UI."
+                    }
+                }
+                finish(client, .signedIn(orgName: payload.orgName, warning: warning))
             case .rejected(let message):
                 try? await client.report(.rejected, message: message)
                 finish(client, .failed("Viam didn't accept the key: \(message)"))

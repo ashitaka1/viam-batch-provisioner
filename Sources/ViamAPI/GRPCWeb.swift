@@ -11,6 +11,15 @@ public enum ViamError: Error, Equatable, Sendable {
     case malformedResponse
 }
 
+extension ViamError: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case .unauthenticated(let message), .permissionDenied(let message), .status(_, let message), .transport(let message): message
+        case .malformedResponse: "Viam sent a response the app couldn't read."
+        }
+    }
+}
+
 /// Unary gRPC-web calls over URLSession, per the gRPC-web wire format
 /// (github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md): each message is a
 /// frame of a flag byte, a big-endian UInt32 length and the bytes; a frame with

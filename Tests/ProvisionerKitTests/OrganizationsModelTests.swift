@@ -43,9 +43,9 @@ actor FakePairingClient: PairingSessionClient {
         await withCheckedContinuation { awaitingWaiters.append($0) }
     }
 
-    func deliver(keyName: String = "provisioner-app studio 2026-10-31") async {
+    func deliver(keyName: String = "provisioner-app studio 2026-10-31", keyID: String? = nil) async {
         await waitUntilAwaitingPayload()
-        payloadWaiter?.resume(returning: PairingPayload(orgID: orgID, orgName: orgName, keyID: "kid-\(orgID)", key: "kval", keyName: keyName))
+        payloadWaiter?.resume(returning: PairingPayload(orgID: orgID, orgName: orgName, keyID: keyID ?? "kid-\(orgID)", key: "kval", keyName: keyName))
         payloadWaiter = nil
     }
 
@@ -65,6 +65,23 @@ struct FakeValidator: CredentialValidator {
     func validate(_ credential: OrgCredential) async -> ValidationResult { results[credential.orgID] ?? fallback }
 }
 
+/// Records each deletion; fails them all when `failure` is set.
+actor FakeKeyDeleter: KeyDeleter {
+    struct Failure: Error, CustomStringConvertible {
+        var description: String { "permission denied" }
+    }
+
+    let fails: Bool
+    private(set) var deletions: [(keyID: String, usingKeyID: String)] = []
+
+    init(fails: Bool = false) { self.fails = fails }
+
+    func deleteKey(id: String, using credential: OrgCredential) async throws {
+        deletions.append((id, credential.keyID))
+        if fails { throw Failure() }
+    }
+}
+
 private let now = Date(timeIntervalSince1970: 1_793_500_000)
 private let link = PairingLink(host: "127.0.0.1", port: 50_000, nonce: .random())
 
@@ -76,9 +93,11 @@ private func stored(_ orgID: String, _ name: String) -> OrgCredential {
 @MainActor
 private func makeModel(store: InMemoryOrgCredentialStore = InMemoryOrgCredentialStore(),
                        validator: FakeValidator = FakeValidator(results: [:]),
+                       deleter: FakeKeyDeleter = FakeKeyDeleter(),
                        clients: [FakePairingClient]) -> (OrganizationsModel, MadeClients) {
     let made = MadeClients(clients)
-    let model = OrganizationsModel(store: store, validator: validator, makeClient: { _ in made.next() }, now: { now })
+    let model = OrganizationsModel(store: store, validator: validator, keyDeleter: deleter,
+                                   makeClient: { _ in made.next() }, now: { now })
     return (model, made)
 }
 
@@ -254,7 +273,7 @@ struct FailingStore: OrgCredentialStore {
     let client = FakePairingClient()
     let validator = GatedValidator()
     let store = InMemoryOrgCredentialStore()
-    let model = OrganizationsModel(store: store, validator: validator, makeClient: { _ in client }, now: { now })
+    let model = OrganizationsModel(store: store, validator: validator, keyDeleter: FakeKeyDeleter(), makeClient: { _ in client }, now: { now })
     let pairing = try #require(model.handle(url: link.url))
     await client.deliver()
     await validator.waitUntilValidating()
@@ -270,11 +289,66 @@ struct FailingStore: OrgCredentialStore {
 
 @MainActor @Test(.timeLimit(.minutes(1))) func savingFailureReportsRejectedAndShowsNoRow() async throws {
     let client = FakePairingClient()
-    let model = OrganizationsModel(store: FailingStore(), validator: FakeValidator(results: [:]), makeClient: { _ in client }, now: { now })
+    let model = OrganizationsModel(store: FailingStore(), validator: FakeValidator(results: [:]), keyDeleter: FakeKeyDeleter(), makeClient: { _ in client }, now: { now })
     let pairing = try #require(model.handle(url: link.url))
     await client.deliver()
     await pairing.value
     #expect(model.rows.isEmpty)
     #expect(await client.reportedOutcomes == [.rejected])
     guard case .failed = model.pairing else { Issue.record("expected .failed, got \(String(describing: model.pairing))"); return }
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func repairDeletesReplacedKeyInViamWithNewKey() async throws {
+    let client = FakePairingClient()
+    let deleter = FakeKeyDeleter()
+    let store = InMemoryOrgCredentialStore([stored("o1", "Acme")])
+    let (model, _) = makeModel(store: store, deleter: deleter, clients: [client])
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver(keyID: "kid-new")
+    await pairing.value
+    let deletions = await deleter.deletions
+    #expect(deletions.map(\.keyID) == ["kid-o1"])
+    #expect(deletions.map(\.usingKeyID) == ["kid-new"])
+    #expect(model.pairing == .signedIn(orgName: "Acme"))
+    #expect(try store.all().map(\.keyID) == ["kid-new"])
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func firstPairingDeletesNothing() async throws {
+    let client = FakePairingClient()
+    let deleter = FakeKeyDeleter()
+    let (model, _) = makeModel(deleter: deleter, clients: [client])
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver()
+    await pairing.value
+    #expect(await deleter.deletions.isEmpty)
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func rejectedRepairKeepsOldKeyEverywhere() async throws {
+    let client = FakePairingClient()
+    let deleter = FakeKeyDeleter()
+    let store = InMemoryOrgCredentialStore([stored("o1", "Acme")])
+    let (model, _) = makeModel(store: store, validator: FakeValidator(results: ["o1": .rejected("bad key")]),
+                               deleter: deleter, clients: [client])
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver(keyID: "kid-new")
+    await pairing.value
+    #expect(await deleter.deletions.isEmpty)
+    #expect(try store.all().map(\.keyID) == ["kid-o1"])
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func failedDeletionKeepsNewKeyAndNamesOldOne() async throws {
+    let client = FakePairingClient()
+    let store = InMemoryOrgCredentialStore([stored("o1", "Acme")])
+    let (model, _) = makeModel(store: store, deleter: FakeKeyDeleter(fails: true), clients: [client])
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver(keyID: "kid-new")
+    await pairing.value
+    #expect(try store.all().map(\.keyID) == ["kid-new"])
+    #expect(await client.reportedOutcomes == [.stored])
+    guard case .signedIn("Acme", let warning?) = model.pairing else {
+        Issue.record("expected .signedIn with a warning, got \(String(describing: model.pairing))")
+        return
+    }
+    #expect(warning.contains("\"old key\""))
+    #expect(warning.contains("permission denied"))
 }

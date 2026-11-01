@@ -295,3 +295,38 @@ private func call(_ reply: @escaping (URLRequest) -> StubProtocol.Reply) async t
     let result = await validate { _ in StubProtocol.Reply(body: Data([0, 0])) }
     guard case .unreachable = result else { Issue.record("expected .unreachable, got \(result)"); return }
 }
+
+// MARK: - Key deletion
+
+@Test func deleteKeySendsKeyIDAuthenticatedAsTheCredential() async throws {
+    let seen = Locked<[(path: String, body: Data, auth: String?)]>([])
+    let base = StubProtocol.register { request, body in
+        seen.withLock { $0.append((request.url!.path, body, request.value(forHTTPHeaderField: "authorization"))) }
+        return request.url!.path.hasSuffix("Authenticate") ? ok(authenticated(token: "tok-new")) : ok(Viam_App_V1_DeleteKeyResponse())
+    }
+    try await ViamKeyDeleter(baseURL: base, session: session).deleteKey(id: "kid-old", using: credential)
+    let calls = seen.withLock { $0 }
+    #expect(calls.map(\.path) == ["/proto.rpc.v1.AuthService/Authenticate", "/viam.app.v1.AppService/DeleteKey"])
+    #expect(try unframe(Proto_Rpc_V1_AuthenticateRequest.self, calls[0].body).entity == "kid")
+    #expect(try unframe(Viam_App_V1_DeleteKeyRequest.self, calls[1].body).id == "kid-old")
+    #expect(calls[1].auth == "Bearer tok-new")
+}
+
+@Test func deleteKeyFailureDescribesViamsMessage() async {
+    let base = StubProtocol.register { request, _ in
+        request.url!.path.hasSuffix("Authenticate") ? ok(authenticated()) : trailerStatus(7, "not an owner")
+    }
+    do {
+        try await ViamKeyDeleter(baseURL: base, session: session).deleteKey(id: "kid-old", using: credential)
+        Issue.record("expected the deletion to fail")
+    } catch {
+        #expect("\(error)".contains("not an owner"))
+    }
+}
+
+@Test func deletingAKeyAlreadyGoneSucceeds() async throws {
+    let base = StubProtocol.register { request, _ in
+        request.url!.path.hasSuffix("Authenticate") ? ok(authenticated()) : trailerStatus(5, "Does not exist or you don't have permissions to view it")
+    }
+    try await ViamKeyDeleter(baseURL: base, session: session).deleteKey(id: "kid-old", using: credential)
+}

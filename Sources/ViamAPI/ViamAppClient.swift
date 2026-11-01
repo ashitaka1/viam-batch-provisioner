@@ -25,6 +25,13 @@ public final class ViamAppClient: Sendable {
         return (response.organization.id, response.organization.name)
     }
 
+    public func deleteKey(id: String) async throws {
+        var request = Viam_App_V1_DeleteKeyRequest()
+        request.id = id
+        let _: Viam_App_V1_DeleteKeyResponse = try await grpc.unary(
+            "viam.app.v1.AppService/DeleteKey", request, metadata: ["authorization": "Bearer \(accessToken())"])
+    }
+
     private func accessToken() async throws -> String {
         if let cached = await token.value { return cached }
         var request = Proto_Rpc_V1_AuthenticateRequest()
@@ -73,5 +80,22 @@ public struct ViamCredentialValidator: CredentialValidator {
         } catch {
             return .unreachable(error.localizedDescription)
         }
+    }
+}
+
+public struct ViamKeyDeleter: KeyDeleter {
+    let baseURL: URL
+    let session: URLSession
+
+    public init(baseURL: URL = ViamAppClient.defaultBaseURL, session: URLSession = .shared) {
+        self.baseURL = baseURL
+        self.session = session
+    }
+
+    /// A key Viam doesn't find (NOT_FOUND) counts as deleted.
+    public func deleteKey(id: String, using credential: OrgCredential) async throws {
+        do {
+            try await ViamAppClient(keyID: credential.keyID, key: credential.key, baseURL: baseURL, session: session).deleteKey(id: id)
+        } catch ViamError.status(code: 5, _) {}
     }
 }
