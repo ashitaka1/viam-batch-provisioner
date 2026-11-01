@@ -370,3 +370,43 @@ struct FailingStore: OrgCredentialStore {
     await recheck.value
     #expect(model.rows.map(\.status) == [.checked(now)])
 }
+
+/// Holds validation of one key ID until answered; validates every other key at once.
+actor KeyGatedValidator: CredentialValidator {
+    let gatedKeyID: String
+    private var waiter: CheckedContinuation<ValidationResult, Never>?
+    private var started: [CheckedContinuation<Void, Never>] = []
+
+    init(gating keyID: String) { gatedKeyID = keyID }
+
+    func validate(_ credential: OrgCredential) async -> ValidationResult {
+        guard credential.keyID == gatedKeyID else { return .valid(orgName: credential.orgName) }
+        return await withCheckedContinuation { waiter = $0; for s in started { s.resume() }; started = [] }
+    }
+
+    func waitUntilGated() async {
+        if waiter != nil { return }
+        await withCheckedContinuation { started.append($0) }
+    }
+
+    func answer(_ result: ValidationResult) {
+        waiter?.resume(returning: result)
+        waiter = nil
+    }
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func lateCheckOfReplacedKeyDoesNotMarkNewKey() async throws {
+    let client = FakePairingClient()
+    let validator = KeyGatedValidator(gating: "kid-o1")
+    let model = OrganizationsModel(store: InMemoryOrgCredentialStore([stored("o1", "Acme")]), validator: validator,
+                                   keyDeleter: FakeKeyDeleter(), makeClient: { _ in client }, now: { now })
+    let load = Task { await model.load() }
+    await validator.waitUntilGated()
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver(keyID: "kid-new")
+    await pairing.value
+    await validator.answer(.rejected("key deleted"))
+    await load.value
+    #expect(model.rows.map(\.credential.keyID) == ["kid-new"])
+    #expect(model.rows.map(\.status) == [.checked(now)])
+}

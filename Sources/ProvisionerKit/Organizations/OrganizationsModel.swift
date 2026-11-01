@@ -76,11 +76,11 @@ public final class OrganizationsModel {
         await withTaskGroup(of: (String, Status).self) { group in
             for row in rows {
                 group.addTask { [validator, now] in
-                    (row.id, Self.status(for: await validator.validate(row.credential), now: now()))
+                    (row.credential.keyID, Self.status(for: await validator.validate(row.credential), now: now()))
                 }
             }
-            for await (orgID, status) in group {
-                if let index = rows.firstIndex(where: { $0.id == orgID }) { rows[index].status = status }
+            for await (keyID, status) in group {
+                if let index = rows.firstIndex(where: { $0.credential.keyID == keyID }) { rows[index].status = status }
             }
         }
     }
