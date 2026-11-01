@@ -46,7 +46,8 @@ while ((${#queue[@]})); do
     [[ $seen == *" $f "* || $f == google/protobuf/* ]] && continue
     seen+="$f "
     files+=("$f")
-    while read -r imp; do queue+=("$imp"); done < <(sed -n 's/^import "\(.*\)";/\1/p' "$(resolve "$f")")
+    path=$(resolve "$f")
+    while read -r imp; do queue+=("$imp"); done < <(sed -n 's/^import "\(.*\)";/\1/p' "$path")
 done
 
 (cd "$ROOT" && swift build -c release --product protoc-gen-swift >/dev/null)
