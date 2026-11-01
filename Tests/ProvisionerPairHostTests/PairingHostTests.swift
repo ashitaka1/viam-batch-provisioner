@@ -182,7 +182,6 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     await timer.fire()
     let events = await collect(host)
     #expect(events.last == .timedOut, "events \(events)")
-    #expect(await host.released, "the host remembers a key was released, so the command can name it")
 }
 
 @Test(.timeLimit(.minutes(1))) func resultAfterTimeoutIsRefused() async throws {

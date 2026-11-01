@@ -50,9 +50,6 @@ public actor PairingHost {
     private let resultTimeout: Duration
     private let sleep: @Sendable (Duration) async throws -> Void
 
-    /// True once a key has been handed over, so the command can name it if the
-    /// app never confirms storing it.
-    public private(set) var released = false
 
     /// How long the app has, after the key is released, to report the result.
     public static let defaultResultTimeout: Duration = .seconds(120)
@@ -160,7 +157,6 @@ public actor PairingHost {
         case .connected(let appKey, let secrets):
             let sealed = try secrets.seal(payload)
             state = .released(appKey: appKey, sealed: sealed)
-            released = true
             restartDeadline(resultTimeout)
             for waiter in keyWaiters { waiter.resume(returning: sealed) }
             keyWaiters = []
