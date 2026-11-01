@@ -54,8 +54,11 @@ public actor PairingHost {
     /// app never confirms storing it.
     public private(set) var released = false
 
+    /// How long the app has, after the key is released, to report the result.
+    public static let defaultResultTimeout: Duration = .seconds(120)
+
     public init(orgID: String, orgName: String, nonce: PairingNonce = .random(), timeout: Duration = .seconds(120),
-                resultTimeout: Duration = .seconds(30),
+                resultTimeout: Duration = PairingHost.defaultResultTimeout,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.orgID = orgID
         self.orgName = orgName

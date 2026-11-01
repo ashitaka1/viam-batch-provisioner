@@ -223,8 +223,9 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     _ = try await app.connect(host)
     try await host.release(payload)
     await timer.waitForSleeps(2)
-    #expect(await timer.requested == [.seconds(120), .seconds(30)])
+    #expect(await timer.requested == [.seconds(120), .seconds(120)])
     await timer.fire(sleep: 0)   // the original deadline passes while the app validates
     try await host.report(app.result(.stored))
     #expect(await collect(host).last == .result(.stored, message: nil), "the stored result still counts")
 }
+
