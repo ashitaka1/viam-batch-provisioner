@@ -1,0 +1,12 @@
+{
+  "outcomes": [
+    {
+      "text": "In any Viam-using shop, a batch of new x86 machines and Pis comes back as named hosts online in Viam, with nobody at a console.",
+      "signal": "after the one-time BIOS setup, a batch of ten reaches installed and shows online at app.viam.com, with no monitor or keyboard attached during the run"
+    },
+    {
+      "text": "Someone trusted to run a server on the shop's LAN sets one up once; after that, anyone in the shop provisions and watches batches from their own Mac or iPhone.",
+      "signal": "a provisioner who never touched the server Mac provisions a machine and watches it reach installed from their own device"
+    }
+  ]
+}
