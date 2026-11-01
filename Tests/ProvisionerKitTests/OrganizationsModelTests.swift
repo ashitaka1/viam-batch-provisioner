@@ -352,3 +352,21 @@ struct FailingStore: OrgCredentialStore {
     #expect(warning.contains("\"old key\""))
     #expect(warning.contains("permission denied"))
 }
+
+@MainActor @Test(.timeLimit(.minutes(1))) func recheckShowsRowsAsUncheckedUntilViamAnswers() async {
+    let validator = GatedValidator()
+    let model = OrganizationsModel(store: InMemoryOrgCredentialStore([stored("o1", "Acme")]), validator: validator,
+                                   keyDeleter: FakeKeyDeleter(), now: { now })
+    let load = Task { await model.load() }
+    await validator.waitUntilValidating()
+    await validator.answer(.valid(orgName: "Acme"))
+    await load.value
+    #expect(model.rows.map(\.status) == [.checked(now)])
+
+    let recheck = Task { await model.recheck() }
+    await validator.waitUntilValidating()
+    #expect(model.rows.map(\.status) == [.unchecked])
+    await validator.answer(.valid(orgName: "Acme"))
+    await recheck.value
+    #expect(model.rows.map(\.status) == [.checked(now)])
+}

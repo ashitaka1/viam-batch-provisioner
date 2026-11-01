@@ -16,7 +16,7 @@ struct OrganizationsSettings: View {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.credential.orgName).bold()
-                            Text("\(row.credential.keyName) · \(Self.describe(row.status))")
+                            Text("\(row.credential.keyName) (\(row.credential.keyID.prefix(5))…) · \(Self.describe(row.status))")
                                 .font(.caption)
                                 .foregroundStyle(Self.isRejected(row.status) ? .orange : .secondary)
                         }
@@ -70,7 +70,7 @@ struct OrganizationsSettings: View {
         switch status {
         case .unchecked: "checking…"
         case .checked(let date):
-            Calendar.current.isDateInToday(date) ? "checked today" : "checked \(date.formatted(date: .abbreviated, time: .omitted))"
+            "checked \(date.formatted(date: Calendar.current.isDateInToday(date) ? .omitted : .abbreviated, time: .shortened))"
         case .rejected: "⚠ key rejected by Viam"
         case .unreachable: "couldn't reach Viam"
         }

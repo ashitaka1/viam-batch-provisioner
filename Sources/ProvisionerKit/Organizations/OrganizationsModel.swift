@@ -72,6 +72,7 @@ public final class OrganizationsModel {
     }
 
     public func recheck() async {
+        for index in rows.indices { rows[index].status = .unchecked }
         await withTaskGroup(of: (String, Status).self) { group in
             for row in rows {
                 group.addTask { [validator, now] in
