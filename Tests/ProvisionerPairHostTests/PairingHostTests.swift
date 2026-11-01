@@ -229,3 +229,11 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
     #expect(await collect(host).last == .result(.stored, message: nil), "the stored result still counts")
 }
 
+@Test(.timeLimit(.minutes(1))) func resultBeforeReleaseIsRefusedAndSessionStaysOpen() async throws {
+    let host = makeHost()
+    let app = AppSide(nonce: host.nonce)
+    _ = try await app.connect(host)
+    await #expect(throws: PairingHostError.unknownSession) { try await host.report(app.result(.stored)) }
+    try await host.release(payload)
+}
+

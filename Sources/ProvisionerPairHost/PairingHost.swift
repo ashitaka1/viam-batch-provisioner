@@ -141,6 +141,7 @@ public actor PairingHost {
 
     public func report(_ result: PairingResult) throws {
         try checkSession(result.nonce, result.appPublicKey)
+        guard case .released = state else { throw PairingHostError.unknownSession }
         end(.finished, event: .result(result.outcome, message: result.message))
     }
 
