@@ -48,12 +48,12 @@ public struct ViamCLI: Sendable {
     private func succeed(_ arguments: [String]) async throws -> String {
         let result = try await run(arguments)
         if result.status == 127 { throw ViamCLIError.notInstalled }
+        guard result.status != 0 else { return result.stdout }
         let stderr = result.stderr.lowercased()
         if stderr.contains("not logged in") || stderr.contains("log in again") || stderr.contains("viam login") {
             throw ViamCLIError.notLoggedIn
         }
-        guard result.status == 0 else { throw ViamCLIError.failed(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        return result.stdout
+        throw ViamCLIError.failed(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// Lines with ANSI color codes removed; the CLI colors its prefixes on a terminal.

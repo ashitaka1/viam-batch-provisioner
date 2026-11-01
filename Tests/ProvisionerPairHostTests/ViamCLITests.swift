@@ -77,3 +77,9 @@ func detectsLoggedOut(fixtureName: String) async throws {
         try await runner.cli.createKey(orgID: "o1", name: "n")
     }
 }
+
+@Test func loginNoticeOnSuccessIsNotAFailure() async throws {
+    let runner = FakeRunner(stdout: try fixture("api-key-create"), stderr: "Warning: your token expires soon; run viam login to refresh it\n")
+    let key = try await runner.cli.createKey(orgID: "o1", name: "provisioner-app studio 2026-10-31")
+    #expect(key.id == "REDACTED-ID")
+}
