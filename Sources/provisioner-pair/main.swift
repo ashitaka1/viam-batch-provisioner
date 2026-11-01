@@ -109,7 +109,9 @@ func converse() async -> Never {
     }
 
     print("Pairing with \(org.name).")
-    print("Does the app show \(code!)? [y/N] ", terminator: "")
+    let shownCode = isatty(STDOUT_FILENO) != 0 && ProcessInfo.processInfo.environment["NO_COLOR"] == nil
+        ? "\u{1B}[1;36m\(code!)\u{1B}[0m" : code!
+    print("Does the app show \(shownCode)? [y/N] ", terminator: "")
     fflush(stdout)
     Thread.detachNewThread { input.yield(.line(readLine())) }
 
