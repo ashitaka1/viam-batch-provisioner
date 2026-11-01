@@ -102,7 +102,7 @@ func converse() async -> Never {
     while code == nil {
         switch await pending.next() {
         case .event(.connected(let shown)): code = shown
-        case .event(.cancelledByApp): await finish("Cancelled in the app. No key was created.", status: 1)
+        case .event(.cancelledByApp): await finish("Cancelled in the app. No key was created.", status: 0)
         case .event(.timedOut), nil: await finish("Timed out. No key was created.", status: 1)
         case .event(.result), .line: continue
         }
@@ -119,10 +119,10 @@ func converse() async -> Never {
         case .line(let answer):
             guard answer?.trimmingCharacters(in: .whitespaces).lowercased() == "y" else {
                 await host.cancel()
-                await finish("Cancelled. No key was created.", status: 1)
+                await finish("Cancelled. No key was created.", status: 0)
             }
             confirmed = true
-        case .event(.cancelledByApp): print(); await finish("Cancelled in the app. No key was created.", status: 1)
+        case .event(.cancelledByApp): print(); await finish("Cancelled in the app. No key was created.", status: 0)
         case .event(.timedOut), nil: print(); await finish("Timed out. No key was created.", status: 1)
         case .event: continue
         }
