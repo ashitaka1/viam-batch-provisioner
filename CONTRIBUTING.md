@@ -35,6 +35,8 @@ Runs `swift test` over the root package (Swift 6, macOS 14+). The ProvisionerPXE
 
 `swift run provisioner-probe` exercises ProvisionerKit against a running API (`scripts/api-service.sh start` runs it with its Bonjour advertisement): `check <base-url>` provisions, reads and removes a throwaway name and exits non-zero on any mismatch; `browse` lists advertised servers for five seconds; `watch <base-url>` prints every queue update and connection state; `notify <base-url>` prints each notification the app would post for an install that completes or fails.
 
+`just app` builds, signs and registers `build/Viam Provisioner.app`. It signs with `CODESIGN_IDENTITY`, else the team Developer ID when the keychain holds it, else ad hoc; an ad-hoc build asks for the login password again after each rebuild. `just pair-app [--org-id <id>]` signs the app in to a Viam org with your `viam` CLI login; it needs the registered app and creates a real API key. `scripts/gen-viam-protos.sh` regenerates `Sources/ViamAPI/Generated/` from the pinned `viamrobotics/api` and `viamrobotics/goutils` commits.
+
 `swift run provisioner-pxe --interface en0 --root netboot` serves proxy DHCP and TFTP on the default ports 67, 4011 and 69 (sudo) and prints each PXE client it answers. `--dhcp-port`, `--pxe-port` and `--tftp-port` override the ports; `--offer-to <ip>:<port>` redirects offers away from the broadcast address, for testing without privileges. It runs beside no dnsmasq: stop `just dhcp` first.
 
 ## Run pieces alone

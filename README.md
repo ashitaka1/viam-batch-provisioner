@@ -267,6 +267,8 @@ Set `API_PORT` in `site.env` to move the provisioner API off 8235. Set `INSTALL_
 | `just stop` | Stop all PXE services |
 | `just unguard <name-or-mac>` | Make one machine reinstall on its next PXE boot, however long from now |
 | `just api` | Run the provisioner API alone in the foreground |
+| `just app` | Build, sign and open the macOS app |
+| `just pair-app` | Sign the macOS app in to a Viam organization with your `viam` CLI login |
 | `just test` | Run the unit tests (prefers `.venv/bin/python3` for the contract test) |
 
 ## Target machine config

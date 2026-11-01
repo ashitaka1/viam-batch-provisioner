@@ -44,7 +44,7 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 | `scripts/flash-usb.sh`, `flash-usb-batch.sh` | x86 USB stick flashing |
 | `scripts/tail-http-logs.sh` | Pretty-prints `logs/access.log` (`just logs`); writes nothing |
 | `scripts/setup-wizard.sh` | Creates `config/site.env` and per-environment files |
-| `Package.swift` | Swift package for v2: the `ProvisionerPXE`, `ProvisionerAPI` and `ProvisionerKit` libraries, and the `provisioner-pxe` and `provisioner-probe` dev executables |
+| `Package.swift` | Swift package for v2: the `ProvisionerPXE`, `ProvisionerAPI` and `ProvisionerKit` libraries, the `ViamAPI` and `ProvisionerPairHost` libraries, the `ViamProvisioner` app, and the `provisioner-pxe`, `provisioner-probe` and `provisioner-pair` executables |
 | `Sources/ProvisionerPXE/PXEServer.swift` | Binds the DHCP (67), PXE (4011) and TFTP (69) sockets on one interface and publishes each answered client on `clients` |
 | `Sources/ProvisionerPXE/DHCP/` | BOOTP/DHCP codec and `ProxyDHCPResponder`, which answers PXE discovers with the boot server and filename (RFC 4578) |
 | `Sources/ProvisionerPXE/TFTP/` | TFTP codec (RFC 1350), option negotiation (RFC 2347-2349), `TFTPRoot` path confinement, per-transfer state machine and handlers |
@@ -57,6 +57,12 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 | `Sources/ProvisionerKit/InstallNotifier.swift` | Consumes `QueueFeed` updates and hands each ending install to a `NotificationPoster`; snapshots post nothing, replayed events post; a failed post is logged |
 | `Sources/ProvisionerKit/UserNotificationPoster.swift` | `NotificationPoster` over `UNUserNotificationCenter`; needs a bundled app |
 | `Sources/ProvisionerKit/ServerBrowser.swift` | Bonjour browse for `_viam-provisioner._tcp` with TXT `api=v1`, and validated manual addresses |
+| `Sources/ViamAPI/` | Viam AppService client: `GRPCWeb.swift` frames unary gRPC-web calls over URLSession; `ViamAppClient` authenticates an API key for a bearer token and calls the service; `Generated/` holds checked-in swift-protobuf types from `scripts/gen-viam-protos.sh` (`docs/decisions/0037-grpc-web-to-viam.md`) |
+| `Sources/ProvisionerKit/Pairing/` | App side of API-key pairing: ephemeral X25519 exchange and the four-digit comparison code (`PairingCrypto`), the `viam-provisioner://pair` link, wire messages and `PairingClient` |
+| `Sources/ProvisionerKit/Organizations/` | `OrgCredential`, the Keychain store (one item per org ID), `CredentialValidator` and `OrganizationsModel`, which stores a key only after a validation call succeeds |
+| `Sources/ProvisionerPairHost/` | Command side of pairing: `PairingHost` state machine, `PairingHTTPServer` loopback listener, and `ViamCLI`, which wraps the `viam` CLI for org listing and key creation |
+| `Sources/provisioner-pair/` | `just pair-app`: picks an org, shows the comparison code, creates the key after the operator confirms, releases it to the app |
+| `Sources/ViamProvisioner/` | The macOS SwiftUI app: onboarding, Settings → Organizations, pairing sheet. `scripts/bundle-app.sh` builds it into a bundle (`docs/decisions/0038-swiftpm-app-bundle.md`) |
 | `Sources/provisioner-probe/` | Dev executable that exercises `ProvisionerKit` against a live API: `check`, `browse`, `watch`, `notify` (prints the notifications the app would post) |
 | `Tests/ProvisionerKitTests/` | Domain mapping, client, feed and browser tests; `Support/` holds a scripted transport and a fake feed source |
 
@@ -92,6 +98,8 @@ All under `http-server/machines/` unless noted. Every file the root watcher crea
 - **The Swift PXE server serves only inside its TFTP root.** `TFTPRoot` rejects paths that resolve outside it. Block size is capped by the interface MTU, and concurrent transfers by `maxTransfers`; a request beyond the cap gets a TFTP error.
 - **The Swift DHCP sockets bind 0.0.0.0 pinned to the interface.** They use `IP_BOUND_IF`, because on macOS a socket bound to a unicast address never receives broadcast discovers. See `docs/decisions/0028-bind-dhcp-to-interface.md`.
 - **The Python server ignores `environment` in provision requests.** `ProvisionRequest.environment` carries the settings the Swift server renders into a machine's install config; the Python server accepts and drops it, and renders from `config/site.env`.
+- **The pairing key is created only after the operator confirms the code, and released only after the app commits to its public key.** Cancel, decline or timeout before creation leave no key in Viam. After creation, every failure path prints the key's name and where to delete it.
+- **The app stores an org key only after one AppService call with it succeeds.** Removing an org deletes the key from the Keychain only; pairing an org again deletes the old key in Viam, and `DeleteKey` returning NOT_FOUND counts as deleted (`docs/decisions/0039-not-found-counts-as-deleted.md`).
 - **NIC names are discovered at install time.** The autoinstall config hardcodes no interface names.
 
 ## Boundaries
@@ -99,6 +107,7 @@ All under `http-server/machines/` unless noted. Every file the root watcher crea
 - **Targets reach only the file server.** They know one `host:port`. nginx forwards exactly `POST /api/v1/install-reports` (16 KiB body limit) to the API at `host.docker.internal`; the rest of the API is unreachable from a target.
 - **The API runs as the operator, unauthenticated, on `0.0.0.0`.** It assumes a trusted lab network. It skips `getfqdn()` at bind so startup never waits on reverse DNS.
 - **The org API key stays on the host.** Targets receive only their own `viam.json`.
+- **The pairing listener binds loopback and caps request bodies at 64 KiB.**
 - **Under `just serve-usb` no watcher runs.** The API appends installer reports to the journal itself.
 
 ## API
