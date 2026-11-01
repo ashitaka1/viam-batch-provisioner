@@ -37,7 +37,17 @@ struct MainView: View {
     let model: OrganizationsModel
 
     var body: some View {
-        if model.rows.isEmpty {
+        if let loadError = model.loadError {
+            VStack(spacing: 12) {
+                Label(loadError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Try again") { Task { await model.load() } }
+            }
+            .padding(32)
+            .frame(maxWidth: 420)
+        } else if model.rows.isEmpty {
             OnboardingView(command: "just pair-app")
         } else {
             VStack(spacing: 12) {

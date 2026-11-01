@@ -44,6 +44,8 @@ public final class OrganizationsModel {
     }
 
     public private(set) var rows: [Row] = []
+    /// Why the stored orgs couldn't be read, when they couldn't.
+    public private(set) var loadError: String?
     /// Nil when no pairing sheet is showing.
     public private(set) var pairing: PairingState?
 
@@ -67,7 +69,14 @@ public final class OrganizationsModel {
 
     /// Reads the stored orgs and checks each key with Viam.
     public func load() async {
-        rows = ((try? store.all()) ?? []).map { Row(credential: $0, status: .unchecked) }
+        do {
+            rows = try store.all().map { Row(credential: $0, status: .unchecked) }
+            loadError = nil
+        } catch {
+            rows = []
+            loadError = "Couldn't read the organizations' keys from the Keychain: \(error)"
+            return
+        }
         await recheck()
     }
 
@@ -136,7 +145,9 @@ public final class OrganizationsModel {
             guard isCurrent(client) else { return }
             switch result {
             case .valid:
-                let replaced = (try? store.all())?.first { $0.orgID == credential.orgID && $0.keyID != credential.keyID }
+                let replaced: Result<OrgCredential?, any Error> = Result {
+                    try store.all().first { $0.orgID == credential.orgID && $0.keyID != credential.keyID }
+                }
                 do {
                     try store.save(credential)
                 } catch {
@@ -149,12 +160,16 @@ public final class OrganizationsModel {
                 rows.sort { $0.credential.orgName < $1.credential.orgName }
                 try? await client.report(.stored, message: nil)
                 var warning: String?
-                if let replaced {
+                switch replaced {
+                case .success(nil): break
+                case .success(let replaced?):
                     do {
                         try await keyDeleter.deleteKey(id: replaced.keyID, using: credential)
                     } catch {
                         warning = "The replaced key \"\(replaced.keyName)\" is still in Viam (\(error)). Delete it in Viam's web UI."
                     }
+                case .failure(let error):
+                    warning = "Couldn't read the Keychain to find a key this one replaces (\(error)). If \(payload.orgName) was paired before, delete its old key in Viam's web UI."
                 }
                 finish(client, .signedIn(orgName: payload.orgName, warning: warning))
             case .rejected(let message):

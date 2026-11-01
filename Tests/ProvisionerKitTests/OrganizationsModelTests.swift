@@ -371,6 +371,46 @@ struct FailingStore: OrgCredentialStore {
     #expect(model.rows.map(\.status) == [.checked(now)])
 }
 
+/// Reads fail; saves succeed into memory.
+final class UnreadableStore: OrgCredentialStore, @unchecked Sendable {
+    struct Failure: Error, CustomStringConvertible { var description: String { "keychain access denied" } }
+    private(set) var saved: [OrgCredential] = []
+    func all() throws -> [OrgCredential] { throw Failure() }
+    func save(_ credential: OrgCredential) throws { saved.append(credential) }
+    func remove(orgID: String) throws {}
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func unreadableStoreShowsLoadErrorInsteadOfNoOrgs() async {
+    let model = OrganizationsModel(store: UnreadableStore(), validator: FakeValidator(results: [:]),
+                                   keyDeleter: FakeKeyDeleter(), now: { now })
+    await model.load()
+    #expect(model.rows.isEmpty)
+    #expect(model.loadError?.contains("keychain access denied") == true)
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func successfulLoadClearsLoadError() async {
+    let store = InMemoryOrgCredentialStore([stored("o1", "Acme")])
+    let model = OrganizationsModel(store: store, validator: FakeValidator(results: [:]), keyDeleter: FakeKeyDeleter(), now: { now })
+    await model.load()
+    #expect(model.loadError == nil)
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func unreadableStoreDuringPairingWarnsAboutPossibleOldKey() async throws {
+    let client = FakePairingClient()
+    let store = UnreadableStore()
+    let model = OrganizationsModel(store: store, validator: FakeValidator(results: [:]), keyDeleter: FakeKeyDeleter(),
+                                   makeClient: { _ in client }, now: { now })
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver(keyID: "kid-new")
+    await pairing.value
+    #expect(store.saved.map(\.keyID) == ["kid-new"])
+    guard case .signedIn("Acme", let warning?) = model.pairing else {
+        Issue.record("expected .signedIn with a warning, got \(String(describing: model.pairing))")
+        return
+    }
+    #expect(warning.contains("keychain access denied"))
+}
+
 /// Holds validation of one key ID until answered; validates every other key at once.
 actor KeyGatedValidator: CredentialValidator {
     let gatedKeyID: String
