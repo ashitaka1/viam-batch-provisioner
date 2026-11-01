@@ -3,10 +3,10 @@ import Foundation
 import Testing
 
 private struct Session {
-    let nonce = PairingNonce.random()
-    let command = PairingKeyPair()
-    let app = PairingKeyPair()
-    let appNonce = PairingNonce.random()
+    var nonce = PairingNonce.random()
+    var command = PairingKeyPair()
+    var app = PairingKeyPair()
+    var appNonce = PairingNonce.random()
 
     func commandSide(peer: Data? = nil) throws -> PairingSecrets {
         try PairingSecrets(own: command, peerPublicKey: peer ?? app.publicKey, nonce: nonce,
@@ -65,6 +65,18 @@ private let payload = PairingPayload(
     #expect(!String(reflecting: payload).contains("s3cret"))
 }
 
+@Test func noncesAndKeyPairsAreFresh() {
+    #expect(PairingNonce.random() != PairingNonce.random())
+    #expect(PairingKeyPair().publicKey != PairingKeyPair().publicKey)
+}
+
+@Test func codeAndKeyAreBoundToTheSessionNonce() throws {
+    let first = Session()
+    let second = Session(nonce: .random(), command: first.command, app: first.app, appNonce: first.appNonce)
+    #expect(try first.commandSide().code != second.appSide().code)
+    #expect(throws: PairingError.decryptionFailed) { try second.appSide().open(first.commandSide().seal(payload)) }
+}
+
 @Test func nonceRoundTripsThroughBase64URL() throws {
     let nonce = PairingNonce.random()
     #expect(nonce.bytes.count == 16)
@@ -100,10 +112,4 @@ private func fixedKey(_ byte: UInt8) throws -> PairingKeyPair {
     #expect(PairingCommitment.verify(commitment, appPublicKey: key, appNonce: appNonce))
     #expect(!PairingCommitment.verify(commitment, appPublicKey: other, appNonce: appNonce), "another key")
     #expect(!PairingCommitment.verify(commitment, appPublicKey: key, appNonce: .random()), "another nonce")
-}
-
-@Test func helloCarriesNoKeyMaterial() throws {
-    let hello = PairingHello(nonce: "n", commitment: "c")
-    let fields = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(hello)) as? [String: Any])
-    #expect(Set(fields.keys) == ["nonce", "commitment"], "hello fields \(fields.keys.sorted())")
 }

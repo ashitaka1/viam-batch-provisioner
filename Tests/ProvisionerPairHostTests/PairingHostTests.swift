@@ -217,12 +217,12 @@ func collect(_ host: PairingHost) async -> [PairingHost.Event] {
 
 @Test(.timeLimit(.minutes(1))) func releaseGivesTheResultItsOwnWindow() async throws {
     let timer = ManualTimer()
-    let host = makeHost(timer: timer)
+    let host = PairingHost(orgID: "o1", orgName: "Acme", timeout: .seconds(7), resultTimeout: .seconds(11), sleep: timer.sleep)
     let app = AppSide(nonce: host.nonce)
     _ = try await app.connect(host)
     try await host.release(payload)
     await timer.waitForSleeps(2)
-    #expect(await timer.requested == [.seconds(120), .seconds(120)])
+    #expect(await timer.requested == [.seconds(7), .seconds(11)])
     await timer.fire(sleep: 0)   // the original deadline passes while the app validates
     try await host.report(app.result(.stored))
     #expect(await collect(host).last == .result(.stored, message: nil), "the stored result still counts")

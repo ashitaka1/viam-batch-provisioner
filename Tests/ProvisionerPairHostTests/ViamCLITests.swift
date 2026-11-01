@@ -32,9 +32,22 @@ private final class FakeRunner: @unchecked Sendable {
 }
 
 @Test func parsesOrganizationsWithColor() async throws {
-    let colored = try fixture("orgs-list").replacingOccurrences(of: "Organizations", with: "\u{1B}[1mOrganizations\u{1B}[0m")
+    let colored = try fixture("orgs-list")
+        .replacingOccurrences(of: "\tAscension", with: "\t\u{1B}[1mAscension\u{1B}[0m")
+        .replacingOccurrences(of: "(id: ", with: "(\u{1B}[2mid:\u{1B}[0m ")
     let orgs = try await FakeRunner(stdout: colored).cli.organizations()
-    #expect(orgs.count == 3)
+    #expect(orgs.map(\.name) == ["Ascension", "Acme (East) Robotics", "asrs"])
+    #expect(orgs.map(\.id) == ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222",
+                               "33333333-3333-4333-8333-333333333333"])
+}
+
+@Test func parsesCreatedKeyWithColor() async throws {
+    let colored = try fixture("api-key-create")
+        .replacingOccurrences(of: "Key ID:", with: "\u{1B}[1mKey ID:\u{1B}[0m")
+        .replacingOccurrences(of: "Key Value:", with: "\u{1B}[1mKey Value:\u{1B}[0m")
+    let key = try await FakeRunner(stdout: colored).cli.createKey(orgID: "o1", name: "n")
+    #expect(key.id == "REDACTED-ID")
+    #expect(key.key == "REDACTED-KEY")
 }
 
 @Test(arguments: ["orgs-list-logged-out.stderr", "orgs-list-token-expired.stderr"])
@@ -63,12 +76,8 @@ func detectsLoggedOut(fixtureName: String) async throws {
 
 @Test func unparsableKeyOutputHidesStdout() async {
     let runner = FakeRunner(stdout: "Key Value: SECRET123 but no id line\n")
-    do {
-        _ = try await runner.cli.createKey(orgID: "o1", name: "n")
-        Issue.record("expected unparsableKey")
-    } catch {
-        #expect(error as? ViamCLIError == .unparsableKey, "got \(error)")
-    }
+    let error = await #expect(throws: ViamCLIError.unparsableKey) { try await runner.cli.createKey(orgID: "o1", name: "n") }
+    #expect(!"\(String(describing: error))".contains("SECRET123"))
 }
 
 @Test func failureCarriesStderrOnly() async {

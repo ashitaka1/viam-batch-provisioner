@@ -85,7 +85,7 @@ actor FakeKeyDeleter: KeyDeleter {
 private let now = Date(timeIntervalSince1970: 1_793_500_000)
 private let link = PairingLink(host: "127.0.0.1", port: 50_000, nonce: .random())
 
-private func stored(_ orgID: String, _ name: String) -> OrgCredential {
+func stored(_ orgID: String, _ name: String) -> OrgCredential {
     OrgCredential(PairingPayload(orgID: orgID, orgName: name, keyID: "kid-\(orgID)", key: "k", keyName: "old key"),
                   addedAt: Date(timeIntervalSince1970: 0))
 }
@@ -202,11 +202,12 @@ final class MadeClients: @unchecked Sendable {
     #expect(model.pairing == .failed("Pairing was cancelled in Terminal."))
 }
 
-@MainActor @Test(.timeLimit(.minutes(1))) func repairReplacesRow() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func repairWithTheSameKeyReplacesRowAndDeletesNothing() async throws {
     let first = FakePairingClient()
     let second = FakePairingClient()
     let store = InMemoryOrgCredentialStore()
-    let (model, _) = makeModel(store: store, clients: [first, second])
+    let deleter = FakeKeyDeleter()
+    let (model, _) = makeModel(store: store, deleter: deleter, clients: [first, second])
     let a = try #require(model.handle(url: link.url))
     await first.deliver(keyName: "key one")
     await a.value
@@ -215,6 +216,7 @@ final class MadeClients: @unchecked Sendable {
     await b.value
     #expect(model.rows.map(\.credential.keyName) == ["key two"])
     #expect(try store.all().count == 1)
+    #expect(await deleter.deletions.isEmpty, "the key just stored must not be deleted")
 }
 
 @MainActor @Test(.timeLimit(.minutes(1))) func badLinkShowsFailure() {
@@ -233,7 +235,7 @@ final class MadeClients: @unchecked Sendable {
     #expect(model.rows.map(\.status) == [.checked(now), .rejected("revoked")])
 }
 
-@MainActor @Test(.timeLimit(.minutes(1))) func removeDeletesRowAndKey() async throws {
+@MainActor @Test(.timeLimit(.minutes(1))) func removeDeletesRowAndStoredCredential() async throws {
     let store = InMemoryOrgCredentialStore([stored("o1", "Acme"), stored("o2", "Beta")])
     let (model, _) = makeModel(store: store, clients: [])
     await model.load()
@@ -388,11 +390,26 @@ final class UnreadableStore: OrgCredentialStore, @unchecked Sendable {
     #expect(model.loadError?.contains("keychain access denied") == true)
 }
 
+/// Reads fail until `readable` is set.
+final class ToggleStore: OrgCredentialStore, @unchecked Sendable {
+    var readable = false
+    func all() throws -> [OrgCredential] {
+        guard readable else { throw UnreadableStore.Failure() }
+        return [stored("o1", "Acme")]
+    }
+    func save(_ credential: OrgCredential) throws {}
+    func remove(orgID: String) throws {}
+}
+
 @MainActor @Test(.timeLimit(.minutes(1))) func successfulLoadClearsLoadError() async {
-    let store = InMemoryOrgCredentialStore([stored("o1", "Acme")])
+    let store = ToggleStore()
     let model = OrganizationsModel(store: store, validator: FakeValidator(results: [:]), keyDeleter: FakeKeyDeleter(), now: { now })
     await model.load()
+    #expect(model.loadError != nil)
+    store.readable = true
+    await model.load()
     #expect(model.loadError == nil)
+    #expect(model.rows.map(\.id) == ["o1"])
 }
 
 @MainActor @Test(.timeLimit(.minutes(1))) func unreadableStoreDuringPairingWarnsAboutPossibleOldKey() async throws {
@@ -449,4 +466,38 @@ actor KeyGatedValidator: CredentialValidator {
     await load.value
     #expect(model.rows.map(\.credential.keyID) == ["kid-new"])
     #expect(model.rows.map(\.status) == [.checked(now)])
+}
+
+/// Holds every deletion until released.
+actor GatedKeyDeleter: KeyDeleter {
+    private var waiter: CheckedContinuation<Void, Never>?
+    private var started: [CheckedContinuation<Void, Never>] = []
+
+    func deleteKey(id: String, using credential: OrgCredential) async throws {
+        await withCheckedContinuation { waiter = $0; for s in started { s.resume() }; started = [] }
+    }
+
+    func waitUntilDeleting() async {
+        if waiter != nil { return }
+        await withCheckedContinuation { started.append($0) }
+    }
+
+    func release() {
+        waiter?.resume()
+        waiter = nil
+    }
+}
+
+@MainActor @Test(.timeLimit(.minutes(1))) func storedIsReportedBeforeTheReplacedKeyIsDeleted() async throws {
+    let client = FakePairingClient()
+    let deleter = GatedKeyDeleter()
+    let model = OrganizationsModel(store: InMemoryOrgCredentialStore([stored("o1", "Acme")]), validator: FakeValidator(results: [:]),
+                                   keyDeleter: deleter, makeClient: { _ in client }, now: { now })
+    let pairing = try #require(model.handle(url: link.url))
+    await client.deliver(keyID: "kid-new")
+    await deleter.waitUntilDeleting()
+    #expect(await client.reportedOutcomes == [.stored], "the command hears the result without waiting on Viam")
+    await deleter.release()
+    await pairing.value
+    #expect(model.pairing == .signedIn(orgName: "Acme"))
 }
