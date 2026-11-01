@@ -12,8 +12,8 @@ The macOS app needs a bundle: an Info.plist that registers the `viam-provisioner
 
 ## Decision
 
-The app is the `ViamProvisioner` executable target in the package. `scripts/bundle-app.sh` (`just app`) builds it, assembles `build/Viam Provisioner.app` from `App/Info.plist`, signs it ad hoc or with `CODESIGN_IDENTITY`, and registers it with Launch Services.
+The app is the `ViamProvisioner` executable target in the package. `scripts/bundle-app.sh` (`just app`) builds it, assembles `build/Viam Provisioner.app` from `App/Info.plist`, signs it with `CODESIGN_IDENTITY`, else the team's Developer ID identity (HGCN675G7C) when the keychain holds it, else ad hoc, and registers it with Launch Services.
 
 ## Consequences
 
-One build system and no project file to merge. Asset catalogs, entitlements, notarization and the SMAppService helper (#43) need build steps the script doesn't have yet; adopting an Xcode project is the path when those arrive. An ad-hoc signature changes on every build, so the login keychain asks again for access to keys saved by an earlier build. An Xcode project now (needs Xcode selected; `project.pbxproj` churn) and a generator such as XcodeGen or Tuist (another tool to install) were the alternatives.
+One build system and no project file to merge. Asset catalogs, entitlements, notarization and the SMAppService helper (#43) need build steps the script doesn't have yet; adopting an Xcode project is the path when those arrive. The login keychain grants an item to the signing identity, so team-signed builds keep access across rebuilds. An ad-hoc signature changes on every build, and the keychain asks again for access to keys saved by an earlier build. An Xcode project now (needs Xcode selected; `project.pbxproj` churn) and a generator such as XcodeGen or Tuist (another tool to install) were the alternatives.
