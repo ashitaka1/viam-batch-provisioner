@@ -147,3 +147,10 @@ private func post(_ link: PairingLink, _ path: String, _ body: Data) async throw
         #expect(status == 400, "status \(String(describing: status))")
     }
 }
+
+@Test(.timeLimit(.minutes(1))) func oversizedBodyIs413() async throws {
+    try await withServer { host, server in
+        let status = try await post(link(host, server), "pair/hello", Data(count: 1 << 20))
+        #expect(status == 413, "status \(String(describing: status))")
+    }
+}

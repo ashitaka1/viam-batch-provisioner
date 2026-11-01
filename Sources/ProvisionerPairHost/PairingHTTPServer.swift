@@ -50,6 +50,9 @@ private final class PairingHTTPHandler: ChannelInboundHandler, @unchecked Sendab
     private let host: PairingHost
     private var head: HTTPRequestHead?
     private var body = ByteBuffer()
+    private var tooLarge = false
+    /// Pairing messages are a few hundred bytes.
+    static let maxBodyBytes = 64 * 1024
 
     init(host: PairingHost) { self.host = host }
 
@@ -58,10 +61,19 @@ private final class PairingHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         case .head(let head):
             self.head = head
             body.clear()
+            tooLarge = false
         case .body(var chunk):
-            body.writeBuffer(&chunk)
+            if body.readableBytes + chunk.readableBytes > Self.maxBodyBytes {
+                tooLarge = true
+                body.clear()
+            }
+            if !tooLarge { body.writeBuffer(&chunk) }
         case .end:
             guard let head else { return }
+            if tooLarge {
+                respond(context: context, status: .payloadTooLarge, body: Data(), keepAlive: false)
+                return
+            }
             let path = head.uri
             let method = head.method
             let bytes = Data(body.readableBytesView)
