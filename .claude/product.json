@@ -1,12 +1,44 @@
 {
   "outcomes": [
     {
-      "text": "In any Viam-using shop, a batch of new x86 machines and Pis comes back as named hosts online in Viam, with nobody at a console.",
-      "signal": "after the one-time BIOS setup, a batch of ten reaches installed and shows online at app.viam.com, with no monitor or keyboard attached during the run"
+      "name": "PXE parity",
+      "text": "PXE provisioning runs on the Mac app alone: x86 machines boot from the network and come back as named hosts online in Viam with nobody at a console, and the server Mac holds nothing but the app.",
+      "signal": "on a Mac with no Python, Docker, Homebrew or dnsmasq, after the one-time BIOS setup, a PXE batch of ten reaches installed and shows online at app.viam.com, with no monitor or keyboard attached during the run"
     },
     {
-      "text": "Someone trusted to run a server on the shop's LAN sets one up once; after that, anyone in the shop provisions and watches batches from their own Mac or iPhone.",
-      "signal": "a provisioner who never touched the server Mac provisions a machine and watches it reach installed from their own device"
+      "name": "Media from any Mac",
+      "text": "Any client Mac flashes SD cards for queued Pis and USB sticks for queued x86 machines, and each machine comes back as a named host online in Viam with nobody at a console.",
+      "signal": "on a Mac other than the server, a provisioner flashes an SD card for a queued Pi and a USB stick for a queued x86 machine; both machines boot from them, reach installed and show online at app.viam.com"
+    },
+    {
+      "name": "Server setup",
+      "text": "Someone trusted to run a server on the shop's LAN sets one up by installing the app and turning on server mode; the app chooses the interface and fetches the ISO and boot files, without a terminal.",
+      "signal": "on a fresh Mac, someone goes from downloading the app to a server that answers a PXE machine, without opening a terminal"
+    },
+    {
+      "name": "Unattended server",
+      "text": "The server runs unattended: it comes back on every boot with nobody logged in, a crashed service restarts on its own, and the server's keeper sees and controls each service from the menu bar.",
+      "signal": "after the server Mac reboots, a client on another device reaches the server before anyone logs in; when the keeper logs in, the menu bar shows both services running, and turning one off and back on there takes effect"
+    },
+    {
+      "name": "Provision from any Mac",
+      "text": "A provisioner sets up environments and provisions batches from their own Mac, without a terminal or access to the server Mac.",
+      "signal": "a provisioner who never touched the server Mac creates an environment and provisions a batch that reaches installed, without opening a terminal"
+    },
+    {
+      "name": "Watch a batch",
+      "text": "A provisioner watches a batch from the app on their own Mac or iPhone: each machine shows the stage it is in, and a failed machine says where it stopped and why within minutes of stalling.",
+      "signal": "in a batch with one machine unplugged mid-download, the app on a provisioner's Mac and on their iPhone each shows every machine's stage as it advances; the rest reach installed, and the unplugged one fails within minutes naming the ISO-download stage"
+    },
+    {
+      "name": "Camera binding",
+      "text": "At the rack, a provisioner binds machines to queue slots with an iPhone's camera.",
+      "signal": "with only an iPhone, a provisioner binds each machine in a batch to its slot by camera, and each machine provisions as the one bound to it"
+    },
+    {
+      "name": "Fire and forget",
+      "text": "Provisioners fire and forget: they start a batch and walk away, sure they'll hear when machines are ready and when one needs them.",
+      "signal": "a provisioner starts a batch and quits the app; without opening it again, they are notified on their Mac or iPhone when the batch is ready, and within minutes when one machine fails, with its stage and reason"
     }
   ]
 }
