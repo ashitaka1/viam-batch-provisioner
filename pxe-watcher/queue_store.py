@@ -144,14 +144,16 @@ def append(queue_dir: Path, new_entries: list[dict], stage: Optional[Callable[[d
         return [], []
     with locked(queue_dir):
         entries = read(queue_dir)
-        names = {e["name"] for e in entries}
+        # Case-insensitive: slot directories on a case-insensitive filesystem
+        # would collide, and Viam treats such names as the same machine.
+        names = {e["name"].lower() for e in entries}
         added: list[dict] = []
         skipped: list[str] = []
         for e in new_entries:
-            if e["name"] in names:
+            if e["name"].lower() in names:
                 skipped.append(e["name"])
                 continue
-            names.add(e["name"])
+            names.add(e["name"].lower())
             added.append(e)
         if added:
             if stage is not None:

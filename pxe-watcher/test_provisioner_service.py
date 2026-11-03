@@ -72,13 +72,13 @@ class ValidateProvisionTest(ServiceLayoutTest):
     def test_rejects_invalid_items_atomically(self):
         good = {"name": "ok", "credentials": CREDS}
         bad_cases = [
-            ([{"name": "Bad"}], 0, "name"),
             ([{"name": "-a"}], 0, "name"),
-            ([{"name": "a-"}], 0, "name"),
+            ([{"name": "_a"}], 0, "name"),
+            ([{"name": "lab pi"}], 0, "name"),
             ([{"name": ".."}], 0, "name"),
             ([{"name": "a/b"}], 0, "name"),
             ([{"name": ""}], 0, "name"),
-            ([{"name": "a" * 64}], 0, "name"),
+            ([{"name": "a" * 61}], 0, "name"),
             ([{"name": "a\n"}], 0, "name"),
             ([good, {"name": "ok2", "credentials": {"cloud": {"id": "x"}}}], 1, "credentials"),
             ([{"name": "ok", "credentials": "string"}], 0, "credentials"),
@@ -86,7 +86,7 @@ class ValidateProvisionTest(ServiceLayoutTest):
             ({"name": "ok"}, None, None),
             ([], None, None),
             ([{"name": "ok"}] * 501, None, None),
-            ([good, {"name": "Bad"}], 1, "name"),
+            ([good, {"name": "bad_name"}], 1, "name"),
         ]
         for body, index, field in bad_cases:
             with self.subTest(body=str(body)[:60]):
@@ -98,9 +98,30 @@ class ValidateProvisionTest(ServiceLayoutTest):
                 self.assertFalse((self.queue_dir / "queue.json").exists(), "a rejected batch must write nothing")
                 self.assertEqual(sorted(p.name for p in self.queue_dir.iterdir()), [], "no slot dir may be left behind")
 
-        accepted = ["a", "a-1", "a" * 63]
+        accepted = ["a", "a-1", "a" * 60, "Bad", "a-", "Lab-Pi-1"]
         results = self.service().provision([{"name": n} for n in accepted])
-        self.assertEqual([r["result"] for r in results], ["added"] * 3)
+        self.assertEqual([r["result"] for r in results], ["added"] * len(accepted))
+
+    def test_name_problems_name_each_broken_rule(self):
+        chars = "Viam machine names contain only letters, digits and hyphens."
+        cases = [
+            ("lab_pi", ['"lab_pi" contains "_"; ' + chars]),
+            ("-lab pi.", ['"-lab pi." starts with "-"; Viam machine names start with a letter or digit.',
+                          '"-lab pi." contains " ", "."; ' + chars]),
+            ("a" * 61, ['"' + "a" * 61 + '" is 61 characters; Viam machine names are at most 60.']),
+            ("", ["Machine name is empty."]),
+            (None, ["Machine name is missing."]),
+            ("Lab-Pi-1", []),
+            ("lab-", []),
+        ]
+        for name, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(svc.name_problems(name), expected)
+
+    def test_rejection_message_is_the_broken_rules(self):
+        with self.assertRaises(svc.ValidationError) as cm:
+            self.service().provision([{"name": "-lab pi."}])
+        self.assertEqual(cm.exception.details[0]["message"], " ".join(svc.name_problems("-lab pi.")))
 
 
 class ProvisionTest(ServiceLayoutTest):
@@ -163,6 +184,20 @@ class ProvisionTest(ServiceLayoutTest):
             {"name": "a", "result": "skipped", "reason": "duplicate-in-request"},
         ])
         self.assertEqual(self.slot_file("a").read_text(), '{"orig": 1}')
+
+
+class CaseInsensitiveDuplicatesTest(ServiceLayoutTest):
+    def test_names_differing_only_in_case_are_one_machine(self):
+        self.seed([{"name": "Lab-Pi-1", "assigned": False}])
+
+        results = self.service().provision([{"name": "lab-pi-1"}, {"name": "Lab-Pi-2"}, {"name": "LAB-PI-2"}])
+
+        self.assertEqual(results, [
+            {"name": "lab-pi-1", "result": "skipped", "reason": "already-queued"},
+            {"name": "Lab-Pi-2", "result": "added"},
+            {"name": "LAB-PI-2", "result": "skipped", "reason": "duplicate-in-request"},
+        ])
+        self.assertEqual([e["name"] for e in self.queue()], ["Lab-Pi-1", "Lab-Pi-2"])
 
 
 class DeriveEntryTest(ServiceLayoutTest):

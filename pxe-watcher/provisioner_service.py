@@ -23,7 +23,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import queue_store  # noqa: E402
 import watcher  # noqa: E402
 
-NAME_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+# Viam's machine-name rule (validateMachineName in the Viam app), which Viam
+# doesn't document; rejections name each broken rule.
+NAME_MAX = 60
+NAME_FIRST_RE = re.compile(r"[A-Za-z0-9]")
+NAME_CHAR_RE = re.compile(r"[A-Za-z0-9-]")
 MAX_ITEMS = 500
 STATUSES = ("queued", "flashed", "assigned", "installing", "installed", "failed")
 
@@ -88,8 +92,29 @@ class StageFailed(ServiceError):
     code = "stage-failed"
 
 
+def name_problems(name) -> list:
+    """One sentence per Viam machine-name rule `name` breaks; empty when valid."""
+    if not isinstance(name, str):
+        return ["Machine name is missing."]
+    if not name:
+        return ["Machine name is empty."]
+    problems = []
+    if not NAME_FIRST_RE.fullmatch(name[0]):
+        problems.append(f'"{name}" starts with "{name[0]}"; Viam machine names start with a letter or digit.')
+    if len(name) > NAME_MAX:
+        problems.append(f'"{name}" is {len(name)} characters; Viam machine names are at most {NAME_MAX}.')
+    bad = []
+    for c in name:
+        if not NAME_CHAR_RE.fullmatch(c) and c not in bad:
+            bad.append(c)
+    if bad:
+        listed = ", ".join(f'"{c}"' for c in bad)
+        problems.append(f'"{name}" contains {listed}; Viam machine names contain only letters, digits and hyphens.')
+    return problems
+
+
 def valid_name(name) -> bool:
-    return isinstance(name, str) and NAME_RE.fullmatch(name) is not None
+    return not name_problems(name)
 
 
 def safe_lookup_name(name: str) -> bool:
@@ -123,8 +148,9 @@ def validate_provision(body) -> list:
             details.append({"index": index, "message": "item must be an object"})
             continue
         name = item.get("name")
-        if not valid_name(name):
-            details.append({"index": index, "field": "name", "message": "must match ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"})
+        problems = name_problems(name)
+        if problems:
+            details.append({"index": index, "field": "name", "message": " ".join(problems)})
         credentials = item.get("credentials")
         if credentials is not None and not _valid_credentials(credentials):
             details.append({"index": index, "field": "credentials", "message": "must be a viam.json object with cloud.id and cloud.secret"})
@@ -276,10 +302,10 @@ class ProvisionService:
         seen = set()
         to_add = []
         for index, item in enumerate(items):
-            if item["name"] in seen:
+            if item["name"].lower() in seen:
                 results[index] = {"name": item["name"], "result": "skipped", "reason": "duplicate-in-request"}
                 continue
-            seen.add(item["name"])
+            seen.add(item["name"].lower())
             to_add.append((index, item))
 
         by_name = {item["name"]: item for _, item in to_add}

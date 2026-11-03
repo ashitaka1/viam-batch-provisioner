@@ -285,10 +285,14 @@ components:
   schemas:
     Name:
       type: string
-      description: Machine name. RFC 1123 hostname label; also used as a directory name on the server.
-      pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+      description: |
+        Viam machine name: letters, digits and hyphens, starting with a letter or
+        digit, at most 60 characters (the Viam app's validateMachineName). Also the
+        machine's hostname and its directory name on the server. Names that differ
+        only in case are the same machine.
+      pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,59}$'
       minLength: 1
-      maxLength: 63
+      maxLength: 60
 
     Mac:
       type: string

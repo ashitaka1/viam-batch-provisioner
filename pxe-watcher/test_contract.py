@@ -108,7 +108,7 @@ class SchemaValidationTest(unittest.TestCase):
 
         for method, path, payload in [
             ("GET", "/api/v1/queue/missing", None),
-            ("POST", "/api/v1/provision", [{"name": "Bad"}]),
+            ("POST", "/api/v1/provision", [{"name": "bad_name"}]),
             ("POST", "/api/v1/provision", b"nope"),
         ]:
             with self.subTest(path=path, payload=str(payload)[:30]):

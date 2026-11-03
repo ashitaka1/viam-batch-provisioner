@@ -127,6 +127,13 @@ class AppendTest(QueueDirTest):
         self.assertEqual(disk[0], _entry("p-1", True, "aa:aa:aa:aa:aa:01"))
         self.assertEqual(disk[3]["slot_id"], "slot-p-4")
 
+    def test_append_skips_names_differing_only_in_case(self):
+        self.seed([_entry("Lab-Pi-1")])
+        before = self.snapshot()
+        added, skipped = queue_store.append(self.queue_dir, [_entry("lab-pi-1")])
+        self.assertEqual((added, skipped), ([], ["lab-pi-1"]))
+        self.assertEqual(self.snapshot(), before, "a case-only duplicate must not rewrite the queue")
+
     def test_append_to_missing_file_creates_it(self):
         added, skipped = queue_store.append(self.queue_dir, [_entry("p-1")])
         self.assertEqual([e["name"] for e in added], ["p-1"])
