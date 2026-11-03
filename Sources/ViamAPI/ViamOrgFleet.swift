@@ -42,8 +42,8 @@ public struct ViamOrgFleet: ViamFleet {
             switch error {
             case .unauthenticated(let message), .permissionDenied(let message):
                 throw .rejected(message)
-            case .status(let code, let message) where code == 4 || code == 14:
-                // DEADLINE_EXCEEDED, UNAVAILABLE: the call may have run.
+            case .status(let code, let message) where [1, 2, 4, 13, 14].contains(code):
+                // CANCELLED, UNKNOWN, DEADLINE_EXCEEDED, INTERNAL, UNAVAILABLE: the call may have run.
                 throw .unreachable(message)
             case .status(_, let message):
                 throw .failed(message)

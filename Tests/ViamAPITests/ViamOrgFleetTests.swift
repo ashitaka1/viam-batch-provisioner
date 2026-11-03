@@ -122,6 +122,9 @@ private func describe(_ error: FleetError?) -> String { error.map { "\($0)" } ??
     (7, .rejected("refused")),
     (14, .unreachable("refused")),
     (4, .unreachable("refused")),
+    (1, .unreachable("refused")),
+    (2, .unreachable("refused")),
+    (13, .unreachable("refused")),
     (3, .failed("refused")),
 ])
 func mapsStatuses(code: Int, expected: FleetError) async {

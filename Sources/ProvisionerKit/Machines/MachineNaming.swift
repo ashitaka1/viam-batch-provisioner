@@ -49,8 +49,17 @@ public enum MachineNamingError: Error, Sendable, Equatable, LocalizedError {
 /// filling gaps in the location's numbers first, then counting past the highest,
 /// skipping names already queued on the server.
 public enum MachineNaming {
-    public static func names(prefix: String, count: Int, existing: [String], queued: Set<String>) throws(MachineNamingError) -> [String] {
+    /// The checks that need no knowledge of the location: the count, and the
+    /// prefix's characters as they appear in its first name.
+    public static func check(prefix: String, count: Int) throws(MachineNamingError) {
         guard count >= 1 else { throw .invalidCount(count) }
+        let first = "\(prefix)-1"
+        let problems = MachineName.problems(first)
+        guard problems.isEmpty else { throw .invalidName(first, problems: problems) }
+    }
+
+    public static func names(prefix: String, count: Int, existing: [String], queued: Set<String>) throws(MachineNamingError) -> [String] {
+        try check(prefix: prefix, count: count)
 
         let lowered = prefix.lowercased() + "-"
         var taken = Set<Int>()

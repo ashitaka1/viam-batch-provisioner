@@ -65,6 +65,11 @@ public struct MachineBatch: Sendable {
     /// Lists the location, picks names, then creates them. Throws only before
     /// the first machine is created; after that the result says what happened.
     public func create(prefix: String, count: Int, queued: Set<String>) async throws(BatchError) -> BatchResult {
+        do {
+            try MachineNaming.check(prefix: prefix, count: count)
+        } catch {
+            throw .naming(error)
+        }
         let existing: [ViamMachine]
         do {
             existing = try await fleet.machines(location: location)

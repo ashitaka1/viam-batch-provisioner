@@ -137,6 +137,18 @@ private func create(_ fleet: FakeFleet, count: Int, queued: Set<String> = []) as
     #expect(await fleet.calls.allSatisfy { $0 == .machines }, "no machine may be created")
 }
 
+/// The operator's mistake is reported even when Viam can't be reached.
+@Test(arguments: [("lab_pi", 1), ("lab-pi", 0)])
+func operatorMistakesComeBeforeAnyViamCall(prefix: String, count: Int) async {
+    let fleet = FakeFleet(listingFailure: .unreachable("offline"))
+    let thrown = await #expect(throws: BatchError.self) {
+        try await batch(fleet).create(prefix: prefix, count: count, queued: [])
+    }
+    let isNaming = if case .naming? = thrown { true } else { false }
+    #expect(isNaming, "expected a naming error, got \(thrown.map { "\($0)" } ?? "none")")
+    #expect(await fleet.calls == [])
+}
+
 @Test func descriptionsHideSecrets() async throws {
     let part = MachinePart(id: "p", secret: "hunter2")
     #expect(!String(describing: part).contains("hunter2"))
