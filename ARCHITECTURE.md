@@ -57,13 +57,14 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 | `Sources/ProvisionerKit/InstallNotifier.swift` | Consumes `QueueFeed` updates and hands each ending install to a `NotificationPoster`; snapshots post nothing, replayed events post; a failed post is logged |
 | `Sources/ProvisionerKit/UserNotificationPoster.swift` | `NotificationPoster` over `UNUserNotificationCenter`; needs a bundled app |
 | `Sources/ProvisionerKit/ServerBrowser.swift` | Bonjour browse for `_viam-provisioner._tcp` with TXT `api=v1`, and validated manual addresses |
-| `Sources/ViamAPI/` | Viam AppService client: `GRPCWeb.swift` frames unary gRPC-web calls over URLSession; `ViamAppClient` authenticates an API key for a bearer token and calls the service; `Generated/` holds checked-in swift-protobuf types from `scripts/gen-viam-protos.sh` (`docs/decisions/0037-grpc-web-to-viam.md`) |
+| `Sources/ViamAPI/` | Viam AppService client: `GRPCWeb.swift` frames unary gRPC-web calls over URLSession; `ViamAppClient` authenticates an API key for a bearer token and calls the service; `ViamOrgFleet` adapts it to `ViamFleet`; `Generated/` holds checked-in swift-protobuf types from `scripts/gen-viam-protos.sh` (`docs/decisions/0037-grpc-web-to-viam.md`) |
 | `Sources/ProvisionerKit/Pairing/` | App side of API-key pairing: ephemeral X25519 exchange and the four-digit comparison code (`PairingCrypto`), the `viam-provisioner://pair` link, wire messages and `PairingClient` |
 | `Sources/ProvisionerKit/Organizations/` | `OrgCredential`, the Keychain store (one item per org ID), `CredentialValidator` and `OrganizationsModel`, which stores a key only after a validation call succeeds |
+| `Sources/ProvisionerKit/Machines/` | `MachineName` and `MachineNaming` apply Viam's machine-name rule and pick the next `<prefix>-N` past the names in the location and the queue; `ViamFleet` is the protocol over Viam's machine calls; `MachineBatch` creates machines one at a time and deletes one that fails partway, and stops only when the key is rejected or the task is cancelled. An unknown outcome (a timeout) deletes any machine found under the name |
 | `Sources/ProvisionerPairHost/` | Command side of pairing: `PairingHost` state machine, `PairingHTTPServer` loopback listener, and `ViamCLI`, which wraps the `viam` CLI for org listing and key creation |
 | `Sources/provisioner-pair/` | `just pair-app`: picks an org, shows the comparison code, creates the key after the operator confirms, releases it to the app |
 | `Sources/ViamProvisioner/` | The macOS SwiftUI app: onboarding, Settings → Organizations, pairing sheet. `scripts/bundle-app.sh` builds it into a bundle (`docs/decisions/0038-swiftpm-app-bundle.md`) |
-| `Sources/provisioner-probe/` | Dev executable that exercises `ProvisionerKit` against a live API: `check`, `browse`, `watch`, `notify` (prints the notifications the app would post) |
+| `Sources/provisioner-probe/` | Dev executable that exercises `ProvisionerKit` against a live API: `check`, `browse`, `watch`, `notify` (prints the notifications the app would post), `viam-locations`, `viam-batch`, `viam-delete-key` |
 | `Tests/ProvisionerKitTests/` | Domain mapping, client, feed and browser tests; `Support/` holds a scripted transport and a fake feed source |
 
 ## Data model
