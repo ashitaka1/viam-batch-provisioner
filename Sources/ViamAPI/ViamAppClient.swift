@@ -1,5 +1,6 @@
 public import Foundation
 public import ProvisionerKit
+import SwiftProtobuf
 
 /// Calls Viam's AppService with an org API key. Authenticates on first use and
 /// keeps the access token for the client's lifetime.
@@ -30,6 +31,55 @@ public final class ViamAppClient: Sendable {
         request.id = id
         let _: Viam_App_V1_DeleteKeyResponse = try await grpc.unary(
             "viam.app.v1.AppService/DeleteKey", request, metadata: ["authorization": "Bearer \(accessToken())"])
+    }
+
+    public func locations(organizationID: String) async throws -> [(id: String, name: String)] {
+        var request = Viam_App_V1_ListLocationsRequest()
+        request.organizationID = organizationID
+        let response: Viam_App_V1_ListLocationsResponse = try await appService("ListLocations", request)
+        return response.locations.map { ($0.id, $0.name) }
+    }
+
+    public func robots(locationID: String) async throws -> [(id: String, name: String)] {
+        var request = Viam_App_V1_ListRobotsRequest()
+        request.locationID = locationID
+        let response: Viam_App_V1_ListRobotsResponse = try await appService("ListRobots", request)
+        return response.robots.map { ($0.id, $0.name) }
+    }
+
+    /// Returns the new machine's ID.
+    public func newRobot(name: String, location: String) async throws -> String {
+        var request = Viam_App_V1_NewRobotRequest()
+        request.name = name
+        request.location = location
+        let response: Viam_App_V1_NewRobotResponse = try await appService("NewRobot", request)
+        return response.id
+    }
+
+    public func robotParts(robotID: String) async throws -> [Viam_App_V1_RobotPart] {
+        var request = Viam_App_V1_GetRobotPartsRequest()
+        request.robotID = robotID
+        let response: Viam_App_V1_GetRobotPartsResponse = try await appService("GetRobotParts", request)
+        return response.parts
+    }
+
+    public func robotPart(id: String) async throws -> (id: String, secret: String) {
+        var request = Viam_App_V1_GetRobotPartRequest()
+        request.id = id
+        let response: Viam_App_V1_GetRobotPartResponse = try await appService("GetRobotPart", request)
+        return (response.part.id, response.part.secret)
+    }
+
+    public func deleteRobot(id: String) async throws {
+        var request = Viam_App_V1_DeleteRobotRequest()
+        request.id = id
+        let _: Viam_App_V1_DeleteRobotResponse = try await appService("DeleteRobot", request)
+    }
+
+    private func appService<Request: SwiftProtobuf.Message, Response: SwiftProtobuf.Message>(
+        _ method: String, _ request: Request
+    ) async throws -> Response {
+        try await grpc.unary("viam.app.v1.AppService/\(method)", request, metadata: ["authorization": "Bearer \(accessToken())"])
     }
 
     private func accessToken() async throws -> String {
