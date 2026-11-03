@@ -40,7 +40,11 @@ private let charactersRule = "Viam machine names contain only letters, digits an
     let long = String(repeating: "a", count: 61)
     #expect(MachineName.problems(long) == ["\"\(long)\" is 61 characters; Viam machine names are at most 60."])
     #expect(MachineName.problems("") == ["Machine name is empty."])
-    #expect(MachineName.problems("lab-") == [])
+    #expect(MachineName.problems("lab-") == [#""lab-" ends with "-"; a machine name becomes its hostname, which can't end with a hyphen."#])
+    #expect(MachineName.problems("-a-") == [
+        #""-a-" starts with "-"; Viam machine names start with a letter or digit."#,
+        #""-a-" ends with "-"; a machine name becomes its hostname, which can't end with a hyphen."#,
+    ])
     #expect(MachineName.problems("Lab-Pi-1") == [])
     #expect(MachineName.problems("café") == [#""café" contains "é"; "# + charactersRule])
     #expect(MachineName.problems("a__b") == [#""a__b" contains "_"; "# + charactersRule])

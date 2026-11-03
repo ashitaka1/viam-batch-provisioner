@@ -24,7 +24,8 @@ import queue_store  # noqa: E402
 import watcher  # noqa: E402
 
 # Viam's machine-name rule (validateMachineName in the Viam app), which Viam
-# doesn't document; rejections name each broken rule.
+# doesn't document, plus no trailing hyphen, since the name is the hostname;
+# rejections name each broken rule.
 NAME_MAX = 60
 NAME_FIRST_RE = re.compile(r"[A-Za-z0-9]")
 NAME_CHAR_RE = re.compile(r"[A-Za-z0-9-]")
@@ -101,6 +102,8 @@ def name_problems(name) -> list:
     problems = []
     if not NAME_FIRST_RE.fullmatch(name[0]):
         problems.append(f'"{name}" starts with "{name[0]}"; Viam machine names start with a letter or digit.')
+    if len(name) > 1 and name.endswith("-"):
+        problems.append(f'"{name}" ends with "-"; a machine name becomes its hostname, which can\'t end with a hyphen.')
     if len(name) > NAME_MAX:
         problems.append(f'"{name}" is {len(name)} characters; Viam machine names are at most {NAME_MAX}.')
     bad = []

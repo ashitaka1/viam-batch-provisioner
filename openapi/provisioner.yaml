@@ -287,10 +287,11 @@ components:
       type: string
       description: |
         Viam machine name: letters, digits and hyphens, starting with a letter or
-        digit, at most 60 characters (the Viam app's validateMachineName). Also the
-        machine's hostname and its directory name on the server. Names that differ
-        only in case are the same machine.
-      pattern: '^[A-Za-z0-9][A-Za-z0-9-]{0,59}$'
+        digit, at most 60 characters (the Viam app's validateMachineName), and not
+        ending with a hyphen, since it is also the machine's hostname. Also its
+        directory name on the server. Names that differ only in case are the same
+        machine.
+      pattern: '^[A-Za-z0-9]([A-Za-z0-9-]{0,58}[A-Za-z0-9])?$'
       minLength: 1
       maxLength: 60
 

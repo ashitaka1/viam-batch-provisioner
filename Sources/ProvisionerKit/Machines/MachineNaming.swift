@@ -1,8 +1,9 @@
 public import Foundation
 
-/// Viam's machine-name rule, from validateMachineName in the Viam app. Viam
-/// doesn't document it, so every rejection names the rule that was broken, in
-/// the same words as the provisioner API.
+/// Viam's machine-name rule, from validateMachineName in the Viam app, plus no
+/// trailing hyphen, since the name becomes the machine's hostname. Viam doesn't
+/// document its rule, so every rejection names the rule that was broken, in the
+/// same words as the provisioner API.
 public enum MachineName {
     public static let maxLength = 60
 
@@ -12,6 +13,9 @@ public enum MachineName {
         var problems: [String] = []
         if !isAlphanumeric(first) {
             problems.append("\"\(name)\" starts with \"\(first)\"; Viam machine names start with a letter or digit.")
+        }
+        if name.count > 1 && name.hasSuffix("-") {
+            problems.append("\"\(name)\" ends with \"-\"; a machine name becomes its hostname, which can't end with a hyphen.")
         }
         let length = name.unicodeScalars.count
         if length > maxLength {

@@ -73,6 +73,7 @@ class ValidateProvisionTest(ServiceLayoutTest):
         good = {"name": "ok", "credentials": CREDS}
         bad_cases = [
             ([{"name": "-a"}], 0, "name"),
+            ([{"name": "a-"}], 0, "name"),
             ([{"name": "_a"}], 0, "name"),
             ([{"name": "lab pi"}], 0, "name"),
             ([{"name": ".."}], 0, "name"),
@@ -98,7 +99,7 @@ class ValidateProvisionTest(ServiceLayoutTest):
                 self.assertFalse((self.queue_dir / "queue.json").exists(), "a rejected batch must write nothing")
                 self.assertEqual(sorted(p.name for p in self.queue_dir.iterdir()), [], "no slot dir may be left behind")
 
-        accepted = ["a", "a-1", "a" * 60, "Bad", "a-", "Lab-Pi-1"]
+        accepted = ["a", "a-1", "a" * 60, "Bad", "Lab-Pi-1"]
         results = self.service().provision([{"name": n} for n in accepted])
         self.assertEqual([r["result"] for r in results], ["added"] * len(accepted))
 
@@ -115,7 +116,9 @@ class ValidateProvisionTest(ServiceLayoutTest):
             ("é-lab", ['"é-lab" starts with "é"; Viam machine names start with a letter or digit.',
                        '"é-lab" contains "é"; ' + chars]),
             ("Lab-Pi-1", []),
-            ("lab-", []),
+            ("lab-", ['"lab-" ends with "-"; a machine name becomes its hostname, which can\'t end with a hyphen.']),
+            ("-a-", ['"-a-" starts with "-"; Viam machine names start with a letter or digit.',
+                     '"-a-" ends with "-"; a machine name becomes its hostname, which can\'t end with a hyphen.']),
         ]
         for name, expected in cases:
             with self.subTest(name=name):
