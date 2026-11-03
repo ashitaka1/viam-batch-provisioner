@@ -8,6 +8,11 @@ let usage = """
            provisioner-probe watch <base-url>
            provisioner-probe notify <base-url>
            provisioner-probe viam-org <org-id>    (VIAM_API_KEY_ID and VIAM_API_KEY in the environment)
+           provisioner-probe viam-locations <org-id>
+           provisioner-probe viam-batch <org-id> <location-id> <prefix> <count>
+           provisioner-probe viam-delete-key <org-id> <key-id>
+             (the viam-* commands use VIAM_API_KEY_ID and VIAM_API_KEY when set,
+              otherwise the org's key paired into the app's Keychain)
     """
 
 func fail(_ message: String) -> Never {
@@ -111,11 +116,108 @@ func viamOrg(_ arguments: ArraySlice<String>) async {
     }
 }
 
+/// An org key from the environment, or else the one paired into the app's Keychain.
+func orgCredential(_ orgID: String) -> OrgCredential {
+    let environment = ProcessInfo.processInfo.environment
+    let keyID = environment["VIAM_API_KEY_ID"], key = environment["VIAM_API_KEY"]
+    if keyID != nil || key != nil {
+        guard let keyID, !keyID.isEmpty else { fail("VIAM_API_KEY is set but VIAM_API_KEY_ID is missing or empty") }
+        guard let key, !key.isEmpty else { fail("VIAM_API_KEY_ID is set but VIAM_API_KEY is missing or empty") }
+        return OrgCredential(
+            PairingPayload(orgID: orgID, orgName: "", keyID: keyID, key: key, keyName: "environment"), addedAt: Date())
+    }
+    do {
+        guard let credential = try KeychainOrgCredentialStore().all().first(where: { $0.orgID == orgID }) else {
+            fail("no key for \(orgID): set VIAM_API_KEY_ID and VIAM_API_KEY, or run just pair-app")
+        }
+        return credential
+    } catch {
+        fail("couldn't read the app's key from the Keychain (\(error)); set VIAM_API_KEY_ID and VIAM_API_KEY instead")
+    }
+}
+
+/// Deletes an org API key; the viam CLI can create keys but not delete them.
+func viamDeleteKey(_ arguments: ArraySlice<String>) async {
+    let arguments = Array(arguments)
+    guard arguments.count == 2 else { fail(usage) }
+    do {
+        try await ViamKeyDeleter().deleteKey(id: arguments[1], using: orgCredential(arguments[0]))
+        print("deleted key \(arguments[1])")
+    } catch {
+        fail("viam-delete-key failed: \(error)")
+    }
+}
+
+func viamLocations(_ arguments: ArraySlice<String>) async {
+    guard let orgID = arguments.first else { fail(usage) }
+    do {
+        for location in try await ViamOrgFleet(credential: orgCredential(orgID)).locations() {
+            print("\(location.id) \(location.name)")
+        }
+    } catch {
+        fail("viam-locations failed: \(error)")
+    }
+}
+
+/// Creates machines with MachineBatch, checks each blob's part ID against Viam,
+/// then deletes them. Never prints a secret.
+func viamBatch(_ arguments: ArraySlice<String>) async {
+    let arguments = Array(arguments)
+    guard arguments.count == 4, let count = Int(arguments[3]) else { fail(usage) }
+    let credential = orgCredential(arguments[0])
+    let fleet = ViamOrgFleet(credential: credential)
+    let result: BatchResult
+    do {
+        result = try await MachineBatch(fleet: fleet, location: arguments[1]).create(prefix: arguments[2], count: count, queued: [])
+    } catch {
+        switch error {
+        case .naming(let naming): fail("viam-batch: \(naming.localizedDescription)")
+        case .fleet(let fleet): fail("viam-batch: \(fleet)")
+        }
+    }
+
+    var ok = result.failures.isEmpty && result.stop == nil
+    for machine in result.created { print("created \(machine)") }
+    for failure in result.failures {
+        print("failed \(failure.name): \(failure.message)", failure.leftInViam ? "(may remain in Viam: \(failure.machineID ?? "ID unknown"))" : "")
+    }
+    if let stop = result.stop { print("stopped: \(stop); untried \(result.untried)") }
+
+    let client = ViamAppClient(keyID: credential.keyID, key: credential.key)
+    for machine in result.created {
+        do {
+            let blob = try JSONSerialization.jsonObject(with: machine.credentialsJSON) as? [String: [String: String]]
+            let part = try await client.robotPart(id: machine.partID)
+            if blob?["cloud"]?["id"] == part.id && blob?["cloud"]?["secret"] == part.secret {
+                print("verified \(machine.name)")
+            } else {
+                print("MISMATCH \(machine.name): viam.json doesn't match part \(machine.partID)")
+                ok = false
+            }
+        } catch {
+            print("couldn't verify \(machine.name): \(error)")
+            ok = false
+        }
+        do {
+            try await fleet.deleteMachine(id: machine.machineID)
+            print("deleted \(machine.name)")
+        } catch {
+            print("COULDN'T DELETE \(machine.name) (\(machine.machineID)): \(error)")
+            ok = false
+        }
+    }
+    if !ok { exit(1) }
+    print("PASS")
+}
+
 switch arguments.popFirst() {
 case "browse": await browse()
 case "check": await check(client(arguments))
 case "watch": await watch(client(arguments))
 case "notify": await notify(client(arguments))
 case "viam-org": await viamOrg(arguments)
+case "viam-locations": await viamLocations(arguments)
+case "viam-batch": await viamBatch(arguments)
+case "viam-delete-key": await viamDeleteKey(arguments)
 default: fail(usage)
 }
