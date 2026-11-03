@@ -111,6 +111,9 @@ class ValidateProvisionTest(ServiceLayoutTest):
             ("a" * 61, ['"' + "a" * 61 + '" is 61 characters; Viam machine names are at most 60.']),
             ("", ["Machine name is empty."]),
             (None, ["Machine name is missing."]),
+            ("a__b", ['"a__b" contains "_"; ' + chars]),
+            ("é-lab", ['"é-lab" starts with "é"; Viam machine names start with a letter or digit.',
+                       '"é-lab" contains "é"; ' + chars]),
             ("Lab-Pi-1", []),
             ("lab-", []),
         ]
@@ -121,7 +124,12 @@ class ValidateProvisionTest(ServiceLayoutTest):
     def test_rejection_message_is_the_broken_rules(self):
         with self.assertRaises(svc.ValidationError) as cm:
             self.service().provision([{"name": "-lab pi."}])
-        self.assertEqual(cm.exception.details[0]["message"], " ".join(svc.name_problems("-lab pi.")))
+        self.assertEqual(cm.exception.details, [{
+            "index": 0,
+            "field": "name",
+            "message": '"-lab pi." starts with "-"; Viam machine names start with a letter or digit. '
+                       '"-lab pi." contains " ", "."; Viam machine names contain only letters, digits and hyphens.',
+        }])
 
 
 class ProvisionTest(ServiceLayoutTest):

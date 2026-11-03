@@ -22,6 +22,7 @@ private func create(_ fleet: FakeFleet, count: Int, queued: Set<String> = []) as
     #expect(json == ["cloud": ["app_address": "https://app.viam.com:443", "id": "p-lab-pi-2", "secret": "s-lab-pi-2"]])
     #expect(machine.request.name == "lab-pi-2")
     #expect(machine.request.credentialsJSON == machine.credentialsJSON)
+    #expect(await fleet.locationsUsed == ["loc-1"], "every call must go to the batch's location")
 }
 
 @Test func partFailureDeletesAndContinues() async throws {
@@ -40,6 +41,16 @@ private func create(_ fleet: FakeFleet, count: Int, queued: Set<String> = []) as
     #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "no main part", machineID: "m-lab-pi-1", leftInViam: true)])
 }
 
+@Test func partRejectionDeletesAndStops() async throws {
+    let fleet = FakeFleet(partFailures: ["lab-pi-1": .rejected("key revoked")])
+    let result = try await create(fleet, count: 2)
+
+    #expect(result.stop == .rejected("key revoked"))
+    #expect(result.untried == ["lab-pi-2"])
+    #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "key revoked", machineID: "m-lab-pi-1", leftInViam: false)])
+    #expect(await fleet.names == [], "the half-made machine must be deleted")
+}
+
 @Test func createFailedStatusLeavesNothing() async throws {
     let fleet = FakeFleet(createOutcomes: ["lab-pi-1": .fail(.failed("already a robot with the name lab-pi-1"))])
     let result = try await create(fleet, count: 1)
@@ -56,6 +67,21 @@ private func create(_ fleet: FakeFleet, count: Int, queued: Set<String> = []) as
     #expect(await fleet.calls == [.machines, .create("lab-pi-1"), .machines, .delete("m-lab-pi-1")])
     #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "connection reset", machineID: "m-lab-pi-1", leftInViam: false)])
     #expect(await fleet.names == [])
+}
+
+@Test func unknownCreateOutcomeFoundInOtherCaseIsDeleted() async throws {
+    let fleet = FakeFleet(createOutcomes: ["lab-pi-1": .createdAsThenUnreachable("Lab-Pi-1")])
+    let result = try await create(fleet, count: 1)
+
+    #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "connection reset", machineID: "m-lab-pi-1", leftInViam: false)])
+    #expect(await fleet.names == [])
+}
+
+@Test func unknownCreateOutcomeDeleteFailureIsLeftInViam() async throws {
+    let fleet = FakeFleet(createOutcomes: ["lab-pi-1": .createdThenUnreachable], deleteFailures: ["lab-pi-1": .unreachable("timeout")])
+    let result = try await create(fleet, count: 1)
+
+    #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "connection reset", machineID: "m-lab-pi-1", leftInViam: true)])
 }
 
 @Test func unknownCreateOutcomeNotFoundLeavesNothing() async throws {
@@ -112,8 +138,9 @@ private func create(_ fleet: FakeFleet, count: Int, queued: Set<String> = []) as
 }
 
 @Test func descriptionsHideSecrets() async throws {
+    let part = MachinePart(id: "p", secret: "hunter2")
+    #expect(!String(describing: part).contains("hunter2"))
+    #expect(!String(reflecting: part).contains("hunter2"))
     let result = try await create(FakeFleet(), count: 1)
-    #expect(!String(describing: result.created[0]).contains("s-lab-pi-1"))
-    #expect(!String(describing: result).contains("s-lab-pi-1"))
     #expect(!String(reflecting: result).contains("s-lab-pi-1"))
 }

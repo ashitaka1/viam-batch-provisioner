@@ -14,10 +14,14 @@ actor FakeFleet: ViamFleet {
         case fail(FleetError)
         /// The machine is created, but the call reports `.unreachable`.
         case createdThenUnreachable
+        /// As above, with Viam holding the name in a different case.
+        case createdAsThenUnreachable(String)
     }
 
     let location = "loc-1"
     private(set) var calls: [Call] = []
+    /// Every location argument the fleet was called with.
+    private(set) var locationsUsed: Set<String> = []
     private(set) var machines: [ViamMachine]
     private let createOutcomes: [String: CreateOutcome]
     private let partFailures: [String: FleetError]
@@ -54,6 +58,7 @@ actor FakeFleet: ViamFleet {
 
     func machines(location: String) async throws(FleetError) -> [ViamMachine] {
         calls.append(.machines)
+        locationsUsed.insert(location)
         if let listingFailure { throw listingFailure }
         if let listingFailureAfterCreate, calls.contains(where: { if case .create = $0 { true } else { false } }) {
             throw listingFailureAfterCreate
@@ -63,11 +68,15 @@ actor FakeFleet: ViamFleet {
 
     func createMachine(name: String, location: String) async throws(FleetError) -> String {
         calls.append(.create(name))
+        locationsUsed.insert(location)
         switch createOutcomes[name] {
         case .fail(let error)?:
             throw error
         case .createdThenUnreachable?:
             machines.append(ViamMachine(id: "m-\(name)", name: name))
+            throw .unreachable("connection reset")
+        case .createdAsThenUnreachable(let stored)?:
+            machines.append(ViamMachine(id: "m-\(name)", name: stored))
             throw .unreachable("connection reset")
         case nil:
             machines.append(ViamMachine(id: "m-\(name)", name: name))

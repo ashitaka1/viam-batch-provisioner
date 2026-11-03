@@ -43,6 +43,11 @@ private let charactersRule = "Viam machine names contain only letters, digits an
     #expect(MachineName.problems("lab-") == [])
     #expect(MachineName.problems("Lab-Pi-1") == [])
     #expect(MachineName.problems("café") == [#""café" contains "é"; "# + charactersRule])
+    #expect(MachineName.problems("a__b") == [#""a__b" contains "_"; "# + charactersRule])
+    #expect(MachineName.problems("é-lab") == [
+        #""é-lab" starts with "é"; Viam machine names start with a letter or digit."#,
+        #""é-lab" contains "é"; "# + charactersRule,
+    ])
 }
 
 @Test func lengthCountsCodePoints() {
