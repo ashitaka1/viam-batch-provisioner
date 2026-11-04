@@ -14,11 +14,12 @@ enum ProvisionerFailure: Error, Equatable {
 /// Owns the server's state: the queue, machine records, staged files and the
 /// event journal. Every read derives status from the stored records.
 actor Provisioner {
-    private let now: @Sendable () -> Date
+    let now: @Sendable () -> Date
     let logger: Logger
     let store: MachineStore?
     private let loadError: String?
     let journal: EventJournal
+    private var fanout = EventFanout()
 
     init(dataDirectory: DataDirectory, now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {
         self.now = now
@@ -101,6 +102,46 @@ actor Provisioner {
         return Components.Schemas.QueueCounts(queued: n(.queued), flashed: n(.flashed), assigned: n(.assigned),
                                               installing: n(.installing), installed: n(.installed), failed: n(.failed),
                                               total: store.queue.count)
+    }
+
+    /// The backlog after `id` and live delivery from the same actor turn, so no
+    /// event is missed or repeated. `nil` means live only. An id ahead of the
+    /// journal, or older than its first event, gets a resync.
+    func subscribe(after id: Int?) -> EventSubscription {
+        let backlog: Backlog
+        if let id {
+            let first = journal.firstID ?? journal.lastID + 1
+            backlog = id > journal.lastID || id + 1 < first ? .resync(latestID: journal.lastID) : .events(journal.events(after: id))
+        } else {
+            backlog = .events([])
+        }
+        let key = UUID()
+        let (stream, continuation) = AsyncStream.makeStream(of: Components.Schemas.MachineEvent.self)
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.unsubscribe(key) }
+        }
+        fanout.add(key, continuation)
+        return EventSubscription(backlog: backlog, live: stream, cancel: { continuation.finish() })
+    }
+
+    func journalEvents(after id: Int) -> [Components.Schemas.MachineEvent] {
+        journal.events(after: id)
+    }
+
+    func machineRecord(_ name: String) -> MachineRecord? {
+        store?.machine(name.lowercased())
+    }
+
+    /// Journals the event and delivers it to open streams. A journal failure is
+    /// logged by the journal and the event goes nowhere.
+    func emit(_ make: (Int) -> Components.Schemas.MachineEvent) {
+        if let event = journal.append(make) {
+            fanout.publish(event)
+        }
+    }
+
+    private func unsubscribe(_ key: UUID) {
+        fanout.remove(key)
     }
 
     // MARK: - Helpers

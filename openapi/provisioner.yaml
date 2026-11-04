@@ -428,12 +428,9 @@ components:
 
     InstallReport:
       type: object
-      description: Exactly one of name and mac identifies the machine. `reason` applies to `failed` only.
+      description: Exactly one of name and mac identifies the machine; the server rejects a report with both or neither. `reason` applies to `failed` only.
       required: [kind, stage]
       additionalProperties: true
-      oneOf:
-        - required: [name]
-        - required: [mac]
       properties:
         kind:
           type: string
