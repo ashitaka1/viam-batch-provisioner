@@ -13,6 +13,8 @@ let package = Package(
         .executable(name: "provisioner-probe", targets: ["provisioner-probe"]),
         .executable(name: "provisioner-pair", targets: ["provisioner-pair"]),
         .executable(name: "ViamProvisioner", targets: ["ViamProvisioner"]),
+        .library(name: "ProvisionerServer", targets: ["ProvisionerServer"]),
+        .executable(name: "provisioner-server", targets: ["provisioner-server"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
@@ -20,6 +22,9 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-openapi-runtime.git", from: "1.13.0"),
         .package(url: "https://github.com/apple/swift-openapi-urlsession.git", from: "1.4.0"),
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0"),
+        .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
+        .package(url: "https://github.com/swift-server/swift-openapi-hummingbird.git", from: "2.0.0"),
+        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.0.0"),
     ],
     targets: [
         .target(
@@ -111,6 +116,33 @@ let package = Package(
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
             ],
             resources: [.copy("Fixtures")]
+        ),
+        .target(
+            name: "ProvisionerServer",
+            dependencies: [
+                "ProvisionerAPI",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "OpenAPIHummingbird", package: "swift-openapi-hummingbird"),
+                .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
+            ],
+            plugins: [
+                .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),
+            ]
+        ),
+        .executableTarget(
+            name: "provisioner-server",
+            dependencies: ["ProvisionerServer"]
+        ),
+        .testTarget(
+            name: "ProvisionerServerTests",
+            dependencies: [
+                "ProvisionerServer",
+                "ProvisionerAPI",
+                "ProvisionerKit",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "HummingbirdTesting", package: "hummingbird"),
+            ]
         ),
     ]
 )
