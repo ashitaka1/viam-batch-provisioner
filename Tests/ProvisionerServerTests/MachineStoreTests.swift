@@ -13,7 +13,6 @@ func posixMode(_ url: URL) throws -> Int {
     return (attributes[.posixPermissions] as! NSNumber).intValue & 0o777
 }
 
-private let t0 = Date(timeIntervalSince1970: 1_790_000_000)
 
 @Test func roundTrip() throws {
     let dir = DataDirectory(try temporaryDirectory())

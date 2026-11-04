@@ -6,7 +6,6 @@ import ProvisionerAPI
 import Testing
 
 let testLogger = Logger(label: "ProvisionerServerTests")
-private let t0 = Date(timeIntervalSince1970: 1_790_000_000)
 
 private func progress(_ name: String) -> (Int) -> Components.Schemas.MachineEvent {
     { id in .installProgress(.init(id: id, _type: .installProgress, timestamp: t0, name: name, stage: .tooling)) }
