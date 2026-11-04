@@ -60,10 +60,11 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 | `Sources/ViamAPI/` | Viam AppService client: `GRPCWeb.swift` frames unary gRPC-web calls over URLSession; `ViamAppClient` authenticates an API key for a bearer token and calls the service; `ViamOrgFleet` adapts it to `ViamFleet`; `Generated/` holds checked-in swift-protobuf types from `scripts/gen-viam-protos.sh` (`docs/decisions/0037-grpc-web-to-viam.md`) |
 | `Sources/ProvisionerKit/Pairing/` | App side of API-key pairing: ephemeral X25519 exchange and the four-digit comparison code (`PairingCrypto`), the `viam-provisioner://pair` link, wire messages and `PairingClient` |
 | `Sources/ProvisionerKit/Organizations/` | `OrgCredential`, the Keychain store (one item per org ID), `CredentialValidator` and `OrganizationsModel`, which stores a key only after a validation call succeeds |
+| `Sources/ProvisionerKit/Environments/` | `Environment` and its validation; `FileEnvironmentStore` (JSON file plus a Keychain vault for secrets); `EnvironmentsModel`, which the editor and sidebar drive, with undo; `SHA512Crypt` for the OS password; `SiteEnvImport`, which maps a `config/environments/<env>.env` file and its packages file onto an environment |
 | `Sources/ProvisionerKit/Machines/` | `MachineName` and `MachineNaming` apply Viam's machine-name rule and pick the next `<prefix>-N` past the names in the location and the queue; `ViamFleet` is the protocol over Viam's machine calls; `MachineBatch` creates machines one at a time and deletes one that fails partway, and stops only when the key is rejected or the task is cancelled. An unknown outcome (a timeout) deletes any machine found under the name |
 | `Sources/ProvisionerPairHost/` | Command side of pairing: `PairingHost` state machine, `PairingHTTPServer` loopback listener, and `ViamCLI`, which wraps the `viam` CLI for org listing and key creation |
 | `Sources/provisioner-pair/` | `just pair-app`: picks an org, shows the comparison code, creates the key after the operator confirms, releases it to the app |
-| `Sources/ViamProvisioner/` | The macOS SwiftUI app: onboarding, Settings → Organizations, pairing sheet. `scripts/bundle-app.sh` builds it into a bundle (`docs/decisions/0038-swiftpm-app-bundle.md`) |
+| `Sources/ViamProvisioner/` | The macOS SwiftUI app: onboarding, the main window (environment sidebar and editor), Settings → Organizations, pairing sheet, and `--import-environment` behind `just import-env`. `scripts/bundle-app.sh` builds it into a bundle (`docs/decisions/0038-swiftpm-app-bundle.md`) |
 | `Sources/provisioner-probe/` | Dev executable that exercises `ProvisionerKit` against a live API: `check`, `browse`, `watch`, `notify` (prints the notifications the app would post), `viam-locations`, `viam-batch`, `viam-delete-key` |
 | `Tests/ProvisionerKitTests/` | Domain mapping, client, feed and browser tests; `Support/` holds a scripted transport and a fake feed source |
 
@@ -78,6 +79,8 @@ All under `http-server/machines/` unless noted. Every file the root watcher crea
 - **`netboot/grub/provisioned/<MAC>.cfg`** — the guard. Its presence makes GRUB exit to disk instead of installing.
 - **`logs/events.jsonl`** — the event journal. Ids derive from the last line, read under the file's flock.
 - **`logs/access.log`** — nginx's access log, mounted at `/var/log/pxe`, outside the served tree.
+- **`~/Library/Application Support/Viam Provisioner/environments.json`** (app) — the app's environments, sorted by name, written atomically. Each carries `has…` flags for its secrets, never the secrets.
+- **Keychain service `com.bringingfire.viam-provisioner.environment-secrets`** (app) — one generic-password item per environment ID holding the OS password's SHA-512 crypt hash, the WiFi password and the Tailscale key.
 - **`config/site.env`** — site settings, gitignored. `config/.server-address` holds the `IP:port` baked into USB sticks.
 
 ## Invariants
@@ -102,6 +105,7 @@ All under `http-server/machines/` unless noted. Every file the root watcher crea
 - **The Python server ignores `environment` in provision requests.** `ProvisionRequest.environment` carries the settings the Swift server renders into a machine's install config; the Python server accepts and drops it, and renders from `config/site.env`.
 - **The pairing key is created only after the operator confirms the code, and released only after the app commits to its public key.** Cancel, decline or timeout before creation leave no key in Viam. After creation, every failure path prints the key's name and where to delete it. See `docs/decisions/0040-pair-api-keys-from-the-viam-cli.md`.
 - **The app stores an org key only after one AppService call with it succeeds.** Removing an org deletes the key from the Keychain only; pairing an org again deletes the old key in Viam, and `DeleteKey` returning NOT_FOUND counts as deleted (`docs/decisions/0039-not-found-counts-as-deleted.md`).
+- **The app never stores an OS password, only its SHA-512 crypt hash.** Environment secrets live in the Keychain and the JSON file carries only flags, which the store derives from the secrets it holds. `just import-env` replaces an environment of the same name, keeping its ID and overwriting edits made in the app.
 - **NIC names are discovered at install time.** The autoinstall config hardcodes no interface names.
 
 ## Boundaries
