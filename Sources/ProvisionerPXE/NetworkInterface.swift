@@ -3,6 +3,10 @@ import Darwin
 public enum PXEServerError: Error, Equatable {
     case interfaceNotFound(String)
     case interfaceHasNoIPv4(String)
+    /// `start()` was called on a server that is starting or running.
+    case alreadyStarted
+    /// `start()` was called on a server that `stop()` has ended.
+    case stopped
 }
 
 /// The serving interface: its index for `IP_BOUND_IF` and its first IPv4 address.

@@ -23,7 +23,8 @@ private final class Harness: Sendable {
     let kernel = randomData(100_000)
     let bootloader = randomData(4096)
 
-    init(tftpTimeout: TimeAmount, maxTransfers: Int = 64) async throws {
+    /// `readClients: false` leaves the `clients` stream unread, for tests that inspect its buffer.
+    init(tftpTimeout: TimeAmount, maxTransfers: Int = 64, clientBufferLimit: Int = 256, readClients: Bool = true) async throws {
         base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         root = base.appendingPathComponent("root")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("grub"), withIntermediateDirectories: true)
@@ -39,9 +40,11 @@ private final class Harness: Sendable {
         configuration.offerDestination = client.address
         configuration.tftpTimeout = tftpTimeout
         configuration.maxTransfers = maxTransfers
+        configuration.clientBufferLimit = clientBufferLimit
         server = PXEServer(configuration: configuration)
         try await server.start()
         ports = server.boundPorts!
+        guard readClients else { return }
 
         let reported = reported
         let clientsFinished = clientsFinished
@@ -63,9 +66,12 @@ private final class Harness: Sendable {
 private func withHarness(
     tftpTimeout: TimeAmount = .seconds(1),
     maxTransfers: Int = 64,
+    clientBufferLimit: Int = 256,
+    readClients: Bool = true,
     _ body: (Harness) async throws -> Void
 ) async throws {
-    let harness = try await Harness(tftpTimeout: tftpTimeout, maxTransfers: maxTransfers)
+    let harness = try await Harness(
+        tftpTimeout: tftpTimeout, maxTransfers: maxTransfers, clientBufferLimit: clientBufferLimit, readClients: readClients)
     do {
         try await body(harness)
     } catch {
@@ -73,6 +79,17 @@ private func withHarness(
         throw error
     }
     await harness.shutdown()
+}
+
+/// `count` distinct UDP ports that were free a moment ago.
+private func freePorts(_ count: Int) async throws -> [Int] {
+    var channels: [any Channel] = []
+    for _ in 0..<count {
+        channels.append(try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton).bind(host: "0.0.0.0", port: 0).get())
+    }
+    let ports = channels.map { $0.localAddress!.port! }
+    for channel in channels { try await channel.close() }
+    return ports
 }
 
 private func readRequest(_ filename: String, options: [TFTPOption] = []) -> ByteBuffer {
@@ -346,6 +363,106 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
             .get()
         try await rebound.close()
         await harness.shutdown()
+    }
+
+    @Test func refusesSecondStart() async throws {
+        try await withHarness { harness in
+            await #expect(throws: PXEServerError.alreadyStarted) {
+                try await harness.server.start()
+            }
+            #expect(try #require(harness.server.boundPorts) == harness.ports)
+
+            try await harness.client.send(pxeDiscover().encoded(), to: harness.ports.dhcp)
+            #expect(await harness.client.receive() != nil, "the first start's sockets stopped answering")
+        }
+    }
+
+    @Test func refusesStartAfterStop() async throws {
+        try await withHarness { harness in
+            await harness.server.stop()
+            await #expect(throws: PXEServerError.stopped) {
+                try await harness.server.start()
+            }
+            #expect(harness.server.boundPorts == nil)
+        }
+    }
+
+    @Test func unreadClientsKeepNewest() async throws {
+        try await withHarness(clientBufferLimit: 2, readClients: false) { harness in
+            let macs: [[UInt8]] = (1...3).map { [0x02, 0, 0, 0, 0, $0] }
+            for mac in macs {
+                try await harness.client.send(pxeDiscover(mac: mac).encoded(), to: harness.ports.dhcp)
+                _ = try #require(await harness.client.receive(), "no offer")
+            }
+            // stop() closes the DHCP channel on its event loop, after every report it read.
+            await harness.server.stop()
+
+            var buffered: [MACAddress] = []
+            for await client in harness.server.clients { buffered.append(client.mac) }
+            #expect(buffered == macs.suffix(2).map { MACAddress(bytes: $0)! })
+        }
+    }
+
+    /// Whether stop() lands before, during or after the binds depends on timing, so this staggers
+    /// it across the bind window. The TFTP socket has no SO_REUSEADDR, so rebinding its port shows
+    /// whether it was released.
+    @Test func stopDuringStartReleasesPorts() async throws {
+        for delay in stride(from: 0, to: 2000, by: 40) {
+            let ports = try await freePorts(3)
+            var configuration = PXEConfiguration(interface: "lo0", tftpRoot: FileManager.default.temporaryDirectory)
+            (configuration.dhcpPort, configuration.pxePort, configuration.tftpPort) = (ports[0], ports[1], ports[2])
+            let server = PXEServer(configuration: configuration)
+
+            let starting = Task { try await server.start() }
+            try await Task.sleep(for: .microseconds(delay))
+            await server.stop()
+            let rebound = try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+                .bind(host: "127.0.0.1", port: ports[2])
+                .get()
+            try await rebound.close()
+            #expect(server.boundPorts == nil)
+            _ = await starting.result
+        }
+    }
+
+    @Test func stopBeforeStartEndsServer() async throws {
+        let server = PXEServer(configuration: PXEConfiguration(interface: "lo0", tftpRoot: FileManager.default.temporaryDirectory))
+        await server.stop()
+        for await _ in server.clients {}
+        await #expect(throws: PXEServerError.stopped) {
+            try await server.start()
+        }
+    }
+
+    /// The DHCP sockets set SO_REUSEADDR, so rebinding their ports cannot show a leak; a leaked
+    /// socket still answers, so this sends to them instead. The retry then shows those ports
+    /// do answer once started, and that a failed start leaves the server startable.
+    @Test func failedStartClosesEarlierSocketsAndCanRetry() async throws {
+        let occupant = try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton).bind(host: "127.0.0.1", port: 0).get()
+        let client = try await UDPTestClient()
+        var configuration = PXEConfiguration(interface: "lo0", tftpRoot: FileManager.default.temporaryDirectory)
+        let ports = try await freePorts(2)
+        (configuration.dhcpPort, configuration.pxePort) = (ports[0], ports[1])
+        configuration.tftpPort = occupant.localAddress!.port!
+        configuration.offerDestination = client.address
+        let server = PXEServer(configuration: configuration)
+        defer { Task { await server.stop(); await client.close(); try? await occupant.close() } }
+
+        do {
+            try await server.start()
+            Issue.record("started with the TFTP port taken")
+        } catch let error as IOError {
+            #expect(error.errnoCode == EADDRINUSE, "\(error)")
+        }
+        #expect(server.boundPorts == nil)
+        try await client.send(pxeDiscover().encoded(), to: configuration.dhcpPort)
+        try await client.send(pxeDiscover(messageType: 3).encoded(), to: configuration.pxePort)
+        #expect(await client.receive(timeout: .milliseconds(300)) == nil, "a socket from the failed start answered")
+
+        try await occupant.close()
+        try await server.start()
+        try await client.send(pxeDiscover().encoded(), to: configuration.dhcpPort)
+        #expect(await client.receive() != nil, "no offer after retrying start")
     }
 
     @Test func unknownInterface() async throws {
