@@ -55,7 +55,7 @@ package enum WireEvent: Sendable, Equatable {
                                   kind: .installFailed(stage: e.stage.rawValue, reason: e.reason,
                                                        source: MachineEvent.FailureSource(rawValue: e.source.rawValue)!)))
         case .installComplete(let e):
-            self = .machine(.init(id: e.id, timestamp: e.timestamp, name: e.name, mac: e.mac,
+            self = .machine(.init(id: e.id, timestamp: e.timestamp, name: e.name, mac: e.mac?.value1,
                                   kind: .installComplete(duration: e.durationSeconds)))
         case .guardInstalled(let e):
             self = .machine(.init(id: e.id, timestamp: e.timestamp, name: e.name, mac: e.mac,

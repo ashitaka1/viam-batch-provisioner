@@ -158,7 +158,7 @@ paths:
       tags: [queue]
       operationId: removeQueueEntry
       summary: Remove an unassigned machine from the queue
-      description: Removes the entry and any staged credentials. Fails with 409 once a machine has been assigned.
+      description: Removes the entry, its credentials and environment. Fails with 409 while the machine is installing; the Python server also refuses any assigned machine.
       responses:
         '204':
           description: Removed
@@ -546,10 +546,13 @@ components:
           $ref: '#/components/schemas/QueueCounts'
         services:
           type: object
-          required: [http, dnsmasq, watcher]
+          description: The Python server reports http, dnsmasq and watcher; the Swift server reports http and helper.
+          required: [http]
           additionalProperties: false
           properties:
             http:
+              $ref: '#/components/schemas/ServiceState'
+            helper:
               $ref: '#/components/schemas/ServiceState'
             dnsmasq:
               $ref: '#/components/schemas/ServiceState'
@@ -682,18 +685,21 @@ components:
     InstallComplete:
       type: object
       description: The installer reported `done`, or the machine PXE-booted again after install and was sent to its disk. Emitted once per attempt.
-      required: [id, type, timestamp, name, mac, duration_seconds]
+      required: [id, type, timestamp, name, duration_seconds]
       additionalProperties: false
       properties:
         id: {$ref: '#/components/schemas/EventId'}
         type: {type: string, enum: [install-complete]}
         timestamp: {$ref: '#/components/schemas/Timestamp'}
         name: {$ref: '#/components/schemas/Name'}
-        mac: {$ref: '#/components/schemas/Mac'}
+        mac:
+          allOf:
+            - $ref: '#/components/schemas/Mac'
+          description: Absent for a machine completed by name before a MAC is bound.
         duration_seconds:
           type: number
           minimum: 0
-          description: Seconds from assignment to this event
+          description: Seconds from assignment, or from the attempt's first install report when the machine has no assignment
 
     GuardInstalled:
       type: object

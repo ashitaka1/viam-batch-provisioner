@@ -175,6 +175,26 @@ private struct RefusingTransport: ClientTransport {
     #expect(status.address == nil)
 }
 
+@Test func statusWithoutPythonServices() async throws {
+    let transport = ScriptedTransport(json: 200, #"""
+        {"api_version":"v1","server_name":"lab-mac","time":"2026-10-04T04:08:29+00:00",
+         "services":{"http":"up"},"last_event_id":0}
+        """#)
+    let status = try await ProvisionerClient(baseURL: base, transport: transport).status()
+
+    #expect(status.services == .init(http: .up))
+}
+
+@Test func statusWithHelper() async throws {
+    let transport = ScriptedTransport(json: 200, #"""
+        {"api_version":"v1","server_name":"lab-mac","time":"2026-10-04T04:08:29+00:00",
+         "services":{"http":"up","helper":"down"},"last_event_id":0}
+        """#)
+    let status = try await ProvisionerClient(baseURL: base, transport: transport).status()
+
+    #expect(status.services.helper == .down)
+}
+
 @Test func htmlBadGatewayIsUnexpected() async {
     let transport = ScriptedTransport([(502, "text/html", "<html><body>502 Bad Gateway</body></html>")])
     let client = ProvisionerClient(baseURL: base, transport: transport)

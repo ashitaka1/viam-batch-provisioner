@@ -55,6 +55,12 @@ private let stamp = "2026-10-04T04:08:29+00:00"
     #expect(f.mac == nil)
 }
 
+@Test func installCompleteWithoutMAC() throws {
+    let complete = try event(#"{"id":5,"type":"install-complete","timestamp":"\#(stamp)","name":"usb1","duration_seconds":42}"#)
+    let expected = MachineEvent(id: 5, timestamp: utc(2026, 10, 4, 4, 8, 29), name: "usb1", mac: nil, kind: .installComplete(duration: 42))
+    #expect(complete == .machine(expected))
+}
+
 @Test func queueEntryMapsAllFields() throws {
     let wire = try decode(Components.Schemas.QueueEntry.self, """
         {"name":"usb1","status":"failed","mac":"\(mac)","assigned_at":"\(stamp)","completed_at":"\(stamp)",

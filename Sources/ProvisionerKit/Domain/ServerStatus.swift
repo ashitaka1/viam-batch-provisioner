@@ -11,12 +11,18 @@ public struct ServerStatus: Sendable, Equatable {
     }
 
     public struct Services: Sendable, Equatable {
-        public var http, dnsmasq, watcher: ServiceState
+        public var http: ServiceState
+        /// Reported by the Python server only.
+        public var dnsmasq, watcher: ServiceState?
+        /// Reported by the Swift server only.
+        public var helper: ServiceState?
 
-        public init(http: ServiceState, dnsmasq: ServiceState, watcher: ServiceState) {
+        public init(http: ServiceState, dnsmasq: ServiceState? = nil, watcher: ServiceState? = nil,
+                    helper: ServiceState? = nil) {
             self.http = http
             self.dnsmasq = dnsmasq
             self.watcher = watcher
+            self.helper = helper
         }
     }
 
@@ -39,8 +45,9 @@ public struct ServerStatus: Sendable, Equatable {
                         installed: $0.installed, failed: $0.failed, total: $0.total)
         }
         services = Services(http: .init(rawValue: wire.services.http.rawValue)!,
-                            dnsmasq: .init(rawValue: wire.services.dnsmasq.rawValue)!,
-                            watcher: .init(rawValue: wire.services.watcher.rawValue)!)
+                            dnsmasq: wire.services.dnsmasq.map { .init(rawValue: $0.rawValue)! },
+                            watcher: wire.services.watcher.map { .init(rawValue: $0.rawValue)! },
+                            helper: wire.services.helper.map { .init(rawValue: $0.rawValue)! })
         lastEventID = wire.lastEventId
     }
 }
