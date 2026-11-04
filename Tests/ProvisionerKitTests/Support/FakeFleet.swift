@@ -52,8 +52,15 @@ actor FakeFleet: ViamFleet {
 
     var names: [String] { machines.map(\.name) }
 
+    /// What `locations()` returns, and how many times it was called.
+    private var locationsOutcome: Result<[ViamLocation], FleetError> = .success([ViamLocation(id: "loc-1", name: "Bench")])
+    private(set) var locationsCalls = 0
+
+    func setLocations(_ outcome: Result<[ViamLocation], FleetError>) { locationsOutcome = outcome }
+
     func locations() async throws(FleetError) -> [ViamLocation] {
-        [ViamLocation(id: location, name: "Bench")]
+        locationsCalls += 1
+        return try locationsOutcome.get()
     }
 
     func machines(location: String) async throws(FleetError) -> [ViamMachine] {
