@@ -91,11 +91,17 @@ private func importing(_ text: String = tcos, packages: String? = packagesText,
         #expect(try importing(packages: nil).0.packages == Environment.defaultPackages)
     }
 
-    @Test func missingSettingsKeepDefaults() throws {
+    /// The defaults scripts/build-config.sh and provision-batch.sh apply.
+    @Test func missingSettingsTakeTheScriptsDefaults() throws {
         let (env, _) = try importing("PASSWORD=pw\nSSH_PUBLIC_KEY_FILE=/keys/k.pub\n", files: ["/keys/k.pub": testKey])
         #expect(env.username == "viam")
-        #expect(env.provisionMode == .full)
+        #expect(env.provisionMode == .osOnly)
+        #expect(env.timezone == "America/New_York")
         #expect(env.orgID == nil)
+    }
+
+    @Test func packageLinesKeepTheirFirstWord() throws {
+        #expect(try importing(packages: "  curl  # for http\njq\n").0.packages == ["curl", "jq"])
     }
 
     @Test func unknownProvisionModeIsAnError() {

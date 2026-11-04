@@ -32,7 +32,7 @@ extension Environment {
         if username == "root" {
             add(.username, "The machines' account can't be root; choose another username.")
         } else if username.wholeMatch(of: /[a-z_][a-z0-9_-]{0,31}/) == nil {
-            add(.username, "Usernames are lowercase letters, digits, _ and -, starting with a letter, up to 32 characters.")
+            add(.username, "Usernames are lowercase letters, digits, _ and -, starting with a letter or _, up to 32 characters.")
         }
 
         if !hasPassword { add(.password, "Enter a password for the machines' account.") }
@@ -64,9 +64,9 @@ extension Environment {
         return problems
     }
 
-    /// A WPA2 passphrase (8 to 63 characters) or a raw 256-bit key (64 hex digits).
-    private static func isWPAPassphrase(_ password: String) -> Bool {
-        (8...63).contains(password.count) || (password.count == 64 && password.allSatisfy(\.isHexDigit))
+    /// A WPA2 passphrase (8 to 63 bytes) or a raw 256-bit key (64 hex digits).
+    static func isWPAPassphrase(_ password: String) -> Bool {
+        (8...63).contains(password.utf8.count) || (password.count == 64 && password.allSatisfy(\.isHexDigit))
     }
 
     /// The settings a provision request carries. Throws when the environment has

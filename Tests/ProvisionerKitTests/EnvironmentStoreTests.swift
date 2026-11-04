@@ -101,6 +101,31 @@ private func temporaryFile() -> URL {
         }
     }
 
+    @Test func savingSettingsDoesNotReadTheVault() throws {
+        let vault = InMemorySecretsVault()
+        let store = FileEnvironmentStore(file: file, vault: vault)
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent().deletingLastPathComponent()) }
+        var shop = env("Shop")
+        try store.save(shop, secrets: fullSecrets)
+        vault.failing = true
+        shop.namePrefix = "lab"
+        try store.save(shop, secrets: nil)
+        let stored = try #require(try store.all().first)
+        #expect(stored.namePrefix == "lab")
+        #expect(stored.hasPassword && stored.hasWifiPassword && stored.hasTailscaleKey, "flags kept from the file")
+    }
+
+    @Test func failedSecretDeleteKeepsTheEnvironment() throws {
+        let vault = InMemorySecretsVault()
+        let store = FileEnvironmentStore(file: file, vault: vault)
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent().deletingLastPathComponent()) }
+        let shop = env("Shop")
+        try store.save(shop, secrets: fullSecrets)
+        vault.failing = true
+        #expect(throws: (any Error).self) { try store.remove(id: shop.id) }
+        #expect(try store.all().map(\.id) == [shop.id], "still listed, so the delete can be retried")
+    }
+
     @Test func fileHoldsNoSecrets() throws {
         try run { store in
             try store.save(env("Shop"), secrets: fullSecrets)

@@ -82,6 +82,12 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
         #expect(fields(env) == [.username])
     }
 
+    @Test func usernameMessageNamesTheRule() {
+        var env = validEnvironment()
+        env.username = "Viam"
+        #expect(messages(env, .username) == ["Usernames are lowercase letters, digits, _ and -, starting with a letter or _, up to 32 characters."])
+    }
+
     @Test(arguments: ["viam", "_svc", "ops-1", String(repeating: "a", count: 32)])
     func usernameAccepted(_ username: String) {
         var env = validEnvironment()
@@ -134,7 +140,8 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
     }
 
     @Test(arguments: [("1234567", false), ("12345678", true), (String(repeating: "a", count: 63), true),
-                      (String(repeating: "g", count: 64), false), (String(repeating: "ab", count: 32), true)])
+                      (String(repeating: "g", count: 64), false), (String(repeating: "ab", count: 32), true),
+                      (String(repeating: "é", count: 32), false), ("éééé", true)])
     func wifiPasswordLength(_ password: String, _ accepted: Bool) {
         var env = validEnvironment()
         env.wifiSSID = "shop"

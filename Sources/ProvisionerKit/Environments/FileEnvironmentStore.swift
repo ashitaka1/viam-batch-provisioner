@@ -33,17 +33,30 @@ public struct FileEnvironmentStore: EnvironmentStore {
         try vault.read(id: id) ?? EnvironmentSecrets()
     }
 
+    /// With nil `secrets`, the flags are kept from the file, so editing settings
+    /// never touches the Keychain.
     public func save(_ environment: Environment, secrets: EnvironmentSecrets?) throws {
-        if let secrets { try vault.write(secrets, id: environment.id, label: "Viam Provisioner environment: \(environment.name)") }
-        let flagged = environment.flagged(by: try secrets ?? self.secrets(id: environment.id))
-        var environments = try read().filter { $0.id != environment.id }
+        var environments = try read()
+        var flagged = environment
+        if let secrets {
+            try vault.write(secrets, id: environment.id, label: "Viam Provisioner environment: \(environment.name)")
+            flagged = environment.flagged(by: secrets)
+        } else {
+            let stored = environments.first { $0.id == environment.id }
+            flagged.hasPassword = stored?.hasPassword ?? false
+            flagged.hasWifiPassword = stored?.hasWifiPassword ?? false
+            flagged.hasTailscaleKey = stored?.hasTailscaleKey ?? false
+        }
+        environments.removeAll { $0.id == environment.id }
         environments.append(flagged)
         try write(environments)
     }
 
+    /// Deletes the secrets first: when that fails, the environment stays listed
+    /// and the delete can be retried.
     public func remove(id: UUID) throws {
-        try write(try read().filter { $0.id != id })
         try vault.delete(id: id)
+        try write(try read().filter { $0.id != id })
     }
 
     private func read() throws -> [Environment] {

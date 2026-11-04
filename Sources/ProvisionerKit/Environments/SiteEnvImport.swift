@@ -43,13 +43,13 @@ public enum SiteEnvImport {
             settings[key].flatMap { $0.isEmpty ? nil : $0 }
         }
 
+        // Missing settings take the scripts' defaults (build-config.sh, provision-batch.sh).
         var environment = Environment.new(name: name)
-        if let mode = value("PROVISION_MODE") {
-            guard let parsed = ProvisionMode(rawValue: mode) else { throw .unknownProvisionMode(mode) }
-            environment.provisionMode = parsed
-        }
+        let mode = value("PROVISION_MODE") ?? ProvisionMode.osOnly.rawValue
+        guard let parsed = ProvisionMode(rawValue: mode) else { throw .unknownProvisionMode(mode) }
+        environment.provisionMode = parsed
         if let username = value("USERNAME") { environment.username = username }
-        if let timezone = value("TIMEZONE") { environment.timezone = timezone }
+        environment.timezone = value("TIMEZONE") ?? "America/New_York"
         environment.wifiSSID = value("WIFI_SSID")
         if let country = value("WIFI_COUNTRY") { environment.wifiCountry = country }
         environment.orgID = value("VIAM_ORG_ID")
@@ -60,9 +60,10 @@ public enum SiteEnvImport {
         environment.sshPublicKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let packagesText {
+            // The first word of each line, as build-config.sh's read_packages takes it.
             environment.packages = packagesText.split(whereSeparator: \.isNewline)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+                .compactMap { $0.split(whereSeparator: \.isWhitespace).first.map(String.init) }
+                .filter { !$0.hasPrefix("#") }
         }
 
         guard let password = value("PASSWORD") else { throw .missingPassword }

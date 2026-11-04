@@ -20,8 +20,9 @@ public final class EnvironmentsModel {
     /// Why the stored environments couldn't be read, when they couldn't.
     public private(set) var loadError: String?
     private var locationStates: [String: LocationsState] = [:]
-    /// Problems found in each environment's secrets when they were last set or loaded.
-    private var secretProblems: [UUID: [EnvironmentProblem]] = [:]
+    /// Environments whose stored WiFi password isn't a WPA passphrase, found when
+    /// it was set or loaded, so problems never read the Keychain.
+    private var badWifiPasswords: Set<UUID> = []
 
     private let store: any EnvironmentStore
     private let orgs: @MainActor () -> [OrganizationsModel.Row]
@@ -44,9 +45,9 @@ public final class EnvironmentsModel {
         do {
             environments = try store.all()
             loadError = nil
-            secretProblems = [:]
-            for environment in environments {
-                if let secrets = try? store.secrets(id: environment.id) { recordSecretProblems(environment, secrets) }
+            badWifiPasswords = []
+            for environment in environments where environment.hasWifiPassword {
+                if let secrets = try? store.secrets(id: environment.id) { record(secrets, id: environment.id) }
             }
         } catch {
             environments = []
@@ -83,6 +84,7 @@ public final class EnvironmentsModel {
         copy.name = unusedName("\(copy.name) copy")
         let secrets = try store.secrets(id: id)
         try store.save(copy, secrets: secrets)
+        record(secrets, id: copy.id)
         try refresh()
         return try stored(copy.id)
     }
@@ -103,9 +105,9 @@ public final class EnvironmentsModel {
     }
 
     public func delete(id: UUID) throws {
+        defer { try? refresh() }
         try store.remove(id: id)
-        secretProblems[id] = nil
-        try refresh()
+        badWifiPasswords.remove(id)
     }
 
     // MARK: Secrets
@@ -140,16 +142,17 @@ public final class EnvironmentsModel {
     }
 
     private func save(_ secrets: EnvironmentSecrets, id: UUID) throws {
-        let environment = try stored(id)
-        try store.save(environment, secrets: secrets)
-        recordSecretProblems(environment, secrets)
+        try store.save(try stored(id), secrets: secrets)
+        record(secrets, id: id)
         try refresh()
     }
 
-    private func recordSecretProblems(_ environment: Environment, _ secrets: EnvironmentSecrets) {
-        let all = environment.problems(otherNames: [], secrets: secrets)
-        let withoutSecrets = environment.problems(otherNames: [], secrets: nil)
-        secretProblems[environment.id] = all.filter { !withoutSecrets.contains($0) }
+    private func record(_ secrets: EnvironmentSecrets, id: UUID) {
+        if let password = secrets.wifiPassword, !Environment.isWPAPassphrase(password) {
+            badWifiPasswords.insert(id)
+        } else {
+            badWifiPasswords.remove(id)
+        }
     }
 
     // MARK: Problems and orgs
@@ -158,7 +161,9 @@ public final class EnvironmentsModel {
     /// as last set, and, in full mode, the health of its org and location.
     public func problems(for environment: Environment) -> [EnvironmentProblem] {
         var problems = environment.problems(otherNames: otherNames(than: environment.id))
-        problems += secretProblems[environment.id] ?? []
+        if badWifiPasswords.contains(environment.id), environment.hasWifiPassword, !(environment.wifiSSID ?? "").isEmpty {
+            problems.append(EnvironmentProblem(field: .wifiPassword, message: "WiFi passwords are 8 to 63 characters."))
+        }
         guard environment.provisionMode == .full, let orgID = environment.orgID, !orgID.isEmpty else { return problems }
         let orgName = environment.orgName ?? orgID
         guard let row = orgs().first(where: { $0.credential.orgID == orgID }) else {

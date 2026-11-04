@@ -193,6 +193,40 @@ private final class Harness {
         #expect(h.model.problems(for: env).contains(EnvironmentProblem(field: .wifiPassword, message: "WiFi passwords are 8 to 63 characters.")))
     }
 
+    @Test func duplicateCarriesTheWifiPasswordProblem() throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop")
+        shop.wifiSSID = "shop"
+        try h.model.update(shop)
+        try h.model.setSecret(.wifiPassword, "short", id: shop.id)
+        let copy = try h.model.duplicate(id: shop.id)
+        #expect(h.model.problems(for: copy).contains { $0.message == "WiFi passwords are 8 to 63 characters." })
+    }
+
+    @Test func wifiPasswordProblemAppearsWhenTheNetworkIsAddedLater() throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop")
+        try h.model.setSecret(.wifiPassword, "short", id: shop.id)
+        shop = try h.stored(shop.id)
+        shop.wifiSSID = "shop"
+        try h.model.update(shop)
+        #expect(h.model.problems(for: shop).contains { $0.message == "WiFi passwords are 8 to 63 characters." })
+    }
+
+    @Test func failedDeleteLeavesTheListMatchingTheStore() throws {
+        let vault = InMemorySecretsVault()
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("env-model-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = FileEnvironmentStore(file: file, vault: vault)
+        let model = EnvironmentsModel(store: store, orgs: { [] }, fleet: { _ in FakeFleet() })
+        let shop = try model.create(name: "Shop")
+        vault.failing = true
+        #expect(throws: (any Error).self) { try model.delete(id: shop.id) }
+        vault.failing = false
+        #expect(model.environments.map(\.id) == [shop.id])
+        #expect(try store.all().map(\.id) == [shop.id])
+    }
+
     @Test func problemsIncludeOrgHealth() async throws {
         let h = Harness()
         var shop = try h.model.create(name: "Shop")
