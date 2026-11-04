@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OrganizationsSettings: View {
     let model: OrganizationsModel
+    let environments: EnvironmentsModel
     @State private var removing: OrganizationsModel.Row?
     @State private var instructions: String?
     @State private var removeError: String?
@@ -19,6 +20,12 @@ struct OrganizationsSettings: View {
                             Text("\(row.credential.keyName) (\(row.credential.keyID.prefix(5))…) · \(Self.describe(row.status))")
                                 .font(.caption)
                                 .foregroundStyle(Self.isRejected(row.status) ? .orange : .secondary)
+                            let users = environments.usage(orgID: row.credential.orgID).count
+                            if users > 0 {
+                                Text(users == 1 ? "Used by 1 environment" : "Used by \(users) environments")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
                         if Self.isRejected(row.status) {
@@ -52,13 +59,24 @@ struct OrganizationsSettings: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the key from this Mac. It still exists in Viam.")
+            Text(removalMessage)
         }
         .alert("Couldn't remove the key", isPresented: Binding(get: { removeError != nil }, set: { if !$0 { removeError = nil } })) {
             Button("OK") {}
         } message: {
             Text(removeError ?? "")
         }
+    }
+
+    /// Names the environments that can't provision once the org is removed.
+    private var removalMessage: String {
+        let base = "This removes the key from this Mac. It still exists in Viam."
+        guard let row = removing else { return base }
+        let names = environments.usage(orgID: row.credential.orgID).map(\.name)
+        guard !names.isEmpty else { return base }
+        let listed = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        let verb = names.count == 1 ? "uses" : "use"
+        return base + "\n\n\(listed) \(verb) \(row.credential.orgName). They can't provision until you pair it again or choose another organization."
     }
 
     private struct Instructions: Identifiable {

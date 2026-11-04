@@ -204,4 +204,19 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
         #expect(Set(EnvironmentField.allCases).subtracting(EnvironmentField.ignoredByPythonServer)
             == [.name, .org, .location, .namePrefix, .provisionMode])
     }
+
+    @Test func sshDirectoryListsParsablePubKeysByName() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ssh-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try (testKey + "\n").write(to: dir.appendingPathComponent("z_ed25519.pub"), atomically: true, encoding: .utf8)
+        try testKey.write(to: dir.appendingPathComponent("a.pub"), atomically: true, encoding: .utf8)
+        try "garbage".write(to: dir.appendingPathComponent("broken.pub"), atomically: true, encoding: .utf8)
+        try testKey.write(to: dir.appendingPathComponent("id_ed25519"), atomically: true, encoding: .utf8)
+        let keys = SSHKeyDirectory.keys(in: dir)
+        #expect(keys.map(\.file.lastPathComponent) == ["a.pub", "z_ed25519.pub"])
+        #expect(keys.first?.text == testKey)
+        #expect(keys.first?.key.fingerprint == testKeyFingerprint)
+        #expect(SSHKeyDirectory.keys(in: dir.appendingPathComponent("missing")).isEmpty)
+    }
 }

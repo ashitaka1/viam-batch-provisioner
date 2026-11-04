@@ -5,64 +5,43 @@ import ViamAPI
 
 @main
 struct ViamProvisionerApp: App {
-    @State private var model = OrganizationsModel(store: KeychainOrgCredentialStore(), validator: ViamCredentialValidator(), keyDeleter: ViamKeyDeleter())
+    @State private var organizations: OrganizationsModel
+    @State private var environments: EnvironmentsModel
 
     init() {
         ImportEnvironmentCommand.runIfRequested()
+        let organizations = OrganizationsModel(store: KeychainOrgCredentialStore(), validator: ViamCredentialValidator(), keyDeleter: ViamKeyDeleter())
+        _organizations = State(initialValue: organizations)
+        _environments = State(initialValue: EnvironmentsModel(
+            store: FileEnvironmentStore(), orgs: { organizations.rows }, fleet: { ViamOrgFleet(credential: $0) }))
     }
 
     var body: some Scene {
         Window("Viam Provisioner", id: "main") {
-            MainView(model: model)
-                .frame(minWidth: 480, minHeight: 320)
-                .task { await model.load() }
+            MainWindow(organizations: organizations, environments: environments)
+                .frame(minWidth: 760, minHeight: 480)
+                .task {
+                    environments.load()
+                    await organizations.load()
+                }
                 .onOpenURL { url in
                     NSApp.activate()
-                    model.handle(url: url)
+                    organizations.handle(url: url)
                 }
                 .sheet(isPresented: Binding(
-                    get: { model.pairing != nil },
-                    set: { presented in if !presented { model.dismissPairing() } }
+                    get: { organizations.pairing != nil },
+                    set: { presented in if !presented { organizations.dismissPairing() } }
                 )) {
-                    PairingSheet(model: model)
+                    PairingSheet(model: organizations)
                 }
         }
+        .commands { EnvironmentCommands() }
         Settings {
             TabView {
-                OrganizationsSettings(model: model)
+                OrganizationsSettings(model: organizations, environments: environments)
                     .tabItem { Label("Organizations", systemImage: "building.2") }
             }
             .frame(width: 520, height: 360)
-        }
-    }
-}
-
-struct MainView: View {
-    let model: OrganizationsModel
-
-    var body: some View {
-        if let loadError = model.loadError {
-            VStack(spacing: 12) {
-                Label(loadError, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Try again") { Task { await model.load() } }
-            }
-            .padding(32)
-            .frame(maxWidth: 420)
-        } else if model.rows.isEmpty {
-            OnboardingView(command: "just pair-app")
-        } else {
-            VStack(spacing: 12) {
-                Text(model.rows.count == 1 ? "Signed in to 1 organization" : "Signed in to \(model.rows.count) organizations")
-                    .font(.title2)
-                ForEach(model.rows) { row in
-                    Text(row.credential.orgName)
-                }
-                SettingsLink { Text("Manage organizations…") }
-            }
-            .padding(32)
         }
     }
 }
