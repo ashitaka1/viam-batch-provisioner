@@ -10,9 +10,9 @@ let usage = """
            provisioner-probe viam-org <org-id>    (VIAM_API_KEY_ID and VIAM_API_KEY in the environment)
            provisioner-probe viam-locations <org-id>
            provisioner-probe viam-batch <org-id> <location-id> <prefix> <count>
-           provisioner-probe viam-delete-key <org-id> <key-id>
-             (the viam-* commands use VIAM_API_KEY_ID and VIAM_API_KEY when set,
-              otherwise the org's key paired into the app's Keychain)
+           provisioner-probe viam-delete-key <org-id> <key-id>    (VIAM_API_KEY_ID and VIAM_API_KEY)
+             (viam-locations and viam-batch use VIAM_API_KEY_ID and VIAM_API_KEY when set,
+              otherwise the viam CLI's login)
     """
 
 func fail(_ message: String) -> Never {
@@ -116,24 +116,52 @@ func viamOrg(_ arguments: ArraySlice<String>) async {
     }
 }
 
-/// An org key from the environment, or else the one paired into the app's Keychain.
-func orgCredential(_ orgID: String) -> OrgCredential {
+/// How the viam-* commands authenticate: an org key from the environment, or
+/// else the viam CLI's login.
+enum ProbeAuth {
+    case key(id: String, key: String)
+    case login(any BearerTokenProvider, baseURL: URL)
+
+    func fleet(orgID: String) -> ViamOrgFleet {
+        switch self {
+        case .key(let id, let key): ViamOrgFleet(orgID: orgID, keyID: id, key: key)
+        case .login(let tokens, let baseURL): ViamOrgFleet(orgID: orgID, tokens: tokens, baseURL: baseURL)
+        }
+    }
+
+    var client: ViamAppClient {
+        switch self {
+        case .key(let id, let key): ViamAppClient(keyID: id, key: key)
+        case .login(let tokens, let baseURL): ViamAppClient(tokens: tokens, baseURL: baseURL)
+        }
+    }
+}
+
+/// The org key in VIAM_API_KEY_ID and VIAM_API_KEY, nil when neither is set.
+func environmentKey() -> (id: String, key: String)? {
     let environment = ProcessInfo.processInfo.environment
     let keyID = environment["VIAM_API_KEY_ID"], key = environment["VIAM_API_KEY"]
-    if keyID != nil || key != nil {
-        guard let keyID, !keyID.isEmpty else { fail("VIAM_API_KEY is set but VIAM_API_KEY_ID is missing or empty") }
-        guard let key, !key.isEmpty else { fail("VIAM_API_KEY_ID is set but VIAM_API_KEY is missing or empty") }
-        return OrgCredential(
-            PairingPayload(orgID: orgID, orgName: "", keyID: keyID, key: key, keyName: "environment"), addedAt: Date())
+    guard keyID != nil || key != nil else { return nil }
+    guard let keyID, !keyID.isEmpty else { fail("VIAM_API_KEY is set but VIAM_API_KEY_ID is missing or empty") }
+    guard let key, !key.isEmpty else { fail("VIAM_API_KEY_ID is set but VIAM_API_KEY is missing or empty") }
+    return (keyID, key)
+}
+
+func probeAuth() async -> ProbeAuth {
+    if let key = environmentKey() { return .key(id: key.id, key: key.key) }
+    guard let executable = await ViamCLI.locate() else {
+        fail("install the viam CLI (https://docs.viam.com/cli/), or set VIAM_API_KEY_ID and VIAM_API_KEY")
     }
+    let cli = ViamCLI(run: ViamCLI.processRunner(executable: executable))
+    let tokens = CLITokenSource(cli: { cli })
     do {
-        guard let credential = try KeychainOrgCredentialStore().all().first(where: { $0.orgID == orgID }) else {
-            fail("no key for \(orgID): set VIAM_API_KEY_ID and VIAM_API_KEY, or run just pair-app")
-        }
-        return credential
+        _ = try await tokens.token(refresh: false)
+    } catch ViamCLIError.notLoggedIn {
+        fail("sign in with viam login, or set VIAM_API_KEY_ID and VIAM_API_KEY")
     } catch {
-        fail("couldn't read the app's key from the Keychain (\(error)); set VIAM_API_KEY_ID and VIAM_API_KEY instead")
+        fail("the viam CLI couldn't give its login: \(error)")
     }
+    return .login(tokens, baseURL: CLIConfig.baseURL() ?? ViamAppClient.defaultBaseURL)
 }
 
 /// Deletes an org API key; the viam CLI can create keys but not delete them.
@@ -141,7 +169,10 @@ func viamDeleteKey(_ arguments: ArraySlice<String>) async {
     let arguments = Array(arguments)
     guard arguments.count == 2 else { fail(usage) }
     do {
-        try await ViamKeyDeleter().deleteKey(id: arguments[1], using: orgCredential(arguments[0]))
+        guard let key = environmentKey() else { fail(usage) }
+        let credential = OrgCredential(
+            PairingPayload(orgID: arguments[0], orgName: "", keyID: key.id, key: key.key, keyName: "environment"), addedAt: Date())
+        try await ViamKeyDeleter().deleteKey(id: arguments[1], using: credential)
         print("deleted key \(arguments[1])")
     } catch {
         fail("viam-delete-key failed: \(error)")
@@ -151,7 +182,7 @@ func viamDeleteKey(_ arguments: ArraySlice<String>) async {
 func viamLocations(_ arguments: ArraySlice<String>) async {
     guard let orgID = arguments.first else { fail(usage) }
     do {
-        for location in try await ViamOrgFleet(credential: orgCredential(orgID)).locations() {
+        for location in try await probeAuth().fleet(orgID: orgID).locations() {
             print("\(location.id) \(location.name)")
         }
     } catch {
@@ -164,8 +195,8 @@ func viamLocations(_ arguments: ArraySlice<String>) async {
 func viamBatch(_ arguments: ArraySlice<String>) async {
     let arguments = Array(arguments)
     guard arguments.count == 4, let count = Int(arguments[3]) else { fail(usage) }
-    let credential = orgCredential(arguments[0])
-    let fleet = ViamOrgFleet(credential: credential)
+    let auth = await probeAuth()
+    let fleet = auth.fleet(orgID: arguments[0])
     let result: BatchResult
     do {
         result = try await MachineBatch(fleet: fleet, location: arguments[1]).create(prefix: arguments[2], count: count, queued: [])
@@ -183,7 +214,7 @@ func viamBatch(_ arguments: ArraySlice<String>) async {
     }
     if let stop = result.stop { print("stopped: \(stop); untried \(result.untried)") }
 
-    let client = ViamAppClient(keyID: credential.keyID, key: credential.key)
+    let client = auth.client
     for machine in result.created {
         do {
             let blob = try JSONSerialization.jsonObject(with: machine.credentialsJSON) as? [String: [String: String]]

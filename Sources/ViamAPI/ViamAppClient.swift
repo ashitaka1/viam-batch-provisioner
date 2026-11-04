@@ -2,35 +2,48 @@ public import Foundation
 public import ProvisionerKit
 import SwiftProtobuf
 
-/// Calls Viam's AppService with an org API key. Authenticates on first use and
-/// keeps the access token for the client's lifetime.
+/// Calls Viam's AppService as the signed-in user's bearer token, or as an org API key.
 public final class ViamAppClient: Sendable {
-    public static let defaultBaseURL = URL(string: "https://app.viam.com")!
+    public static let defaultBaseURL = ViamSession.defaultBaseURL
 
-    private let keyID: String
-    private let key: String
+    private enum Auth {
+        /// Authenticates on first use and keeps the access token for the client's lifetime.
+        case apiKey(id: String, key: String, cache: TokenCache)
+        case bearer(any BearerTokenProvider)
+    }
+
+    private let auth: Auth
     private let grpc: GRPCWeb
-    private let token = TokenCache()
 
     public init(keyID: String, key: String, baseURL: URL = ViamAppClient.defaultBaseURL, session: URLSession = .shared) {
-        self.keyID = keyID
-        self.key = key
+        auth = .apiKey(id: keyID, key: key, cache: TokenCache())
+        grpc = GRPCWeb(baseURL: baseURL, session: session)
+    }
+
+    public init(tokens: any BearerTokenProvider, baseURL: URL = ViamAppClient.defaultBaseURL, session: URLSession = .shared) {
+        auth = .bearer(tokens)
         grpc = GRPCWeb(baseURL: baseURL, session: session)
     }
 
     public func organization(id: String) async throws -> (id: String, name: String) {
         var request = Viam_App_V1_GetOrganizationRequest()
         request.organizationID = id
-        let response: Viam_App_V1_GetOrganizationResponse = try await grpc.unary(
-            "viam.app.v1.AppService/GetOrganization", request, metadata: ["authorization": "Bearer \(accessToken())"])
+        let response: Viam_App_V1_GetOrganizationResponse = try await appService("GetOrganization", request)
         return (response.organization.id, response.organization.name)
+    }
+
+    /// The organizations the caller can see, sorted by name ignoring case.
+    public func organizations() async throws -> [ViamOrganization] {
+        let response: Viam_App_V1_ListOrganizationsResponse = try await appService(
+            "ListOrganizations", Viam_App_V1_ListOrganizationsRequest())
+        return response.organizations.map { ViamOrganization(id: $0.id, name: $0.name) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     public func deleteKey(id: String) async throws {
         var request = Viam_App_V1_DeleteKeyRequest()
         request.id = id
-        let _: Viam_App_V1_DeleteKeyResponse = try await grpc.unary(
-            "viam.app.v1.AppService/DeleteKey", request, metadata: ["authorization": "Bearer \(accessToken())"])
+        let _: Viam_App_V1_DeleteKeyResponse = try await appService("DeleteKey", request)
     }
 
     public func locations(organizationID: String) async throws -> [(id: String, name: String)] {
@@ -76,20 +89,39 @@ public final class ViamAppClient: Sendable {
         let _: Viam_App_V1_DeleteRobotResponse = try await appService("DeleteRobot", request)
     }
 
+    /// A bearer token Viam refuses is refreshed once and the call retried.
     private func appService<Request: SwiftProtobuf.Message, Response: SwiftProtobuf.Message>(
         _ method: String, _ request: Request
     ) async throws -> Response {
-        try await grpc.unary("viam.app.v1.AppService/\(method)", request, metadata: ["authorization": "Bearer \(accessToken())"])
+        let path = "viam.app.v1.AppService/\(method)"
+        switch auth {
+        case .apiKey(let id, let key, let cache):
+            let token = try await apiKeyToken(id: id, key: key, cache: cache)
+            return try await grpc.unary(path, request, metadata: ["authorization": "Bearer \(token)"])
+        case .bearer(let tokens):
+            do {
+                let token = try await tokens.token(refresh: false)
+                return try await grpc.unary(path, request, metadata: ["authorization": "Bearer \(token)"])
+            } catch ViamError.unauthenticated {
+                let token = try await tokens.token(refresh: true)
+                do {
+                    return try await grpc.unary(path, request, metadata: ["authorization": "Bearer \(token)"])
+                } catch ViamError.unauthenticated(let message) {
+                    await tokens.rejected()
+                    throw ViamError.unauthenticated(message)
+                }
+            }
+        }
     }
 
-    private func accessToken() async throws -> String {
-        if let cached = await token.value { return cached }
+    private func apiKeyToken(id: String, key: String, cache: TokenCache) async throws -> String {
+        if let cached = await cache.value { return cached }
         var request = Proto_Rpc_V1_AuthenticateRequest()
-        request.entity = keyID
+        request.entity = id
         request.credentials.type = "api-key"
         request.credentials.payload = key
         let response: Proto_Rpc_V1_AuthenticateResponse = try await grpc.unary("proto.rpc.v1.AuthService/Authenticate", request)
-        await token.set(response.accessToken)
+        await cache.set(response.accessToken)
         return response.accessToken
     }
 }
@@ -97,40 +129,6 @@ public final class ViamAppClient: Sendable {
 private actor TokenCache {
     var value: String?
     func set(_ token: String) { value = token }
-}
-
-/// Checks a stored key by reading its org from Viam.
-public struct ViamCredentialValidator: CredentialValidator {
-    let baseURL: URL
-    let session: URLSession
-
-    public init(baseURL: URL = ViamAppClient.defaultBaseURL, session: URLSession = .shared) {
-        self.baseURL = baseURL
-        self.session = session
-    }
-
-    public func validate(_ credential: OrgCredential) async -> ValidationResult {
-        let client = ViamAppClient(keyID: credential.keyID, key: credential.key, baseURL: baseURL, session: session)
-        do {
-            return .valid(orgName: try await client.organization(id: credential.orgID).name)
-        } catch let error as ViamError {
-            switch error {
-            case .unauthenticated(let message), .permissionDenied(let message):
-                return .rejected(message)
-            case .status(let code, let message) where code == 3 || code == 5:
-                // INVALID_ARGUMENT, NOT_FOUND: the org ID the key was paired for doesn't resolve.
-                return .rejected(message)
-            case .status(_, let message):
-                return .unreachable(message)
-            case .transport(let message):
-                return .unreachable(message)
-            case .malformedResponse:
-                return .unreachable("Viam sent a response the app couldn't read.")
-            }
-        } catch {
-            return .unreachable(error.localizedDescription)
-        }
-    }
 }
 
 public struct ViamKeyDeleter: KeyDeleter {

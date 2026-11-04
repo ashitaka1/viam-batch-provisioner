@@ -128,10 +128,6 @@ import-env name:
     ./scripts/bundle-app.sh >/dev/null
     "build/Viam Provisioner.app/Contents/MacOS/ViamProvisioner" --import-environment "config/environments/{{name}}.env"
 
-# Sign the macOS app in to a Viam organization (uses your viam CLI login)
-pair-app *args:
-    swift run -c release provisioner-pair {{args}}
-
 # --- Debug helpers (individual services; `just serve` runs them together) ---
 
 # Start PXE watcher only (assigns names to MACs as machines boot)

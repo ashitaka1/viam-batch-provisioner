@@ -23,7 +23,7 @@ func cliMessage(_ error: any Error) -> String {
     case .notLoggedIn: "Run 'viam login' first."
     case .failed(let stderr): "The viam CLI failed: \(stderr)"
     case .unparsableOrganizations: "Couldn't read the viam CLI's organization list. Update it with 'viam update'."
-    case .unparsableKey, nil: "The viam CLI failed: \(error)"
+    case .unparsableKey, .tokenUnavailable, nil: "The viam CLI failed: \(error)"
     }
 }
 
@@ -46,7 +46,8 @@ while let argument = arguments.popFirst() {
 
 // MARK: Pick the org
 
-let cli = ViamCLI()
+guard let executable = await ViamCLI.locate() else { fail(cliMessage(ViamCLIError.notInstalled)) }
+let cli = ViamCLI(run: ViamCLI.processRunner(executable: executable))
 let orgs: [(id: String, name: String)]
 do { orgs = try await cli.organizations() } catch { fail(cliMessage(error)) }
 

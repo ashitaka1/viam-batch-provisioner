@@ -4,6 +4,7 @@ import SwiftUI
 /// The main window: environments in the sidebar, the selected one's editor in
 /// the detail pane. Queue and History join the sidebar with #38.
 struct MainWindow: View {
+    let session: ViamSession
     let organizations: OrganizationsModel
     let environments: EnvironmentsModel
 
@@ -29,18 +30,22 @@ struct MainWindow: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             VStack(spacing: 0) {
-                if let error = environments.loadError ?? organizations.loadError {
+                if let error = environments.loadError {
                     Banner(message: error) {
-                        Button("Try Again") {
-                            environments.load()
-                            Task { await organizations.load() }
-                        }
+                        Button("Try Again") { environments.load() }
+                    }
+                } else if case .failed(let error) = organizations.state {
+                    Banner(message: error) {
+                        Button("Try Again") { Task { await organizations.load() } }
                     }
                 }
                 detail.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationTitle(selected?.name ?? "Viam Provisioner")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { AccountStatus(session: session) }
+        }
         .focusedSceneValue(\.environmentActions, EnvironmentActions(
             create: { create() },
             duplicate: selected.map { environment in { duplicate(environment) } },
@@ -63,12 +68,12 @@ struct MainWindow: View {
 
     @ViewBuilder private var detail: some View {
         if let environment = selected {
-            EnvironmentEditor(organizations: organizations, environments: environments, environment: environment)
+            EnvironmentEditor(session: session, organizations: organizations, environments: environments, environment: environment)
                 .id(environment.id)
         } else if environments.environments.isEmpty && environments.loadError == nil {
-            if organizations.rows.isEmpty {
+            if !isSignedIn {
                 VStack(spacing: 0) {
-                    OnboardingView(command: "just pair-app")
+                    SignInView(session: session)
                     Button("Create an environment without Viam") { create(mode: .osOnly) }
                         .buttonStyle(.link)
                 }
@@ -84,6 +89,10 @@ struct MainWindow: View {
         } else {
             ContentUnavailableView("Select an Environment", systemImage: "square.stack.3d.up")
         }
+    }
+
+    private var isSignedIn: Bool {
+        if case .signedIn = session.state { true } else { false }
     }
 
     private func create(mode: ProvisionMode = .full) {

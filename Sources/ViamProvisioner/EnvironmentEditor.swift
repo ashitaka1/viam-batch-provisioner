@@ -5,6 +5,7 @@ import SwiftUI
 /// text fields on Return or leaving the field, pickers at once. Invalid values
 /// are saved too; the problems they cause block provisioning, not editing.
 struct EnvironmentEditor: View {
+    let session: ViamSession
     let organizations: OrganizationsModel
     let environments: EnvironmentsModel
     /// The environment as stored.
@@ -14,13 +15,14 @@ struct EnvironmentEditor: View {
     @State private var packagesText: String
     /// Fields whose "required" problems show; others show only once committed.
     @State private var visited: Set<EnvironmentField> = []
-    @State private var pairCommand: String?
     @State private var settingPassword = false
     @State private var failure: String?
     @FocusState private var focused: EnvironmentField?
     @SwiftUI.Environment(\.undoManager) private var undoManager
 
-    init(organizations: OrganizationsModel, environments: EnvironmentsModel, environment: ProvisionerKit.Environment) {
+    init(session: ViamSession, organizations: OrganizationsModel, environments: EnvironmentsModel,
+         environment: ProvisionerKit.Environment) {
+        self.session = session
         self.organizations = organizations
         self.environments = environments
         self.environment = environment
@@ -79,15 +81,8 @@ struct EnvironmentEditor: View {
                 draft.hasTailscaleKey = stored.hasTailscaleKey
             }
         }
-        .task(id: "\(draft.orgID ?? "")|\(draft.provisionMode.rawValue)|\(environments.orgIsPaired(draft))") {
+        .task(id: "\(draft.orgID ?? "")|\(draft.provisionMode.rawValue)|\(environments.orgIsAvailable(draft))") {
             if draft.provisionMode == .full, let orgID = draft.orgID { await environments.loadLocations(org: orgID) }
-        }
-        .sheet(item: Binding(get: { pairCommand.map(PairCommand.init) }, set: { pairCommand = $0?.command })) { item in
-            VStack {
-                OnboardingView(title: "Add a Viam organization", command: item.command, waiting: false)
-                Button("Close") { pairCommand = nil }.keyboardShortcut(.cancelAction)
-            }
-            .padding(.bottom)
         }
         .sheet(isPresented: $settingPassword) {
             PasswordSheet { password in
@@ -128,20 +123,18 @@ struct EnvironmentEditor: View {
             field(.org) {
                 if organizations.rows.isEmpty && draft.orgID == nil {
                     LabeledContent("Organization") {
-                        Text("No organizations paired.").foregroundStyle(.secondary)
-                        Button("Add Organization…") { pairCommand = "just pair-app" }
+                        Text(isSignedIn ? "Your Viam account has no organizations." : "Sign in to Viam to choose one.")
+                            .foregroundStyle(.secondary)
                     }
                 } else {
                     Picker("Organization", selection: orgBinding) {
                         if draft.orgID == nil { Text("Choose…").tag(String?.none) }
-                        ForEach(organizations.rows) { row in
-                            Text(row.credential.orgName).tag(Optional(row.credential.orgID))
+                        ForEach(organizations.rows) { org in
+                            Text(org.name).tag(Optional(org.id))
                         }
-                        if let orgID = draft.orgID, !environments.orgIsPaired(draft) {
-                            Text("\(draft.orgName ?? orgID) (not paired)").tag(Optional(orgID))
+                        if let orgID = draft.orgID, !environments.orgIsAvailable(draft) {
+                            Text("\(draft.orgName ?? orgID) (unavailable)").tag(Optional(orgID))
                         }
-                        Divider()
-                        Text("Add Organization…").tag(Optional(Self.addOrganizationTag))
                     }
                     .focused($focused, equals: .org)
                 }
@@ -189,7 +182,7 @@ struct EnvironmentEditor: View {
                 Button("Try Again") { Task { await environments.reloadLocations(org: orgID) } }
             }
             .help(message)
-        case (_, .unpaired):
+        case (_, .unavailable):
             LabeledContent("Location") {
                 Text(draft.locationName.map { "\($0) (saved)" } ?? "None").foregroundStyle(.secondary)
             }
@@ -288,17 +281,16 @@ struct EnvironmentEditor: View {
     @ViewBuilder private var orgBanner: some View {
         if environment.provisionMode == .full, let orgID = environment.orgID {
             let orgName = environment.orgName ?? orgID
-            if !environments.orgIsPaired(environment) {
-                Banner(message: "\(orgName) isn't paired on this Mac.") {
-                    Button("Pair \(orgName)…") { pairCommand = "just pair-app --org-id \(orgID)" }
+            if !isSignedIn {
+                Banner(message: "Sign in to Viam to use \(orgName).") {
+                    SignInButton(session: session)
+                }
+            } else if organizations.state == .loaded, !environments.orgIsAvailable(environment) {
+                Banner(message: "Your Viam account can't see \(orgName).") {
                     Button("Choose Another Organization") {
                         visited.insert(.org)
                         focused = .org
                     }
-                }
-            } else if case .rejected? = organizations.rows.first(where: { $0.credential.orgID == orgID })?.status {
-                Banner(message: "Viam rejected the key for \(orgName).") {
-                    Button("Re-pair \(orgName)…") { pairCommand = "just pair-app --org-id \(orgID)" }
                 }
             }
         }
@@ -389,19 +381,14 @@ struct EnvironmentEditor: View {
         Binding(get: { draft[keyPath: keyPath] ?? "" }, set: { draft[keyPath: keyPath] = $0.isEmpty ? nil : $0 })
     }
 
-    private static let addOrganizationTag = "\u{0}add-organization"
 
     /// Changing the org clears the location, whose IDs belong to an org.
     private var orgBinding: Binding<String?> {
         Binding(get: { draft.orgID }, set: { orgID in
             visited.insert(.org)
-            if orgID == Self.addOrganizationTag {
-                pairCommand = "just pair-app"
-                return
-            }
             guard orgID != draft.orgID else { return }
             draft.orgID = orgID
-            draft.orgName = organizations.rows.first { $0.credential.orgID == orgID }?.credential.orgName
+            draft.orgName = organizations.rows.first { $0.id == orgID }?.name
             draft.locationID = nil
             draft.locationName = nil
             commit()
@@ -423,9 +410,8 @@ struct EnvironmentEditor: View {
         .map { (code: $0, name: Locale.current.localizedString(forRegionCode: $0) ?? $0) }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
-    private struct PairCommand: Identifiable {
-        let command: String
-        var id: String { command }
+    private var isSignedIn: Bool {
+        if case .signedIn = session.state { true } else { false }
     }
 }
 

@@ -11,8 +11,8 @@ public final class EnvironmentsModel {
         case rejected(String)
         /// Viam couldn't be reached, or answered with an error.
         case unreachable(String)
-        /// No key for the org is paired on this Mac.
-        case unpaired
+        /// Signed out, the account's orgs are unknown, or it can't see this one.
+        case unavailable
     }
 
     /// Sorted by name, ignoring case.
@@ -25,13 +25,13 @@ public final class EnvironmentsModel {
     private var badWifiPasswords: Set<UUID> = []
 
     private let store: any EnvironmentStore
-    private let orgs: @MainActor () -> [OrganizationsModel.Row]
-    private let fleet: @Sendable (OrgCredential) -> any ViamFleet
+    private let orgs: @MainActor () -> AccountOrgs
+    private let fleet: @Sendable (_ orgID: String) -> any ViamFleet
     private let readFile: @MainActor (String) -> String?
     private let home: String
 
-    public init(store: any EnvironmentStore, orgs: @escaping @MainActor () -> [OrganizationsModel.Row],
-                fleet: @escaping @Sendable (OrgCredential) -> any ViamFleet,
+    public init(store: any EnvironmentStore, orgs: @escaping @MainActor () -> AccountOrgs,
+                fleet: @escaping @Sendable (_ orgID: String) -> any ViamFleet,
                 readFile: @escaping @MainActor (String) -> String? = { try? String(contentsOfFile: $0, encoding: .utf8) },
                 home: String = NSHomeDirectory()) {
         self.store = store
@@ -58,15 +58,14 @@ public final class EnvironmentsModel {
     // MARK: Lifecycle
 
     /// A new environment under an unused name, with the org preselected when
-    /// exactly one is paired and `~/.ssh/id_ed25519.pub` as its key when that parses.
+    /// the account sees exactly one, and `~/.ssh/id_ed25519.pub` as its key when that parses.
     @discardableResult
     public func create(name: String = "New Environment", mode: ProvisionMode = .full) throws -> Environment {
         var environment = Environment.new(name: unusedName(name))
         environment.provisionMode = mode
-        let rows = orgs()
-        if rows.count == 1 {
-            environment.orgID = rows[0].credential.orgID
-            environment.orgName = rows[0].credential.orgName
+        if case .known(let orgs) = orgs(), orgs.count == 1 {
+            environment.orgID = orgs[0].id
+            environment.orgName = orgs[0].name
         }
         if let key = readFile("\(home)/.ssh/id_ed25519.pub"), case .success = SSHPublicKey.parse(key) {
             environment.sshPublicKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -166,12 +165,19 @@ public final class EnvironmentsModel {
         }
         guard environment.provisionMode == .full, let orgID = environment.orgID, !orgID.isEmpty else { return problems }
         let orgName = environment.orgName ?? orgID
-        guard let row = orgs().first(where: { $0.credential.orgID == orgID }) else {
-            problems.append(EnvironmentProblem(field: .org, message: "This Mac has no key for \(orgName)."))
+        let orgs: [ViamOrganization]
+        switch self.orgs() {
+        case .signedOut:
+            problems.append(EnvironmentProblem(field: .org, message: "Sign in to Viam to use \(orgName)."))
             return problems
+        case .unknown:
+            return problems
+        case .known(let known):
+            orgs = known
         }
-        if case .rejected = row.status {
-            problems.append(EnvironmentProblem(field: .org, message: "Viam rejected this Mac's key for \(orgName)."))
+        guard orgs.contains(where: { $0.id == orgID }) else {
+            problems.append(EnvironmentProblem(field: .org, message: "Your Viam account can't see \(orgName)."))
+            return problems
         }
         if let locationID = environment.locationID, !locationID.isEmpty,
            case .loaded(let locations) = locationStates[orgID], !locations.contains(where: { $0.id == locationID }) {
@@ -181,9 +187,9 @@ public final class EnvironmentsModel {
         return problems
     }
 
-    public func orgIsPaired(_ environment: Environment) -> Bool {
+    public func orgIsAvailable(_ environment: Environment) -> Bool {
         guard let orgID = environment.orgID else { return false }
-        return orgs().contains { $0.credential.orgID == orgID }
+        return isAvailable(orgID)
     }
 
     /// The full-mode environments that use the org.
@@ -192,14 +198,14 @@ public final class EnvironmentsModel {
     }
 
     public func locations(org orgID: String) -> LocationsState {
-        guard orgs().contains(where: { $0.credential.orgID == orgID }) else { return .unpaired }
+        guard isAvailable(orgID) else { return .unavailable }
         return locationStates[orgID] ?? .idle
     }
 
     /// Fetches the org's locations unless they are loaded or loading.
     public func loadLocations(org orgID: String) async {
         switch locations(org: orgID) {
-        case .loaded, .loading, .unpaired: return
+        case .loaded, .loading, .unavailable: return
         case .idle, .rejected, .unreachable: await fetchLocations(org: orgID)
         }
     }
@@ -210,10 +216,10 @@ public final class EnvironmentsModel {
     }
 
     private func fetchLocations(org orgID: String) async {
-        guard let credential = orgs().first(where: { $0.credential.orgID == orgID })?.credential else { return }
+        guard isAvailable(orgID) else { return }
         locationStates[orgID] = .loading
         do {
-            locationStates[orgID] = .loaded(try await fleet(credential).locations())
+            locationStates[orgID] = .loaded(try await fleet(orgID).locations())
         } catch {
             switch error {
             case .rejected(let message): locationStates[orgID] = .rejected(message)
@@ -223,6 +229,11 @@ public final class EnvironmentsModel {
     }
 
     // MARK: Helpers
+
+    private func isAvailable(_ orgID: String) -> Bool {
+        guard case .known(let orgs) = orgs() else { return false }
+        return orgs.contains { $0.id == orgID }
+    }
 
     private func refresh() throws {
         environments = try store.all()

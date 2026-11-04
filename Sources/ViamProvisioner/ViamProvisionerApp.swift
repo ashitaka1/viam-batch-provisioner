@@ -5,40 +5,52 @@ import ViamAPI
 
 @main
 struct ViamProvisionerApp: App {
+    @State private var session: ViamSession
     @State private var organizations: OrganizationsModel
     @State private var environments: EnvironmentsModel
 
     init() {
         ImportEnvironmentCommand.runIfRequested()
-        let organizations = OrganizationsModel(store: KeychainOrgCredentialStore(), validator: ViamCredentialValidator(), keyDeleter: ViamKeyDeleter())
+        let session = ViamSession()
+        let tokens = session.tokens
+        let baseURL = session.baseURL
+        let organizations = OrganizationsModel(lister: ViamOrganizationLister(tokens: tokens, baseURL: baseURL))
+        _session = State(initialValue: session)
         _organizations = State(initialValue: organizations)
         _environments = State(initialValue: EnvironmentsModel(
-            store: FileEnvironmentStore(), orgs: { organizations.rows }, fleet: { ViamOrgFleet(credential: $0) }))
+            store: FileEnvironmentStore(),
+            orgs: {
+                switch session.state {
+                case .signedIn: organizations.state == .loaded ? .known(organizations.rows) : .unknown
+                case .checking: .unknown
+                case .cliMissing, .signedOut, .signingIn, .failed: .signedOut
+                }
+            },
+            fleet: { ViamOrgFleet(orgID: $0, tokens: tokens, baseURL: baseURL) }))
     }
 
     var body: some Scene {
         Window("Viam Provisioner", id: "main") {
-            MainWindow(organizations: organizations, environments: environments)
+            MainWindow(session: session, organizations: organizations, environments: environments)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
                     environments.load()
-                    await organizations.load()
+                    await session.load()
                 }
-                .onOpenURL { url in
-                    NSApp.activate()
-                    organizations.handle(url: url)
+                .onChange(of: session.state) { _, state in
+                    if case .signedIn = state {
+                        Task { await organizations.load() }
+                    } else if state == .signedOut {
+                        organizations.clear()
+                    }
                 }
-                .sheet(isPresented: Binding(
-                    get: { organizations.pairing != nil },
-                    set: { presented in if !presented { organizations.dismissPairing() } }
-                )) {
-                    PairingSheet(model: organizations)
-                }
+                // The scheme stays registered for a later OAuth callback; pairing links are ignored.
+                .onOpenURL { _ in NSApp.activate() }
         }
         .commands { EnvironmentCommands() }
         Settings {
             TabView {
-                OrganizationsSettings(model: organizations, environments: environments)
+                OrganizationsSettings(session: session, model: organizations, environments: environments)
                     .tabItem { Label("Organizations", systemImage: "building.2") }
             }
             .frame(width: 520, height: 360)

@@ -6,19 +6,14 @@ import Testing
 
 private typealias Seen = Locked<[(path: String, body: Data, authorization: String?)]>
 
-/// A fleet whose AppService calls go to `reply`, recording each request in `seen`.
-/// Authenticate answers with `authenticate`, which succeeds unless a test overrides it.
-private func fleet(
-    seen: Seen = Seen([]),
-    authenticate: @escaping () -> StubProtocol.Reply = { ok(authenticated()) },
-    _ reply: @escaping (String) -> StubProtocol.Reply
-) -> ViamOrgFleet {
+/// A fleet for org o1 whose AppService calls go to `reply`, recording each request in `seen`.
+private func fleet(seen: Seen = Seen([]), _ reply: @escaping (String) -> StubProtocol.Reply) -> ViamOrgFleet {
     let base = StubProtocol.register { request, body in
         let path = request.url!.path
         seen.withLock { $0.append((path, body, request.value(forHTTPHeaderField: "authorization"))) }
-        return path.hasSuffix("Authenticate") ? authenticate() : reply(path)
+        return reply(path)
     }
-    return ViamOrgFleet(credential: credential, baseURL: base, session: session)
+    return ViamOrgFleet(orgID: "o1", tokens: ScriptedTokens(["tok"]), baseURL: base, session: session)
 }
 
 private func lastCall(_ seen: Seen) throws -> (path: String, body: Data, authorization: String?) {
@@ -35,7 +30,7 @@ private func part(_ id: String, secret: String = "", main: Bool) -> Viam_App_V1_
 
 private func describe(_ error: FleetError?) -> String { error.map { "\($0)" } ?? "no error" }
 
-@Test func listsLocationsForTheCredentialsOrg() async throws {
+@Test func listsLocationsForTheOrg() async throws {
     let seen = Seen([])
     let fleet = fleet(seen: seen) { _ in
         var response = Viam_App_V1_ListLocationsResponse()
@@ -132,15 +127,9 @@ func mapsStatuses(code: Int, expected: FleetError) async {
     await #expect(throws: expected) { _ = try await fleet.createMachine(name: "lab-pi-1", location: "l1") }
 }
 
-/// A revoked key fails at Authenticate; that must stop the batch like any other refusal.
-@Test func refusedAuthenticationIsRejection() async {
-    let fleet = fleet(authenticate: { trailerStatus(16, "key revoked") }) { _ in ok(Viam_App_V1_NewRobotResponse()) }
-    await #expect(throws: FleetError.rejected("key revoked")) { _ = try await fleet.createMachine(name: "lab-pi-1", location: "l1") }
-}
-
 @Test func transportFailureIsUnreachable() async {
     let base = StubProtocol.register { _, _ in StubProtocol.Reply(error: URLError(.timedOut)) }
-    let fleet = ViamOrgFleet(credential: credential, baseURL: base, session: session)
+    let fleet = ViamOrgFleet(orgID: "o1", tokens: ScriptedTokens(["tok"]), baseURL: base, session: session)
     let thrown = await #expect(throws: FleetError.self) { _ = try await fleet.createMachine(name: "lab-pi-1", location: "l1") }
     let isUnreachable = if case .unreachable? = thrown { true } else { false }
     #expect(isUnreachable, "expected .unreachable, got \(describe(thrown))")

@@ -105,3 +105,30 @@ final class Locked<Value>: @unchecked Sendable {
     init(_ value: Value) { self.value = value }
     func withLock<R>(_ body: (inout Value) -> R) -> R { lock.withLock { body(&value) } }
 }
+
+/// Hands out `tokens` in order, repeating the last, or throws `failure`. Records
+/// each `refresh` flag and each `rejected()`.
+actor ScriptedTokens: BearerTokenProvider {
+    private var tokens: [String]
+    private let failure: (any Error)?
+    private(set) var refreshes: [Bool] = []
+    private(set) var rejections = 0
+
+    init(_ tokens: [String]) {
+        self.tokens = tokens
+        failure = nil
+    }
+
+    init(failing failure: any Error) {
+        tokens = []
+        self.failure = failure
+    }
+
+    func token(refresh: Bool) async throws -> String {
+        refreshes.append(refresh)
+        if let failure { throw failure }
+        return tokens.count > 1 ? tokens.removeFirst() : tokens[0]
+    }
+
+    func rejected() async { rejections += 1 }
+}

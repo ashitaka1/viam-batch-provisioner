@@ -2,9 +2,11 @@ import Foundation
 @testable import ProvisionerKit
 import Testing
 
-private func credential(_ orgID: String, name: String) -> OrgCredential {
-    OrgCredential(PairingPayload(orgID: orgID, orgName: name, keyID: "id-\(orgID)", key: "k", keyName: "provisioner-app studio"),
-                  addedAt: Date(timeIntervalSince1970: 1_793_000_000))
+private final class Locked<Value>: @unchecked Sendable {
+    private var value: Value
+    private let lock = NSLock()
+    init(_ value: Value) { self.value = value }
+    func withLock<R>(_ body: (inout Value) -> R) -> R { lock.withLock { body(&value) } }
 }
 
 private struct ThrowingStore: EnvironmentStore {
@@ -20,10 +22,15 @@ private final class Harness {
     let file = FileManager.default.temporaryDirectory.appendingPathComponent("env-model-\(UUID().uuidString).json")
     let store: FileEnvironmentStore
     let fleet = FakeFleet()
-    var rows: [OrganizationsModel.Row] = [OrganizationsModel.Row(credential: credential("org-1", name: "Acme"), status: .unchecked)]
+    var orgs: AccountOrgs = .known([ViamOrganization(id: "org-1", name: "Acme")])
+    let fleetOrgs = Locked<[String]>([])
     var files: [String: String] = [:]
     lazy var model = EnvironmentsModel(
-        store: store, orgs: { [unowned self] in rows }, fleet: { [fleet] _ in fleet },
+        store: store, orgs: { [unowned self] in orgs },
+        fleet: { [fleet, fleetOrgs] orgID in
+            fleetOrgs.withLock { $0.append(orgID) }
+            return fleet
+        },
         readFile: { [unowned self] path in files[path] }, home: "/Users/test")
 
     init() { store = FileEnvironmentStore(file: file, vault: InMemorySecretsVault()) }
@@ -46,7 +53,7 @@ private final class Harness {
 
     @Test func createLeavesOrgEmptyWhenSeveralArePaired() throws {
         let h = Harness()
-        h.rows.append(OrganizationsModel.Row(credential: credential("org-2", name: "Beta"), status: .unchecked))
+        h.orgs = .known([ViamOrganization(id: "org-1", name: "Acme"), ViamOrganization(id: "org-2", name: "Beta")])
         #expect(try h.model.create().orgID == nil)
     }
 
@@ -154,7 +161,7 @@ private final class Harness {
         shop.wifiSSID = "shop"
         try h.model.update(shop)
         try h.model.setSecret(.wifiPassword, "short", id: shop.id)
-        let again = EnvironmentsModel(store: h.store, orgs: { [] }, fleet: { _ in FakeFleet() })
+        let again = EnvironmentsModel(store: h.store, orgs: { .known([]) }, fleet: { _ in FakeFleet() })
         again.load()
         let env = try #require(again.environments.first)
         #expect(again.problems(for: env).contains { $0.message == "WiFi passwords are 8 to 63 characters." })
@@ -218,7 +225,7 @@ private final class Harness {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("env-model-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = FileEnvironmentStore(file: file, vault: vault)
-        let model = EnvironmentsModel(store: store, orgs: { [] }, fleet: { _ in FakeFleet() })
+        let model = EnvironmentsModel(store: store, orgs: { .known([]) }, fleet: { _ in FakeFleet() })
         let shop = try model.create(name: "Shop")
         vault.failing = true
         #expect(throws: (any Error).self) { try model.delete(id: shop.id) }
@@ -238,13 +245,25 @@ private final class Harness {
         await h.model.loadLocations(org: "org-1")
         #expect(h.model.problems(for: shop).contains(EnvironmentProblem(field: .location, message: "\"Lab B\" no longer exists in Acme.")))
 
-        h.rows[0].status = .rejected("bad key")
-        #expect(h.model.problems(for: shop).contains(EnvironmentProblem(field: .org, message: "Viam rejected this Mac's key for Acme.")))
+        h.orgs = .known([ViamOrganization(id: "org-2", name: "Beta")])
+        #expect(h.model.problems(for: shop).contains(EnvironmentProblem(field: .org, message: "Your Viam account can't see Acme.")))
+        #expect(!h.model.orgIsAvailable(shop))
+        #expect(h.model.locations(org: "org-1") == .unavailable)
+    }
 
-        h.rows = []
-        #expect(h.model.problems(for: shop).contains(EnvironmentProblem(field: .org, message: "This Mac has no key for Acme.")))
-        #expect(!h.model.orgIsPaired(shop))
-        #expect(h.model.locations(org: "org-1") == .unpaired)
+    @Test func signedOutEnvironmentAsksToSignIn() throws {
+        let h = Harness()
+        let shop = try h.model.create(name: "Shop")
+        h.orgs = .signedOut
+        #expect(h.model.problems(for: shop).filter { $0.field == .org }
+            == [EnvironmentProblem(field: .org, message: "Sign in to Viam to use Acme.")])
+        #expect(!h.model.orgIsAvailable(shop))
+    }
+
+    @Test func locationsUseTheOrgsFleet() async throws {
+        let h = Harness()
+        await h.model.loadLocations(org: "org-1")
+        #expect(h.fleetOrgs.withLock { $0 } == ["org-1"])
     }
 
     @Test func orgHealthIgnoredOutsideFullMode() throws {
@@ -293,11 +312,27 @@ private final class Harness {
         #expect(h.model.locations(org: "org-1") == .unreachable("internal"))
     }
 
-    @Test func unpairedOrgDoesNotCallViam() async throws {
+    /// Offline, or still listing: the org's health is unknown, which is not a problem with the environment.
+    @Test func unknownOrgsRaiseNoOrgProblem() throws {
         let h = Harness()
-        h.rows = []
+        let shop = try h.model.create(name: "Shop")
+        h.orgs = .unknown
+        #expect(!h.model.problems(for: shop).contains { $0.field == .org }, "problems: \(h.model.problems(for: shop))")
+    }
+
+    @Test func orgTheAccountCantSeeDoesNotCallViam() async throws {
+        let h = Harness()
+        h.orgs = .known([ViamOrganization(id: "org-2", name: "Beta")])
         await h.model.loadLocations(org: "org-1")
-        #expect(h.model.locations(org: "org-1") == .unpaired)
+        #expect(h.model.locations(org: "org-1") == .unavailable)
+        #expect(await h.fleet.locationsCalls == 0)
+    }
+
+    @Test func signedOutDoesNotCallViam() async throws {
+        let h = Harness()
+        h.orgs = .signedOut
+        await h.model.loadLocations(org: "org-1")
+        #expect(h.model.locations(org: "org-1") == .unavailable)
         #expect(await h.fleet.locationsCalls == 0)
     }
 
@@ -311,14 +346,14 @@ private final class Harness {
     @Test func loadReadsStoredEnvironments() throws {
         let h = Harness()
         _ = try h.model.create(name: "Shop")
-        let again = EnvironmentsModel(store: h.store, orgs: { [] }, fleet: { _ in FakeFleet() })
+        let again = EnvironmentsModel(store: h.store, orgs: { .known([]) }, fleet: { _ in FakeFleet() })
         again.load()
         #expect(again.environments.map(\.name) == ["Shop"])
         #expect(again.loadError == nil)
     }
 
     @Test func loadErrorReported() {
-        let model = EnvironmentsModel(store: ThrowingStore(), orgs: { [] }, fleet: { _ in FakeFleet() })
+        let model = EnvironmentsModel(store: ThrowingStore(), orgs: { .known([]) }, fleet: { _ in FakeFleet() })
         model.load()
         #expect(model.environments.isEmpty)
         #expect(model.loadError == "Couldn't read the environments in /tmp/environments.json: bad")

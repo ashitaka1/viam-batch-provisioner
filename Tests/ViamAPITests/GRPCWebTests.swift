@@ -95,65 +95,13 @@ import Testing
     }
 }
 
-@Test func validResultCarriesOrgName() async {
-    let base = StubProtocol.register { request, _ in
-        request.url!.path.hasSuffix("Authenticate") ? ok(authenticated()) : ok(organization("o1", "Acme Robotics"))
-    }
-    let result = await ViamCredentialValidator(baseURL: base, session: session).validate(credential)
-    #expect(result == .valid(orgName: "Acme Robotics"))
-}
-
-@Test func unauthenticatedIsRejection() async {
-    let base = StubProtocol.register { _, _ in trailerStatus(16, "bad key") }
-    let result = await ViamCredentialValidator(baseURL: base, session: session).validate(credential)
-    #expect(result == .rejected("bad key"))
-}
-
-@Test func permissionDeniedIsRejection() async {
-    let base = StubProtocol.register { request, _ in
-        request.url!.path.hasSuffix("Authenticate") ? ok(authenticated()) : trailerStatus(7, "no access")
-    }
-    let result = await ViamCredentialValidator(baseURL: base, session: session).validate(credential)
-    #expect(result == .rejected("no access"))
-}
-
-@Test func transportErrorIsNotRejection() async {
-    let base = StubProtocol.register { _, _ in StubProtocol.Reply(error: URLError(.notConnectedToInternet)) }
-    let result = await ViamCredentialValidator(baseURL: base, session: session).validate(credential)
-    guard case .unreachable = result else {
-        Issue.record("expected .unreachable, got \(result)")
-        return
-    }
-}
-
-@Test func serverUnavailableIsNotRejection() async {
-    let base = StubProtocol.register { _, _ in trailerStatus(14, "unavailable") }
-    let result = await ViamCredentialValidator(baseURL: base, session: session).validate(credential)
-    guard case .unreachable = result else {
-        Issue.record("expected .unreachable, got \(result)")
-        return
-    }
-}
-
-
 // MARK: - Malformed responses and other statuses
-
-private func validate(_ reply: @escaping (URLRequest) -> StubProtocol.Reply) async -> ValidationResult {
-    let base = StubProtocol.register { request, _ in
-        request.url!.path.hasSuffix("Authenticate") ? ok(authenticated()) : reply(request)
-    }
-    return await ViamCredentialValidator(baseURL: base, session: session).validate(credential)
-}
 
 private func call(_ reply: @escaping (URLRequest) -> StubProtocol.Reply) async throws {
     let base = StubProtocol.register { request, _ in
         request.url!.path.hasSuffix("Authenticate") ? ok(authenticated()) : reply(request)
     }
     _ = try await ViamAppClient(keyID: "kid", key: "kval", baseURL: base, session: session).organization(id: "o1")
-}
-
-@Test(arguments: [3, 5]) func unknownOrgIsRejection(code: Int) async {
-    #expect(await validate { _ in trailerStatus(code, "no such org") } == .rejected("no such org"))
 }
 
 @Test func httpErrorIsTransport() async {
@@ -188,11 +136,6 @@ private func call(_ reply: @escaping (URLRequest) -> StubProtocol.Reply) async t
     await #expect(throws: ViamError.malformedResponse) {
         try await call { _ in StubProtocol.Reply(body: frame(0, try! organization("o1", "Acme").serializedData())) }
     }
-}
-
-@Test func malformedResponseIsNotRejection() async {
-    let result = await validate { _ in StubProtocol.Reply(body: Data([0, 0])) }
-    guard case .unreachable = result else { Issue.record("expected .unreachable, got \(result)"); return }
 }
 
 // MARK: - Key deletion

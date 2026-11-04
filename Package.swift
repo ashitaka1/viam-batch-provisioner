@@ -101,8 +101,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ProvisionerPairHostTests",
-            dependencies: ["ProvisionerPairHost", "ProvisionerKit"],
-            resources: [.copy("Fixtures")]
+            dependencies: ["ProvisionerPairHost", "ProvisionerKit"]
         ),
         .testTarget(
             name: "ProvisionerKitTests",
@@ -110,7 +109,8 @@ let package = Package(
                 "ProvisionerAPI",
                 "ProvisionerKit",
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
-            ]
+            ],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

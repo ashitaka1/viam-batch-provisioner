@@ -32,6 +32,8 @@ Boots a target machine over the network (x86) or from a pre-flashed SD card (Pi)
 For Viam `full` mode:
 - Viam CLI (`brew install viam`)
 
+The macOS app signs in to Viam through the Viam CLI's login, so it needs the CLI too. Its **Sign in to Viam** button runs `viam login` in the browser and shows the code to match on Viam's device-login page.
+
 Run `just doctor` at any time to verify all of the above are installed. The
 setup wizard runs the same check before prompting, and creates the Python
 venv with `viam-sdk` for you when you choose `full` mode.
@@ -268,7 +270,6 @@ Set `API_PORT` in `site.env` to move the provisioner API off 8235. Set `INSTALL_
 | `just unguard <name-or-mac>` | Make one machine reinstall on its next PXE boot, however long from now |
 | `just api` | Run the provisioner API alone in the foreground |
 | `just app` | Build, sign and open the macOS app |
-| `just pair-app` | Sign the macOS app in to a Viam organization with your `viam` CLI login |
 | `just import-env <env>` | Copy `config/environments/<env>.env` into the macOS app's environments |
 | `just test` | Run the unit tests (prefers `.venv/bin/python3` for the contract test) |
 

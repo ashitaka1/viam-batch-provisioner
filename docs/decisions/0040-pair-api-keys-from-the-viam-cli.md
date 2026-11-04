@@ -4,7 +4,7 @@ Date: 2026-11-01
 
 ## Status
 
-Accepted
+Accepted. Superseded for the Mac app by 43; still the path for an iPhone app.
 
 ## Context
 
