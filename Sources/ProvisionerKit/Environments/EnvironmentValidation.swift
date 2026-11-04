@@ -1,5 +1,5 @@
 import CryptoKit
-public import Foundation
+import Foundation
 
 extension Environment {
     /// One problem per broken rule, in the editor's field order. `otherNames` are

@@ -56,7 +56,7 @@ struct SecretField: View {
     @State private var original = ""
     @State private var revealed = false
     @State private var unsaved = false
-    @State private var error: String?
+    @State private var error: (title: String, message: String)?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -96,10 +96,10 @@ struct SecretField: View {
         }
         .disabled(disabled)
         .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
-        .alert("Couldn't save the \(title) to the Keychain", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+        .alert(error?.title ?? "", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") {}
         } message: {
-            Text(error ?? "")
+            Text(error?.message ?? "")
         }
     }
 
@@ -117,7 +117,7 @@ struct SecretField: View {
                 }
                 revealed = true
             } catch {
-                self.error = error.localizedDescription
+                self.error = ("Couldn't read the \(title) from the Keychain", error.localizedDescription)
             }
         }
     }
@@ -131,11 +131,12 @@ struct SecretField: View {
         do {
             try save(value)
             unsaved = false
-            original = revealed ? (value ?? "") : ""
-            if !revealed { text = "" }
+            // Show what's stored now, so a later commit can't put back a value just removed.
+            text = revealed ? (value ?? "") : ""
+            original = text
         } catch {
             unsaved = true
-            self.error = error.localizedDescription
+            self.error = ("Couldn't save the \(title) to the Keychain", error.localizedDescription)
         }
     }
 }

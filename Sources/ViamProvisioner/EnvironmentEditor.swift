@@ -56,6 +56,11 @@ struct EnvironmentEditor: View {
                 .formStyle(.grouped)
             }
         }
+        .onDisappear {
+            // Selecting another environment, ⌘N or closing the window ends the
+            // editor without a focus change; a deleted environment isn't saved back.
+            if environments.environments.contains(where: { $0.id == environment.id }) { commit() }
+        }
         .onChange(of: focused) { previous, _ in
             if let previous {
                 visited.insert(previous)
@@ -74,7 +79,7 @@ struct EnvironmentEditor: View {
                 draft.hasTailscaleKey = stored.hasTailscaleKey
             }
         }
-        .task(id: draft.orgID) {
+        .task(id: "\(draft.orgID ?? "")|\(draft.provisionMode.rawValue)|\(environments.orgIsPaired(draft))") {
             if draft.provisionMode == .full, let orgID = draft.orgID { await environments.loadLocations(org: orgID) }
         }
         .sheet(item: Binding(get: { pairCommand.map(PairCommand.init) }, set: { pairCommand = $0?.command })) { item in
@@ -109,7 +114,7 @@ struct EnvironmentEditor: View {
             .pickerStyle(.segmented)
             .id(EnvironmentField.provisionMode)
             field(.namePrefix) {
-                TextField("Name prefix", text: $draft.namePrefix).focused($focused, equals: .namePrefix)
+                TextField("Name prefix", text: $draft.namePrefix).focused($focused, equals: .namePrefix).onSubmit(commit)
             }
         } footer: {
             let prefix = draft.namePrefix.isEmpty ? "<prefix>" : draft.namePrefix
@@ -138,6 +143,7 @@ struct EnvironmentEditor: View {
                         Divider()
                         Text("Add Organization…").tag(Optional(Self.addOrganizationTag))
                     }
+                    .focused($focused, equals: .org)
                 }
             }
             field(.location) { locationRow }
@@ -158,16 +164,21 @@ struct EnvironmentEditor: View {
             }
         case (let orgID?, .loaded(let locations)):
             Picker("Location", selection: locationBinding(locations)) {
-                if draft.locationID == nil || !locations.contains(where: { $0.id == draft.locationID }) {
-                    Text("Choose…").tag(String?.none)
+                if draft.locationID == nil { Text("Choose…").tag(String?.none) }
+                if let locationID = draft.locationID, !locations.contains(where: { $0.id == locationID }) {
+                    Text("\(draft.locationName ?? locationID) (missing)").tag(Optional(locationID))
                 }
                 ForEach(locations) { Text($0.name).tag(Optional($0.id)) }
             }
             .onAppear {
-                // Select automatically when the org has exactly one location.
                 if draft.locationID == nil, locations.count == 1 {
+                    // Select automatically when the org has exactly one location.
                     draft.locationID = locations[0].id
                     draft.locationName = locations[0].name
+                    commit()
+                } else if let location = locations.first(where: { $0.id == draft.locationID }), draft.locationName != location.name {
+                    // An import stores the ID only; keep the name for the sidebar and offline use.
+                    draft.locationName = location.name
                     commit()
                 }
             }
@@ -188,7 +199,7 @@ struct EnvironmentEditor: View {
     private var accountSection: some View {
         Section {
             field(.username) {
-                TextField("Username", text: $draft.username).focused($focused, equals: .username)
+                TextField("Username", text: $draft.username).focused($focused, equals: .username).onSubmit(commit)
             }
             field(.password) {
                 LabeledContent("Password") {
@@ -223,6 +234,7 @@ struct EnvironmentEditor: View {
             field(.wifiSSID) {
                 TextField("WiFi network", text: optional(\.wifiSSID), prompt: Text("None"))
                     .focused($focused, equals: .wifiSSID)
+                    .onSubmit(commit)
             }
             field(.wifiPassword) {
                 SecretField(title: "WiFi password", isSet: draft.hasWifiPassword,
@@ -234,6 +246,9 @@ struct EnvironmentEditor: View {
                 Text("No password: machines join it as an open network.").font(.caption).foregroundStyle(.secondary)
             }
             Picker("Country", selection: binding(\.wifiCountry)) {
+                if let code = draft.wifiCountry, !Self.regions.contains(where: { $0.code == code }) {
+                    Text(code).tag(Optional(code))
+                }
                 ForEach(Self.regions, id: \.code) { region in
                     Text("\(region.name) (\(region.code))").tag(Optional(region.code))
                 }
@@ -276,7 +291,10 @@ struct EnvironmentEditor: View {
             if !environments.orgIsPaired(environment) {
                 Banner(message: "\(orgName) isn't paired on this Mac.") {
                     Button("Pair \(orgName)…") { pairCommand = "just pair-app --org-id \(orgID)" }
-                    Button("Choose Another Organization") { focused = nil; visited.insert(.org) }
+                    Button("Choose Another Organization") {
+                        visited.insert(.org)
+                        focused = .org
+                    }
                 }
             } else if case .rejected? = organizations.rows.first(where: { $0.credential.orgID == orgID })?.status {
                 Banner(message: "Viam rejected the key for \(orgName).") {
@@ -338,14 +356,26 @@ struct EnvironmentEditor: View {
         do {
             try environments.update(value)
             if value.packages != draft.packages { draft.packages = value.packages }
-            let model = environments
-            undoManager?.registerUndo(withTarget: model) { model in
-                MainActor.assumeIsolated { try? model.update(previous) }
-            }
-            undoManager?.setActionName("Edit \(previous.name)")
+            Self.registerUndo(undoManager, model: environments, restoring: previous, name: "Edit \(previous.name)")
         } catch {
             failure = error.localizedDescription
         }
+    }
+
+    /// Undo puts `target` back, keeping the current name (a rename is its own
+    /// change), and registers the reverse, which UndoManager files as redo.
+    private static func registerUndo(_ undoManager: UndoManager?, model: EnvironmentsModel,
+                                     restoring target: ProvisionerKit.Environment, name: String) {
+        undoManager?.registerUndo(withTarget: model) { model in
+            MainActor.assumeIsolated {
+                guard let current = model.environments.first(where: { $0.id == target.id }) else { return }
+                var restored = target
+                restored.name = current.name
+                try? model.update(restored)
+                registerUndo(undoManager, model: model, restoring: current, name: name)
+            }
+        }
+        undoManager?.setActionName(name)
     }
 
     private func binding<Value: Equatable>(_ keyPath: WritableKeyPath<ProvisionerKit.Environment, Value>) -> Binding<Value> {

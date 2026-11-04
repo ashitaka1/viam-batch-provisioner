@@ -111,14 +111,17 @@ struct MainWindow: View {
         }
     }
 
-    /// Deletes, then selects the row that took its place, or the one above.
+    /// Deletes. When it was selected, selects the row that took its place, or the one above.
     private func delete(_ environment: ProvisionerKit.Environment) {
         let list = environments.environments
         let index = list.firstIndex { $0.id == environment.id } ?? 0
+        let wasSelected = selection.wrappedValue == environment.id
         do {
             try environments.delete(id: environment.id)
             let remaining = environments.environments
-            selection.wrappedValue = remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id
+            if wasSelected {
+                selection.wrappedValue = remaining.isEmpty ? nil : remaining[min(index, remaining.count - 1)].id
+            }
             undoManager?.removeAllActions(withTarget: environments)
         } catch {
             failure = error.localizedDescription
