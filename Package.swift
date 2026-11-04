@@ -25,6 +25,7 @@ let package = Package(
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
         .package(url: "https://github.com/swift-server/swift-openapi-hummingbird.git", from: "2.0.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.0.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
     ],
     targets: [
         .target(
@@ -125,6 +126,7 @@ let package = Package(
                 .product(name: "OpenAPIHummingbird", package: "swift-openapi-hummingbird"),
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
+                .product(name: "Logging", package: "swift-log"),
             ],
             plugins: [
                 .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),
@@ -142,6 +144,7 @@ let package = Package(
                 "ProvisionerKit",
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "HummingbirdTesting", package: "hummingbird"),
+                .product(name: "Logging", package: "swift-log"),
             ]
         ),
     ]
