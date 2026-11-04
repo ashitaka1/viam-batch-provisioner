@@ -4,7 +4,7 @@ Date: 2026-10-02
 
 ## Status
 
-Accepted
+Accepted; amended by decision 42, which registers the client in the project's own Viam organization
 
 ## Context
 
