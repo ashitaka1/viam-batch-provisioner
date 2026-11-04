@@ -103,7 +103,7 @@ class PxeTrackerTest(RepoLayoutTest):
         self.assertFalse(self.guard().exists())
         self.assertEqual(result, "retry")
 
-        watcher.apply_progress(self.queue_dir, name="t-1", mac=MAC, stage="done", now=self.clock, emit=None)
+        watcher.apply_progress(self.queue_dir, name="t-1", mac=MAC, stage="tooling", now=self.clock, emit=None)
         self.advance(61)
         result = self.tracker.on_pxe(MAC)
         self.assertEqual(self.guard().read_text(), "exit\n")
@@ -657,6 +657,123 @@ class FailureStateTest(RepoLayoutTest):
             self.assertEqual(self.info(), before)
             self.assertEqual(self.events, [])
             self.assertEqual(result, "ignored")
+
+    def test_done_completes_the_install(self):
+        # A machine that reports done is past its hostname fetch, so the guard
+        # is written even if the fetch went unseen.
+        self.machine(stage="tailscale", progress_at=self.iso(400))
+        self.advance(600)
+
+        result = self.progress("done")
+
+        info = self.info()
+        self.assertEqual((info["completed_at"], info["stage"]), (self.iso(600), "done"))
+        self.assertTrue(self.guard().exists())
+        self.assertEqual(self.types(), ["install-progress", "install-complete"])
+        self.assertEqual(self.events[1][1], {"name": "t-1", "mac": MAC, "timestamp": self.iso(600), "duration_seconds": 600.0})
+        self.assertEqual(result, "recorded")
+
+    def test_done_without_a_readable_assignment_time_reports_zero_duration(self):
+        self.machine(guard=True, assigned_at="garbled")
+
+        self.progress("done")
+
+        self.assertEqual(self.info()["completed_at"], self.iso())
+        self.assertEqual(self.events[-1], ("install-complete", {"name": "t-1", "mac": MAC, "timestamp": self.iso(), "duration_seconds": 0.0}))
+
+    def test_a_done_whose_guard_write_fails_completes_on_retry(self):
+        self.machine(stage="tailscale")
+        self.advance(600)
+        with mock.patch.object(watcher, "write_guard", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.progress("done")
+        self.assertNotIn("completed_at", self.info())
+
+        self.advance(610)
+        result = self.progress("done")
+
+        self.assertEqual(self.info()["completed_at"], self.iso(610))
+        self.assertTrue(self.guard().exists())
+        self.assertIn("install-complete", self.types())
+        self.assertEqual(result, "recorded")
+
+    def test_a_pxe_boot_after_done_changes_nothing(self):
+        self.machine(guard=True, stage="tailscale")
+        tracker = watcher.PxeTracker(self.queue_dir, now=lambda: self.clock, log=lambda *_: None,
+                                     emit=lambda t, d: self.events.append((t, d)))
+        self.advance(600)
+        self.progress("done")
+        before = self.info()
+        self.events.clear()
+
+        self.advance(700)
+        result = tracker.on_pxe(MAC)
+
+        self.assertEqual(self.info(), before)
+        self.assertTrue(self.guard().exists())
+        self.assertEqual(self.events, [])
+        self.assertEqual(result, "guard-exists")
+
+    def test_done_when_the_install_cannot_complete(self):
+        with self.subTest("a repeated done is ignored and completes once"):
+            self.forget()
+            self.machine(guard=True)
+            self.advance(600)
+            self.progress("done")
+            completed = self.info()
+            self.events.clear()
+            self.advance(620)
+            result = self.progress("done")
+            self.assertEqual(self.info(), completed)
+            self.assertEqual(self.events, [])
+            self.assertEqual(result, "ignored")
+
+        with self.subTest("an installer failure sticks"):
+            self.forget()
+            self.machine(guard=True)
+            self.report_failure(source="installer")
+            self.events.clear()
+            result = self.progress("done")
+            self.assertNotIn("completed_at", self.info())
+            self.assertFalse(self.guard().exists())
+            self.assertEqual(self.events, [])
+            self.assertEqual(result, "ignored")
+
+        with self.subTest("an armed machine still reinstalls on its next PXE boot"):
+            self.forget()
+            self.machine(guard=True, stage="tailscale")
+            watcher.arm_retry(self.queue_dir, MAC)
+            result = self.progress("done")
+            self.assertNotIn("completed_at", self.info())
+            self.assertFalse(self.guard().exists())
+            self.assertEqual(self.info()["stage"], "done")
+            self.assertNotIn("install-complete", self.types())
+            self.assertEqual(result, "recorded")
+
+        with self.subTest("a USB machine is not completed"):
+            self.forget()
+            self.seed([{"name": "t-1", "assigned": True, "flashed_via": "usb"}])
+            result = watcher.apply_progress(
+                self.queue_dir, name="t-1", mac=None, stage="done", now=self.clock,
+                emit=lambda t, d: self.events.append((t, d)), log=lambda *_: None)
+            self.assertNotIn("completed_at", queue_store.read(self.queue_dir)[0])
+            self.assertEqual(self.types(), ["install-progress"])
+            self.assertEqual(result, "recorded")
+
+    def test_done_after_a_timeout_failure_completes(self):
+        self.machine(guard=True, stage="tailscale", progress_at=self.iso(10))
+        self.report_failure(source="timeout", stage="tailscale", reason="no installer activity")
+        self.events.clear()
+        self.advance(3000)
+
+        result = self.progress("done")
+
+        info = self.info()
+        self.assertNotIn("failed_at", info)
+        self.assertEqual(info["completed_at"], self.iso(3000))
+        self.assertTrue(self.guard().exists())
+        self.assertEqual(self.types(), ["install-progress", "install-complete"])
+        self.assertEqual(result, "recorded")
 
     def test_the_timeout_loses_to_a_report_that_just_arrived(self):
         cutoff = T0 + timedelta(seconds=50)

@@ -244,9 +244,13 @@ def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str
     reported failed, are left alone. A failure the timeout guessed at is
     cleared, and the guard comes back if the machine is already past its
     hostname fetch.
+
+    `done` completes a PXE machine: it stamps completed_at, writes the guard
+    if the hostname fetch went unseen, and emits install-complete. A machine
+    `just unguard` armed is not completed, so its next PXE boot reinstalls.
     """
     when = now.isoformat(timespec="seconds")
-    outcome = {"result": "recorded", "cleared": False}
+    outcome = {"result": "recorded", "cleared": False, "completed": False}
 
     if mac is not None:
         def mutate(info: dict) -> bool:
@@ -264,6 +268,14 @@ def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str
                 outcome["result"] = "duplicate"
             info["stage"] = stage
             info["progress_at"] = when
+            if stage == "done" and not info.get("armed"):
+                # Under the lock, so `just unguard` can't remove the guard in
+                # between, and before completed_at is saved, so a failed write
+                # leaves the retried report able to complete.
+                write_guard(queue_dir, mac)
+                info["completed_at"] = when
+                outcome["completed"] = True
+                outcome["assigned_at"] = info.get("assigned_at")
             return True
 
         if update_info(queue_dir, mac, mutate) is None:
@@ -280,11 +292,16 @@ def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str
         if queue_store.update_entry(queue_dir, name, mutate_entry) is None:
             return "unknown"
 
-    if outcome["result"] != "recorded":
-        return outcome["result"]
     if outcome["cleared"] and mac is not None and stage in GUARD_STAGES:
         write_guard(queue_dir, mac)
-    _emit_event(emit, log, "install-progress", _event(name, mac, now, stage=stage))
+    if outcome["result"] == "recorded":
+        _emit_event(emit, log, "install-progress", _event(name, mac, now, stage=stage))
+    if not outcome["completed"]:
+        return outcome["result"]
+    assigned = parse_time(outcome["assigned_at"])
+    duration = max(0.0, (now - assigned).total_seconds()) if assigned else 0.0
+    log(f"Install complete: {name} ({mac}) reported done after {int(duration)}s")
+    _emit_event(emit, log, "install-complete", _event(name, mac, now, duration_seconds=duration))
     return "recorded"
 
 

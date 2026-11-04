@@ -188,7 +188,7 @@ with `api=v1` in the TXT record.
 
 Entry status is derived from disk on every read: `queued`, `flashed` (USB),
 `assigned` (PXE client bound), `installing` (installer fetched its hostname),
-`installed` (rebooted from disk after install), `failed`. Events are
+`installed` (the installer reported `done`), `failed`. Events are
 `machine-assigned`, `install-started`, `install-progress`, `install-failed`,
 `guard-installed` and `install-complete`; a `resync` event tells a client its
 cursor can no longer be served.
@@ -211,8 +211,9 @@ fresh install instead of treating the reboot as a finished one.
 
 An install that goes silent is failed by the server after
 `INSTALL_TIMEOUT_MINUTES` (default 45, `0` turns it off). Any report counts as
-a sign of life, and the final `done` report exempts a machine from the
-timeout. Reports never include installer log text, since logs can echo
+a sign of life. The final `done` report marks a PXE machine `installed`,
+whichever device its firmware boots next; a USB-flashed machine stays
+`flashed`. Reports never include installer log text, since logs can echo
 commands that contain secrets. `just unguard <name>` makes the machine's next
 PXE boot start a new install, however long from now it happens, without
 marking it failed.

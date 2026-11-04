@@ -77,9 +77,10 @@ paths:
 
         `progress` records the stage the installer entered. Every report moves
         the machine's progress time, so an install that keeps reporting is never
-        timed out. The final `done` stage only exempts the machine from the
-        install timeout: it does not complete the install. A machine is
-        `installed` when it PXE-boots again after installing.
+        timed out. The final `done` stage completes a PXE machine: it becomes
+        `installed` and an `install-complete` event is emitted. A machine
+        whose `done` never arrives is `installed` when it PXE-boots again
+        after installing. A USB-flashed machine is not completed.
 
         `failed` records the failure and removes the machine's GRUB guard, so
         its next PXE boot installs again. The installer's report replaces a
@@ -421,7 +422,7 @@ components:
         identity: the machine is resolving its name and fetching its credentials.
         tooling: downloading the Viam CLI and agent.
         tailscale: installing Tailscale.
-        done: late-commands finished. Exempts the machine from the install timeout; it does not complete the install.
+        done: late-commands finished. Completes a PXE machine's install.
         unknown: set by the server when the timeout fires on a machine that never reported a stage. Never accepted from a target.
       enum: [installer, late-commands, identity, tooling, tailscale, done, unknown]
 
@@ -463,7 +464,7 @@ components:
         flashed: written to a USB stick; no PXE assignment will follow.
         assigned: a PXE client has been bound to this name and is installing or retrying.
         installing: the installer fetched its hostname; the GRUB guard is in place.
-        installed: the machine PXE-booted again after install and was sent to disk.
+        installed: the installer reported done, or the machine PXE-booted again after install and was sent to disk.
         failed: the installer reported a failure, or the server saw no installer activity for the install timeout. A PXE machine installs again on its next boot, and a progress report after a timeout failure returns it to installing.
       enum: [queued, flashed, assigned, installing, installed, failed]
 
@@ -680,7 +681,7 @@ components:
 
     InstallComplete:
       type: object
-      description: The machine PXE-booted again after install and was sent to its disk. The installer's final `done` report does not produce this event.
+      description: The installer reported `done`, or the machine PXE-booted again after install and was sent to its disk. Emitted once per attempt.
       required: [id, type, timestamp, name, mac, duration_seconds]
       additionalProperties: false
       properties:
