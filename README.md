@@ -269,6 +269,7 @@ Set `API_PORT` in `site.env` to move the provisioner API off 8235. Set `INSTALL_
 | `just api` | Run the provisioner API alone in the foreground |
 | `just app` | Build, sign and open the macOS app |
 | `just pair-app` | Sign the macOS app in to a Viam organization with your `viam` CLI login |
+| `just import-env <env>` | Copy `config/environments/<env>.env` into the macOS app's environments |
 | `just test` | Run the unit tests (prefers `.venv/bin/python3` for the contract test) |
 
 ## Target machine config

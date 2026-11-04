@@ -122,6 +122,12 @@ app:
     ./scripts/bundle-app.sh
     open "build/Viam Provisioner.app"
 
+# Import config/environments/<name>.env and its packages file into the macOS
+# app's environments (builds the app; replaces an environment of that name)
+import-env name:
+    ./scripts/bundle-app.sh >/dev/null
+    "build/Viam Provisioner.app/Contents/MacOS/ViamProvisioner" --import-environment "config/environments/{{name}}.env"
+
 # Sign the macOS app in to a Viam organization (uses your viam CLI login)
 pair-app *args:
     swift run -c release provisioner-pair {{args}}

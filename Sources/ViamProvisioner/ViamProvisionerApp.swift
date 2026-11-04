@@ -7,6 +7,10 @@ import ViamAPI
 struct ViamProvisionerApp: App {
     @State private var model = OrganizationsModel(store: KeychainOrgCredentialStore(), validator: ViamCredentialValidator(), keyDeleter: ViamKeyDeleter())
 
+    init() {
+        ImportEnvironmentCommand.runIfRequested()
+    }
+
     var body: some Scene {
         Window("Viam Provisioner", id: "main") {
             MainView(model: model)
