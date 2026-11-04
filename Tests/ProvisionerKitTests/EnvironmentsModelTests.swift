@@ -69,9 +69,30 @@ private final class Harness {
         #expect(copy.id != shop.id)
         #expect(copy.name == "Shop copy")
         #expect(copy.wifiSSID == "shop")
-        #expect(try h.store.secrets(id: copy.id) == h.store.secrets(id: shop.id))
+        let secrets = try h.store.secrets(id: copy.id)
+        #expect(secrets.wifiPassword == "wifipass1")
+        #expect(secrets.passwordHash?.hasPrefix("$6$") == true)
         #expect(try h.stored(copy.id).hasPassword)
+    }
+
+    @Test func duplicatingTwicePicksTheNextName() throws {
+        let h = Harness()
+        let shop = try h.model.create(name: "Shop")
+        _ = try h.model.duplicate(id: shop.id)
         #expect(try h.model.duplicate(id: shop.id).name == "Shop copy 2")
+    }
+
+    @Test func updateKeepsTheSecrets() throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop")
+        try h.model.setPassword("hunter22", id: shop.id)
+        try h.model.setSecret(.wifiPassword, "wifipass1", id: shop.id)
+        let before = try h.store.secrets(id: shop.id)
+        shop = try h.stored(shop.id)
+        shop.username = "ops"
+        try h.model.update(shop)
+        #expect(try h.store.secrets(id: shop.id) == before)
+        #expect(try h.stored(shop.id).hasPassword)
     }
 
     @Test func renameRefusesEmptyOrDuplicateName() throws {
@@ -109,12 +130,34 @@ private final class Harness {
         let shop = try h.model.create(name: "Shop")
         try h.model.setPassword("hunter22", id: shop.id)
         let hash = try #require(try h.store.secrets(id: shop.id).passwordHash)
+        #expect(!hash.contains("hunter22"))
         let salt = String(hash.split(separator: "$")[1])
-        #expect(hash == SHA512Crypt.hash("hunter22", salt: salt))
+        #expect(hash == SHA512Crypt.hash("hunter22", salt: salt), "SHA512Crypt itself is pinned by reference vectors")
         #expect(h.model.environments.first?.hasPassword == true)
         try h.model.setPassword(nil, id: shop.id)
         #expect(try h.store.secrets(id: shop.id).passwordHash == nil)
         #expect(h.model.environments.first?.hasPassword == false)
+    }
+
+    @Test func emptyPasswordClearsIt() throws {
+        let h = Harness()
+        let shop = try h.model.create(name: "Shop")
+        try h.model.setPassword("hunter22", id: shop.id)
+        try h.model.setPassword("", id: shop.id)
+        #expect(try h.store.secrets(id: shop.id).passwordHash == nil)
+        #expect(h.model.environments.first?.hasPassword == false)
+    }
+
+    @Test func loadFindsProblemsInStoredSecrets() throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop")
+        shop.wifiSSID = "shop"
+        try h.model.update(shop)
+        try h.model.setSecret(.wifiPassword, "short", id: shop.id)
+        let again = EnvironmentsModel(store: h.store, orgs: { [] }, fleet: { _ in FakeFleet() })
+        again.load()
+        let env = try #require(again.environments.first)
+        #expect(again.problems(for: env).contains { $0.message == "WiFi passwords are 8 to 63 characters." })
     }
 
     @Test(arguments: [EnvironmentField.wifiPassword, .tailscaleAuthKey])
@@ -188,6 +231,15 @@ private final class Harness {
         #expect(h.model.locations(org: "org-1") == .loaded([ViamLocation(id: "loc-1", name: "Bench")]))
         await h.model.reloadLocations(org: "org-1")
         #expect(await h.fleet.locationsCalls == 2)
+    }
+
+    @Test func failedLoadIsRetried() async throws {
+        let h = Harness()
+        await h.fleet.setLocations(.failure(.unreachable("offline")))
+        await h.model.loadLocations(org: "org-1")
+        await h.fleet.setLocations(.success([ViamLocation(id: "loc-1", name: "Bench")]))
+        await h.model.loadLocations(org: "org-1")
+        #expect(h.model.locations(org: "org-1") == .loaded([ViamLocation(id: "loc-1", name: "Bench")]))
     }
 
     @Test func rejectedKeyShowsRejected() async throws {

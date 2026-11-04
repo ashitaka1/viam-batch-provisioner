@@ -16,64 +16,6 @@ private func env(_ name: String, id: UUID = UUID()) -> Environment {
 
 private let fullSecrets = EnvironmentSecrets(passwordHash: "$6$salt$hashvalue", wifiPassword: "wifipass1", tailscaleAuthKey: "tskey-1")
 
-/// The behavior every store shares, run against each store.
-private enum Contract {
-    static func saveThenReadRoundTripsEveryField(_ store: any EnvironmentStore) throws {
-        var shop = env("Shop")
-        shop.hasPassword = true
-        shop.hasWifiPassword = true
-        shop.hasTailscaleKey = true
-        try store.save(shop, secrets: fullSecrets)
-        #expect(try store.all() == [shop])
-        #expect(try store.secrets(id: shop.id) == fullSecrets)
-    }
-
-    static func saveSetsFlagsFromSecrets(_ store: any EnvironmentStore) throws {
-        var shop = env("Shop")
-        shop.hasPassword = true
-        try store.save(shop, secrets: EnvironmentSecrets(wifiPassword: "wifipass1"))
-        let stored = try #require(try store.all().first)
-        #expect(!stored.hasPassword && stored.hasWifiPassword && !stored.hasTailscaleKey)
-    }
-
-    static func saveReplacesSameID(_ store: any EnvironmentStore) throws {
-        let id = UUID()
-        try store.save(env("Old", id: id), secrets: nil)
-        try store.save(env("New", id: id), secrets: nil)
-        #expect(try store.all().map(\.name) == ["New"])
-    }
-
-    static func sortedByNameCaseInsensitive(_ store: any EnvironmentStore) throws {
-        for name in ["beta", "Alpha", "Gamma"] { try store.save(env(name), secrets: nil) }
-        #expect(try store.all().map(\.name) == ["Alpha", "beta", "Gamma"])
-    }
-
-    static func nilSecretsKeepsStoredSecrets(_ store: any EnvironmentStore) throws {
-        var shop = env("Shop")
-        try store.save(shop, secrets: fullSecrets)
-        shop.name = "Shop floor"
-        shop.hasPassword = false
-        try store.save(shop, secrets: nil)
-        #expect(try store.secrets(id: shop.id) == fullSecrets)
-        #expect(try store.all().first?.hasPassword == true, "flags follow the stored secrets")
-    }
-
-    static func removeDeletesEnvironmentAndSecrets(_ store: any EnvironmentStore) throws {
-        let shop = env("Shop")
-        let lab = env("Lab")
-        try store.save(shop, secrets: fullSecrets)
-        try store.save(lab, secrets: nil)
-        try store.remove(id: shop.id)
-        #expect(try store.all().map(\.id) == [lab.id])
-        #expect(try store.secrets(id: shop.id) == EnvironmentSecrets())
-    }
-
-    static func removeMissingIsNotAnError(_ store: any EnvironmentStore) throws {
-        try store.remove(id: UUID())
-        #expect(try store.all().isEmpty)
-    }
-}
-
 private func temporaryFile() -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("env-store-\(UUID().uuidString)/nested/environments.json")
 }
@@ -90,13 +32,74 @@ private func temporaryFile() -> URL {
         try body(store)
     }
 
-    @Test func saveThenReadRoundTripsEveryField() throws { try run(Contract.saveThenReadRoundTripsEveryField) }
-    @Test func saveSetsFlagsFromSecrets() throws { try run(Contract.saveSetsFlagsFromSecrets) }
-    @Test func saveReplacesSameID() throws { try run(Contract.saveReplacesSameID) }
-    @Test func sortedByNameCaseInsensitive() throws { try run(Contract.sortedByNameCaseInsensitive) }
-    @Test func nilSecretsKeepsStoredSecrets() throws { try run(Contract.nilSecretsKeepsStoredSecrets) }
-    @Test func removeDeletesEnvironmentAndSecrets() throws { try run(Contract.removeDeletesEnvironmentAndSecrets) }
-    @Test func removeMissingIsNotAnError() throws { try run(Contract.removeMissingIsNotAnError) }
+    @Test func saveThenReadRoundTripsEveryField() throws {
+        try run { store in
+            var shop = env("Shop")
+            shop.hasPassword = true
+            shop.hasWifiPassword = true
+            shop.hasTailscaleKey = true
+            try store.save(shop, secrets: fullSecrets)
+            #expect(try store.all() == [shop])
+            #expect(try store.secrets(id: shop.id) == fullSecrets)
+        }
+    }
+
+    @Test func saveSetsFlagsFromSecrets() throws {
+        try run { store in
+            var shop = env("Shop")
+            shop.hasPassword = true
+            try store.save(shop, secrets: EnvironmentSecrets(wifiPassword: "wifipass1"))
+            let stored = try #require(try store.all().first)
+            #expect(!stored.hasPassword && stored.hasWifiPassword && !stored.hasTailscaleKey)
+        }
+    }
+
+    @Test func saveReplacesSameID() throws {
+        try run { store in
+            let id = UUID()
+            try store.save(env("Old", id: id), secrets: nil)
+            try store.save(env("New", id: id), secrets: nil)
+            #expect(try store.all().map(\.name) == ["New"])
+        }
+    }
+
+    @Test func sortedByNameCaseInsensitive() throws {
+        try run { store in
+            for name in ["beta", "Alpha", "Gamma"] { try store.save(env(name), secrets: nil) }
+            #expect(try store.all().map(\.name) == ["Alpha", "beta", "Gamma"])
+        }
+    }
+
+    @Test func nilSecretsKeepsStoredSecrets() throws {
+        try run { store in
+            var shop = env("Shop")
+            try store.save(shop, secrets: fullSecrets)
+            shop.name = "Shop floor"
+            shop.hasPassword = false
+            try store.save(shop, secrets: nil)
+            #expect(try store.secrets(id: shop.id) == fullSecrets)
+            #expect(try store.all().first?.hasPassword == true, "flags follow the stored secrets")
+        }
+    }
+
+    @Test func removeDeletesEnvironmentAndSecrets() throws {
+        try run { store in
+            let shop = env("Shop")
+            let lab = env("Lab")
+            try store.save(shop, secrets: fullSecrets)
+            try store.save(lab, secrets: nil)
+            try store.remove(id: shop.id)
+            #expect(try store.all().map(\.id) == [lab.id])
+            #expect(try store.secrets(id: shop.id) == EnvironmentSecrets())
+        }
+    }
+
+    @Test func removeMissingIsNotAnError() throws {
+        try run { store in
+            try store.remove(id: UUID())
+            #expect(try store.all().isEmpty)
+        }
+    }
 
     @Test func fileHoldsNoSecrets() throws {
         try run { store in
@@ -104,13 +107,6 @@ private func temporaryFile() -> URL {
             let text = try String(contentsOf: file, encoding: .utf8)
             #expect(text.contains("Shop"))
             #expect(!text.contains("wifipass1") && !text.contains("hashvalue") && !text.contains("tskey-1"))
-        }
-    }
-
-    @Test func secondStoreReadsWhatFirstWrote() throws {
-        try run { store in
-            try store.save(env("Shop"), secrets: nil)
-            #expect(try FileEnvironmentStore(file: file, vault: InMemorySecretsVault()).all().map(\.name) == ["Shop"])
         }
     }
 

@@ -18,6 +18,19 @@ import Testing
             == "$6$rounds=77777$short$WuQyW2YR.hBNpjjRhpYD/ifIw05xdfeEyQoMxIXbkvr0gge1a1x3yRULJ5CCaUeOxFmtlcGZelFl5CxtgfiAc0")
     }
 
+    @Test func roundsBelowMinimumAreRaisedTo1000() {
+        #expect(SHA512Crypt.hash("the minimum number is still observed", salt: "roundstoolow", rounds: 10)
+            == "$6$rounds=1000$roundstoolow$kUMsbe306n21p9R.FRkW3IGn.S9NPN0x50YhH1xhLsPuWGsUSklZt58jaTfF4ZEQpyUNGc0dqbpBYYBaHHrsX.")
+    }
+
+    /// Computed with Homebrew's `openssl passwd -6 -salt fixedsalt`.
+    @Test func matchesOpenSSL() {
+        #expect(SHA512Crypt.hash("hunter22", salt: "fixedsalt")
+            == "$6$fixedsalt$iex.S17VReJdL1EZyuu7dIuv5gR1qAV5TPbELAc1cAtSZtYPUxRc4eD.JZa.wKO8SfLzOcXVsaWMyzBYsYxau1")
+        #expect(SHA512Crypt.hash("pässwörd", salt: "fixedsalt")
+            == "$6$fixedsalt$eHkBVXz.s6PmpkQfSQ5hcw66hsDVPW30UC54aiAJDg08RCTy1q6V2mkpuZRImtZ2WHElkblao1LmMY6q4GRVV.")
+    }
+
     @Test func randomSaltIsSixteenCryptCharacters() {
         let parts = SHA512Crypt.hash("pw").split(separator: "$")
         #expect(parts.count == 3)

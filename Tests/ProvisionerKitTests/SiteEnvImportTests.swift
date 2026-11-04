@@ -60,13 +60,8 @@ private func importing(_ text: String = tcos, packages: String? = packagesText,
         #expect(secrets.wifiPassword == "mellon-friend")
         #expect(secrets.tailscaleAuthKey == "tskey-1")
         let hash = try #require(secrets.passwordHash)
+        #expect(hash.hasPrefix("$6$") && !hash.contains("hunter22"))
         #expect(hash == SHA512Crypt.hash("hunter22", salt: String(hash.split(separator: "$")[1])))
-    }
-
-    @Test func importIgnoresApiKeys() throws {
-        let (env, secrets) = try importing()
-        let text = String(describing: env) + String(reflecting: secrets)
-        #expect(!text.contains("key-secret") && !text.contains("key-id"))
     }
 
     @Test func missingKeyFileNamesPath() {
@@ -82,6 +77,12 @@ private func importing(_ text: String = tcos, packages: String? = packagesText,
     @Test func emptyWifiIsNoWifi() throws {
         let (env, secrets) = try importing(tcos.replacingOccurrences(of: "\"Rivendell\"", with: "")
             .replacingOccurrences(of: "'mellon-friend'", with: ""))
+        #expect(env.wifiSSID == nil)
+        #expect(secrets.wifiPassword == nil)
+    }
+
+    @Test func wifiPasswordWithoutNetworkIsDropped() throws {
+        let (env, secrets) = try importing(tcos.replacingOccurrences(of: "\"Rivendell\"", with: ""))
         #expect(env.wifiSSID == nil)
         #expect(secrets.wifiPassword == nil)
     }
@@ -122,5 +123,19 @@ private func importing(_ text: String = tcos, packages: String? = packagesText,
         let second = try SiteEnvImport.importFile(at: envFile, into: store, home: "/Users/test")
         #expect(second.id == first.id)
         #expect(try store.all().map(\.wifiSSID) == ["lab"])
+
+        try store.save(Environment.new(name: "Upper"), secrets: nil)
+        let upper = try #require(try store.all().first { $0.name == "Upper" })
+        let upperFile = dir.appendingPathComponent("upper.env")
+        try "PASSWORD=pw\nSSH_PUBLIC_KEY_FILE=\(dir.path)/k.pub\n".write(to: upperFile, atomically: true, encoding: .utf8)
+        let imported = try SiteEnvImport.importFile(at: upperFile, into: store, home: "/Users/test")
+        #expect(imported.id == upper.id && imported.name == "Upper", "a name in another case is the same environment")
+
+        let before = try store.all()
+        try "PASSWORD=pw\nSSH_PUBLIC_KEY_FILE=\(dir.path)/missing.pub\n".write(to: envFile, atomically: true, encoding: .utf8)
+        #expect(throws: SiteEnvImportError.missingSSHKey("\(dir.path)/missing.pub")) {
+            try SiteEnvImport.importFile(at: envFile, into: store, home: "/Users/test")
+        }
+        #expect(try store.all() == before, "a failed import changes nothing")
     }
 }

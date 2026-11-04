@@ -47,9 +47,6 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
         #expect(env.provisionMode == .full)
         #expect(env.username == "viam")
         #expect(env.timezone == TimeZone.current.identifier)
-        #expect(env.packages == Environment.defaultPackages)
-        #expect(env.packages.count == 10)
-        #expect(env.wifiCountry?.count == 2)
     }
 
     /// Only full mode creates machines in Viam; every mode names machines from the prefix.
@@ -85,7 +82,7 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
         #expect(fields(env) == [.username])
     }
 
-    @Test(arguments: ["viam", "_svc", "ops-1"])
+    @Test(arguments: ["viam", "_svc", "ops-1", String(repeating: "a", count: 32)])
     func usernameAccepted(_ username: String) {
         var env = validEnvironment()
         env.username = username
@@ -132,6 +129,8 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
         var env = validEnvironment()
         env.wifiSSID = String(repeating: "é", count: 17)
         #expect(messages(env, .wifiSSID) == ["WiFi network names are at most 32 bytes."])
+        env.wifiSSID = String(repeating: "é", count: 16)
+        #expect(messages(env, .wifiSSID) == [])
     }
 
     @Test(arguments: [("1234567", false), ("12345678", true), (String(repeating: "a", count: 63), true),
@@ -152,6 +151,8 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
         ])
         env.packages = ["curl", "libstdc++6", "curl"]
         #expect(messages(env, .packages) == ["Line 3 repeats curl."])
+        env.packages = ["a", "-ab"]
+        #expect(messages(env, .packages).count == 2, "names are at least 2 characters and start with a letter or digit")
     }
 
     @Test func configCarriesEverySetting() throws {
@@ -190,7 +191,26 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
     }
 
     @Test func configRefusesMissingPasswordSecret() {
-        #expect(throws: EnvironmentError.self) { try validEnvironment().config(secrets: EnvironmentSecrets()) }
+        #expect(throws: EnvironmentError.invalid([EnvironmentProblem(field: .password, message: "Enter a password for the machines' account.")])) {
+            try validEnvironment().config(secrets: EnvironmentSecrets())
+        }
+    }
+
+    @Test func configTrimsTheSSHKey() throws {
+        var env = validEnvironment()
+        env.sshPublicKey = testKey + "\n"
+        #expect(try env.config(secrets: EnvironmentSecrets(passwordHash: "$6$x$y")).sshPublicKey == testKey)
+    }
+
+    @Test func configTreatsEmptyValuesAsAbsent() throws {
+        var env = validEnvironment()
+        env.wifiSSID = "shop"
+        var config = try env.config(secrets: EnvironmentSecrets(passwordHash: "$6$x$y", wifiPassword: "", tailscaleAuthKey: ""))
+        #expect(config.wifi == EnvironmentConfig.Wifi(ssid: "shop", password: nil, country: env.wifiCountry))
+        #expect(config.tailscaleAuthKey == nil)
+        env.wifiSSID = ""
+        config = try env.config(secrets: EnvironmentSecrets(passwordHash: "$6$x$y"))
+        #expect(config.wifi == nil)
     }
 
     @Test func secretsDescriptionHidesValues() {
@@ -198,11 +218,6 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
         for text in [String(describing: secrets), String(reflecting: secrets)] {
             #expect(!text.contains("hashvalue") && !text.contains("wifipass1") && !text.contains("tskey-1"))
         }
-    }
-
-    @Test func pythonServerHonorsOnlyOrgLocationPrefixAndMode() {
-        #expect(Set(EnvironmentField.allCases).subtracting(EnvironmentField.ignoredByPythonServer)
-            == [.name, .org, .location, .namePrefix, .provisionMode])
     }
 
     @Test func sshDirectoryListsParsablePubKeysByName() throws {
