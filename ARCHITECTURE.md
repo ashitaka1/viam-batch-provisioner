@@ -118,7 +118,7 @@ All under `http-server/machines/` unless noted. Every file the root watcher crea
 
 ## Boundaries
 
-- **Targets reach only the file server.** They know one `host:port`. nginx forwards exactly `POST /api/v1/install-reports` (16 KiB body limit) to the API at `host.docker.internal`; the rest of the API is unreachable from a target.
+- **Targets know only the file server's `host:port`.** nginx forwards exactly `POST /api/v1/install-reports` (16 KiB body limit) to the API at `host.docker.internal`. The API's own port is open to any host on the network, targets included; the split is two processes, not an access boundary.
 - **The API runs as the operator, unauthenticated, on `0.0.0.0`.** It assumes a trusted lab network. It skips `getfqdn()` at bind so startup never waits on reverse DNS.
 - **The org API key stays on the host.** Targets receive only their own `viam.json`.
 - **The pairing listener binds loopback and caps request bodies at 64 KiB.**
