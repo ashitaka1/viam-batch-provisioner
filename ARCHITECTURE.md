@@ -6,9 +6,9 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 
 ### Boot chains
 
-**x86 PXE.** UEFI PXE ROM → dnsmasq (proxy DHCP + TFTP) → GRUB → Ubuntu kernel + initrd over TFTP → installer downloads the ISO over HTTP → autoinstall → late-commands fetch hostname and credentials by MAC → first boot with viam-agent and Tailscale.
+**x86 PXE.** UEFI PXE ROM → dnsmasq (proxy DHCP + TFTP) → GRUB → Ubuntu HWE kernel + initrd over TFTP → installer downloads the ISO over HTTP → autoinstall → late-commands fetch hostname and credentials by MAC → first boot with viam-agent, and Tailscale when the server has a key.
 
-**x86 USB stick.** UEFI USB boot → GRUB on the stick → kernel + initrd from the stick → installer downloads the ISO from the `IP:port` in the stick's `grub.cfg` → autoinstall → late-commands read `viam_hostname=` from `/proc/cmdline` and fetch credentials from `/machines/by-name/<name>/` → first boot. Only the HTTP server and API run.
+**x86 USB stick.** UEFI USB boot → GRUB on the stick → HWE kernel + initrd from the stick → installer downloads the ISO from the `IP:port` in the stick's `grub.cfg` → autoinstall → late-commands read `viam_hostname=` from `/proc/cmdline` and fetch credentials from `/machines/by-name/<name>/` → first boot. Only the HTTP server and API run.
 
 **Raspberry Pi.** `flash-pi-sd.sh` writes the OS image, mounts the FAT32 boot partition and writes cloud-init `user-data`, `network-config` and `meta-data`. First boot configures the OS offline, then a systemd service does the network-dependent setup (packages, viam-agent, Tailscale).
 

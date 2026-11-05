@@ -136,14 +136,14 @@ The exact menu locations vary by vendor.
 
 ```
 Power on → UEFI PXE ROM → DHCP (dnsmasq proxy) → TFTP (GRUB) →
-Ubuntu kernel + initrd → ISO download over HTTP → Ubuntu autoinstall →
+Ubuntu HWE kernel + initrd → ISO download over HTTP → Ubuntu autoinstall →
 late-commands fetch hostname + credentials → first boot with all services
 ```
 
 ### USB boot chain (x86)
 
 ```
-Power on → UEFI USB boot → GRUB on the stick → kernel + initrd from the stick →
+Power on → UEFI USB boot → GRUB on the stick → HWE kernel + initrd from the stick →
 ISO download over HTTP (server IP baked into grub.cfg) → Ubuntu autoinstall →
 late-commands read viam_hostname=<name> from /proc/cmdline →
 fetch credentials from /machines/by-name/<name>/ → first boot
@@ -298,6 +298,8 @@ Installed automatically:
 | System76 Meerkat (CRARL579) | Intel, dual I226-V NICs | Fully validated |
 | Minisforum UM890 Pro | AMD Ryzen, dual Realtek 2.5GbE | Fully validated |
 | Advantech MIC-770 V3 | Intel Core i-series, dual Intel NICs (I219 + I210) | Fully validated |
+| ASUS NUC (BIOS GDPTL579) | Intel, dual I226-V NICs | Fully validated |
+| AAEON CEXD-INTRBL | Intel Core Ultra (Panther Lake), four I226-V NICs | Installs over PXE; port choice and a second disk are open ([#128](https://github.com/ashitaka1/viam-batch-provisioner/issues/128)) |
 | Raspberry Pi 5 | ARM64 | Fully validated |
 | Raspberry Pi 4 | ARM64 | Untested (should work) |
 
@@ -305,6 +307,7 @@ Installed automatically:
 
 - Intel BE200 WiFi (device 7740) on newer Meerkats has no firmware in Ubuntu 24.04, so WiFi doesn't come up ([#3](https://github.com/ashitaka1/viam-batch-provisioner/issues/3)).
 - The Minisforum UM890 Pro's BIOS ignores the boot order the installer sets; set NVMe above Network in its Fixed Boot Order by hand ([#4](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)).
+- The AAEON CEXD-INTRBL's BIOS also puts PXE back ahead of the disk, and its PXE ROM can take minutes to fetch GRUB. Set NVMe first and install through Save & Exit → Boot Override; a blank disk falls through to the network on its own ([#128](https://github.com/ashitaka1/viam-batch-provisioner/issues/128)).
 
 Open issues: https://github.com/ashitaka1/viam-batch-provisioner/issues
 
