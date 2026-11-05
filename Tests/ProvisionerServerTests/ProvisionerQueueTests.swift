@@ -49,22 +49,20 @@ private func outcome(_ results: [Schemas.ProvisionResult]) -> [String] {
 @Test func invalidItemRejectsWholeRequest() async throws {
     let (provisioner, _) = try makeProvisioner()
 
-    do {
-        _ = try await provisioner.provision([request("ok-1"), request("-bad")])
-        Issue.record("expected the request to be rejected")
-    } catch .invalid(_, let details) {
-        #expect(details.map(\.index) == [1])
-        #expect(details.map(\.field) == ["name"])
+    guard case .invalid(_, let details) = await failure({ try await provisioner.provision([request("ok-1"), request("-bad")]) }) else {
+        Issue.record("expected the request to be rejected as invalid")
+        return
     }
+    #expect(details.map(\.index) == [1])
+    #expect(details.map(\.field) == ["name"])
     #expect(try await provisioner.snapshot().entries.isEmpty)
 }
 
 @Test func emptyCredentialIDRejected() async throws {
     let (provisioner, _) = try makeProvisioner()
 
-    await #expect(throws: ProvisionerFailure.self) {
-        _ = try await provisioner.provision([request("m-1", credentials: .init(cloud: .init(id: "", secret: "s")))])
-    }
+    let result = await failure { try await provisioner.provision([request("m-1", credentials: .init(cloud: .init(id: "", secret: "s")))]) }
+    #expect(result?.kind == "invalid")
 }
 
 @Test func credentialsNeverOverwritten() async throws {
@@ -152,16 +150,38 @@ private func outcome(_ results: [Schemas.ProvisionResult]) -> [String] {
     await #expect(throws: ProvisionerFailure.notFound("nope")) { try await provisioner.remove("nope") }
 }
 
-@Test func invalidLookupName() async throws {
+@Test(arguments: ["../x", "a b", String(repeating: "a", count: 61)])
+func invalidLookupName(name: String) async throws {
     let (provisioner, _) = try makeProvisioner()
 
-    await #expect(throws: ProvisionerFailure.self) { try await provisioner.entry("../x") }
-    do {
-        _ = try await provisioner.entry(String(repeating: "a", count: 61))
-    } catch .invalidName {
-    } catch {
-        Issue.record("expected invalidName, got \(error)")
-    }
+    #expect(await failure { try await provisioner.entry(name) }?.kind == "invalidName")
+    #expect(await failure { try await provisioner.remove(name) }?.kind == "invalidName")
+}
+
+@Test func emptyRequestRejected() async throws {
+    let (provisioner, _) = try makeProvisioner()
+
+    #expect(await failure { try await provisioner.provision([]) }?.kind == "invalid")
+}
+
+@Test func requestSizeLimit() async throws {
+    let (provisioner, _) = try makeProvisioner()
+
+    #expect(await failure { try await provisioner.provision((0...500).map { request("big-\($0)") }) }?.kind == "invalid")
+    #expect(try await provisioner.provision((0..<500).map { request("big-\($0)") }).count == 500)
+}
+
+@Test func stagingFailureQueuesNothing() async throws {
+    let (provisioner, dir) = try makeProvisioner()
+    try FileManager.default.createDirectory(at: dir.credentialsRoot, withIntermediateDirectories: true)
+    try Data("in the way".utf8).write(to: dir.credentials("m-2"))
+
+    let result = await failure { try await provisioner.provision([request("m-1", credentials: creds("A")),
+                                                                  request("m-2", credentials: creds("B"))]) }
+
+    #expect(result?.kind == "internal")
+    #expect(try await provisioner.snapshot().entries.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: dir.credentials("m-1").path))
 }
 
 @Test func unreadableQueue() async throws {
@@ -170,11 +190,7 @@ private func outcome(_ results: [Schemas.ProvisionResult]) -> [String] {
     try Data("{".utf8).write(to: DataDirectory(root).queue)
     let (provisioner, _) = try makeProvisioner(root)
 
-    do {
-        _ = try await provisioner.snapshot()
-        Issue.record("expected queueUnreadable")
-    } catch .queueUnreadable {
-    }
+    #expect(await failure { try await provisioner.snapshot() }?.kind == "queueUnreadable")
     #expect(await provisioner.counts() == nil)
 }
 

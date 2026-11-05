@@ -7,7 +7,10 @@ import ProvisionerAPI
 import ServiceLifecycleTestKit
 import Testing
 
-private struct Timeout: Error {}
+private struct StreamTimedOut: Error, CustomStringConvertible {
+    let received: String
+    var description: String { "no matching frames within 5 s; received: \(received.debugDescription)" }
+}
 
 /// Reads the event stream at `query` until `done` holds for the text so far, or 5 seconds pass.
 private func readEvents(port: Int, query: String = "", lastEventID: Int? = nil,
@@ -16,18 +19,18 @@ private func readEvents(port: Int, query: String = "", lastEventID: Int? = nil,
     if let lastEventID { request.headers.add(name: "Last-Event-ID", value: "\(lastEventID)") }
     let response = try await HTTPClient.shared.execute(request, timeout: .seconds(5))
     #expect(response.status.code == 200)
+    let received = TextBox()
     return try await withThrowingTaskGroup(of: String.self) { group in
         group.addTask {
-            var text = ""
             for try await chunk in response.body {
-                text += String(buffer: chunk)
-                if done(text) { return text }
+                received.append(String(buffer: chunk))
+                if done(received.text) { return received.text }
             }
-            return text
+            return received.text
         }
         group.addTask {
             try await Task.sleep(for: .seconds(5))
-            throw Timeout()
+            throw StreamTimedOut(received: received.text)
         }
         let text = try await group.next()!
         group.cancelAll()
@@ -35,16 +38,18 @@ private func readEvents(port: Int, query: String = "", lastEventID: Int? = nil,
     }
 }
 
+private final class TextBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = ""
+    var text: String { lock.withLock { value } }
+    func append(_ more: String) { lock.withLock { value += more } }
+}
+
 /// Reports three progress stages for m-1, producing events 1 to 3.
 private func threeEvents(_ client: ProvisionerClient, _ port: Int) async throws {
     _ = try await client.provision([ProvisionRequest(name: "m-1")])
     for stage in ["late-commands", "identity", "tooling"] {
-        var request = HTTPClientRequest(url: "http://localhost:\(port)/api/v1/install-reports")
-        request.method = .POST
-        request.headers.add(name: "Content-Type", value: "application/json")
-        request.body = .bytes(ByteBuffer(string: #"{"kind":"progress","stage":"\#(stage)","name":"m-1"}"#))
-        let response = try await HTTPClient.shared.execute(request, timeout: .seconds(5))
-        #expect(response.status.code == 200)
+        #expect(try await postReport(port: port, #"{"kind":"progress","stage":"\#(stage)","name":"m-1"}"#) == 200)
     }
 }
 
@@ -63,11 +68,7 @@ private func ids(_ text: String) -> [String] {
         }
         #expect(entries.map(\.name) == ["m-1"])
 
-        var request = HTTPClientRequest(url: "http://localhost:\(test.port!)/api/v1/install-reports")
-        request.method = .POST
-        request.headers.add(name: "Content-Type", value: "application/json")
-        request.body = .bytes(ByteBuffer(string: #"{"kind":"progress","stage":"late-commands","name":"m-1"}"#))
-        _ = try await HTTPClient.shared.execute(request, timeout: .seconds(5))
+        try await postReport(port: test.port!, #"{"kind":"progress","stage":"late-commands","name":"m-1"}"#)
 
         guard case .event(let event, let inSnapshot) = await updates.next() else {
             Issue.record("expected an event after the snapshot")
@@ -191,6 +192,41 @@ private func pollStatus(port: Int, until: (UInt) -> Bool, within limit: Duration
 
         #expect(try await frames.next() == nil)
         try await poll(within: .seconds(2)) { released.isSet }
-        #expect(released.isSet)
+        #expect(released.isSet, "release not called within 2 s of graceful shutdown")
+    }
+}
+
+@Test func headerCursorWinsOverQuery() async throws {
+    try await withLiveServer { client, test, _ in
+        try await threeEvents(client, test.port!)
+
+        let text = try await readEvents(port: test.port!, query: "?last_event_id=0", lastEventID: 2) { ids($0).count >= 1 }
+
+        #expect(ids(text) == ["3"])
+    }
+}
+
+@Test func negativeCursorRejected() async throws {
+    try await withLiveServer { _, test, _ in
+        var request = HTTPClientRequest(url: "http://localhost:\(test.port!)/api/v1/events")
+        request.headers.add(name: "Last-Event-ID", value: "-1")
+        let response = try await HTTPClient.shared.execute(request, timeout: .seconds(5))
+        let body = try await response.body.collect(upTo: 1 << 16)
+
+        #expect(response.status.code == 400)
+        #expect(try JSONDecoder().decode(Schemas._Error.self, from: Data(buffer: body)).error.code == .invalidRequest)
+    }
+}
+
+@Test func failureAndCompletionFramesNameTheirType() async throws {
+    try await withLiveServer { client, test, _ in
+        _ = try await client.provision([ProvisionRequest(name: "m-1"), ProvisionRequest(name: "m-2")])
+        try await postReport(port: test.port!, #"{"kind":"progress","stage":"done","name":"m-1"}"#)
+        try await postReport(port: test.port!, #"{"kind":"failed","stage":"tooling","name":"m-2"}"#)
+
+        let text = try await readEvents(port: test.port!, lastEventID: 0) { ids($0).count >= 3 }
+
+        let names = text.split(separator: "\n").filter { $0.hasPrefix("event: ") }.map { String($0.dropFirst(7)) }
+        #expect(names == ["install-progress", "install-complete", "install-failed"])
     }
 }

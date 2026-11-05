@@ -55,13 +55,13 @@ private func backlogIDs(_ subscription: EventSubscription) -> [Int?] {
     #expect(backlogIDs(subscription) == [])
 }
 
-@Test func cancelStopsDelivery() async throws {
+@Test func cancelUnsubscribes() async throws {
     let provisioner = try await withEvents(1)
     let subscription = await provisioner.subscribe(after: nil)
+    #expect(await provisioner.subscriberCount == 1)
 
     subscription.cancel()
-    _ = try await provisioner.report(report(.progress, .tailscale, name: "m-1"))
 
-    var live = subscription.live.makeAsyncIterator()
-    #expect(await live.next() == nil)
+    try await poll(within: .seconds(2)) { await provisioner.subscriberCount == 0 }
+    #expect(await provisioner.subscriberCount == 0, "the fanout still holds a cancelled subscriber")
 }

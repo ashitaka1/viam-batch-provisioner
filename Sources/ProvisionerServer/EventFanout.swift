@@ -25,6 +25,8 @@ struct EventFanout {
         continuations[id] = nil
     }
 
+    var count: Int { continuations.count }
+
     func publish(_ event: Components.Schemas.MachineEvent) {
         for continuation in continuations.values { continuation.yield(event) }
     }

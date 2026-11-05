@@ -1,4 +1,7 @@
+import AsyncHTTPClient
 import Foundation
+import NIOCore
+import Testing
 import ProvisionerAPI
 @testable import ProvisionerServer
 
@@ -26,11 +29,11 @@ func eventSummary(_ provisioner: Provisioner, after id: Int = 0) async -> [Strin
 extension Schemas.MachineEvent {
     var summary: String {
         switch self {
-        case .installProgress(let e): "install-progress \(e.stage.rawValue)"
-        case .installFailed(let e): "install-failed \(e.stage.rawValue) \(e.source.rawValue): \(e.reason)"
-        case .installComplete(let e): "install-complete \(e.durationSeconds)"
+        case .installProgress(let e): "install-progress \(e.name) \(e.stage.rawValue)"
+        case .installFailed(let e): "install-failed \(e.name) \(e.stage.rawValue) \(e.source.rawValue): \(e.reason)"
+        case .installComplete(let e): "install-complete \(e.name) \(e.durationSeconds)"
         case .resync(let e): "resync \(e.latestId)"
-        default: "other"
+        default: "unexpected \(self)"
         }
     }
 }
@@ -44,9 +47,48 @@ final class TestFlag: @unchecked Sendable {
 }
 
 /// Waits until `condition` holds or `limit` passes.
-func poll(within limit: Duration, _ condition: () -> Bool) async throws {
+func poll(within limit: Duration, _ condition: () async -> Bool) async throws {
     let deadline = ContinuousClock.now + limit
-    while !condition() && ContinuousClock.now < deadline {
+    while await !condition() && ContinuousClock.now < deadline {
         try await Task.sleep(for: .milliseconds(10))
     }
+}
+
+/// The failure `body` throws, or nil when it succeeds.
+func failure<T>(_ body: () async throws -> T) async -> ProvisionerFailure? {
+    do {
+        _ = try await body()
+        return nil
+    } catch let error as ProvisionerFailure {
+        return error
+    } catch {
+        Issue.record("expected a ProvisionerFailure, got \(error)")
+        return nil
+    }
+}
+
+extension ProvisionerFailure {
+    /// The case name alone, for assertions that ignore the message.
+    var kind: String {
+        switch self {
+        case .invalid: "invalid"
+        case .invalidName: "invalidName"
+        case .notFound: "notFound"
+        case .alreadyAssigned: "alreadyAssigned"
+        case .queueUnreadable: "queueUnreadable"
+        case .internal: "internal"
+        }
+    }
+}
+
+/// Posts an install report to a live server and returns the HTTP status.
+@discardableResult
+func postReport(port: Int, _ json: String) async throws -> UInt {
+    var request = HTTPClientRequest(url: "http://localhost:\(port)/api/v1/install-reports")
+    request.method = .POST
+    request.headers.add(name: "Content-Type", value: "application/json")
+    request.body = .bytes(ByteBuffer(string: json))
+    let response = try await HTTPClient.shared.execute(request, timeout: .seconds(5))
+    _ = try await response.body.collect(upTo: 1 << 16)
+    return response.status.code
 }

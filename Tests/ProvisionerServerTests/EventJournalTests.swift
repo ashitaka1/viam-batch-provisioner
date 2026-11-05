@@ -49,3 +49,17 @@ private func progress(_ name: String) -> (Int) -> Components.Schemas.MachineEven
     let decoded = try WireCoding.decoder.decode(Components.Schemas.MachineEvent.self, from: Data(line.utf8))
     #expect(WireEvent(decoded) == .machine(.init(id: 1, timestamp: t0, name: "m-1", mac: nil, kind: .installProgress(stage: "tooling"))))
 }
+
+@Test func reopenSkipsGarbageAndRepeatedIDs() throws {
+    let url = try temporaryDirectory().appending(path: "events.jsonl")
+    let journal = try EventJournal(url: url, logger: testLogger)
+    for name in ["a", "b"] { _ = journal.append(progress(name)) }
+    let lines = try String(decoding: Data(contentsOf: url), as: UTF8.self).split(separator: "\n")
+    let tampered = [String(lines[0]), "not json", String(lines[0]), String(lines[1])].joined(separator: "\n") + "\n"
+    try Data(tampered.utf8).write(to: url)
+
+    let reopened = try EventJournal(url: url, logger: testLogger)
+
+    #expect(reopened.events(after: 0).map(\.id) == [1, 2])
+    #expect(reopened.append(progress("c"))?.id == 3)
+}

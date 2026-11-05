@@ -124,6 +124,8 @@ actor Provisioner {
         return EventSubscription(backlog: backlog, live: stream, cancel: { continuation.finish() })
     }
 
+    var subscriberCount: Int { fanout.count }
+
     func journalEvents(after id: Int) -> [Components.Schemas.MachineEvent] {
         journal.events(after: id)
     }

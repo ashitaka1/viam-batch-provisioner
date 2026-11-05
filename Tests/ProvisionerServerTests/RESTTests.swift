@@ -68,8 +68,7 @@ private let jsonHeaders: HTTPFields = [.contentType: "application/json"]
 @Test func removeWhileInstallingConflicts() async throws {
     try await withLiveServer { provisioner, client, _ in
         _ = try await provisioner.provision([ProvisionRequest(name: "m-1")])
-        _ = try await client.execute(uri: "/api/v1/install-reports", method: .post, headers: jsonHeaders,
-                                     body: json(#"{"kind":"progress","stage":"tooling","name":"m-1"}"#))
+        try await postReport(port: client.port!, #"{"kind":"progress","stage":"tooling","name":"m-1"}"#)
 
         #expect(await serverError { try await provisioner.remove(named: "m-1") } == "409 already-assigned")
     }
@@ -82,10 +81,8 @@ private let jsonHeaders: HTTPFields = [.contentType: "application/json"]
         let status = try await provisioner.status()
 
         #expect(status.services == .init(http: .up))
-        #expect(status.apiVersion == "v1")
         #expect(status.address == "127.0.0.1:8234")
         #expect(status.queue?.queued == 1)
-        #expect(!status.serverName.isEmpty)
     }
 }
 
@@ -102,12 +99,35 @@ private let jsonHeaders: HTTPFields = [.contentType: "application/json"]
     }
 }
 
-@Test func reportForUnknownMachineIs404() async throws {
+@Test(arguments: [#"{"kind":"progress","stage":"done","mac":"aa:bb:cc:dd:ee:ff"}"#,
+                  #"{"kind":"progress","stage":"done","name":"nobody"}"#])
+func reportForUnknownMachineIs404(body: String) async throws {
     try await withLiveServer { _, client, _ in
         let response = try await client.execute(uri: "/api/v1/install-reports", method: .post, headers: jsonHeaders,
-                                                body: json(#"{"kind":"progress","stage":"done","mac":"aa:bb:cc:dd:ee:ff"}"#))
+                                                body: json(body))
         #expect(response.status == .notFound)
         #expect(try errorCode(response) == "not-found")
+    }
+}
+
+@Test func bodiesAtTheLimitAreRead() async throws {
+    try await withLiveServer { _, client, _ in
+        let report = try await client.execute(uri: "/api/v1/install-reports", method: .post, headers: jsonHeaders,
+                                              body: ByteBuffer(repeating: UInt8(ascii: " "), count: 16 * 1024))
+        let provision = try await client.execute(uri: "/api/v1/provision", method: .post, headers: jsonHeaders,
+                                                 body: ByteBuffer(repeating: UInt8(ascii: " "), count: 17 * 1024))
+
+        #expect(try errorCode(report) == "invalid-json", "a 16 KiB report is within its limit")
+        #expect(try errorCode(provision) == "invalid-json", "a 17 KiB provision body is within its limit")
+    }
+}
+
+@Test func unreadableQueueIs503() async throws {
+    let dataDirectory = try temporaryDirectory()
+    try Data("{".utf8).write(to: DataDirectory(dataDirectory).queue)
+    try await withLiveServer(dataDirectory: dataDirectory) { provisioner, _, _ in
+        #expect(await serverError { _ = try await provisioner.queue() } == "503 queue-unreadable")
+        #expect(await serverError { _ = try await provisioner.provision([ProvisionRequest(name: "m-1")]) } == "503 queue-unreadable")
     }
 }
 

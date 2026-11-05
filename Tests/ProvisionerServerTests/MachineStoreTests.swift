@@ -56,16 +56,16 @@ func posixMode(_ url: URL) throws -> Int {
     try dir.prepare()
     try Data("{".utf8).write(to: dir.queue)
 
-    #expect(throws: StoreError.self) { try MachineStore(dir) }
     do {
         _ = try MachineStore(dir)
+        Issue.record("expected a corrupt queue to be rejected")
     } catch .queueUnreadable {
     } catch {
         Issue.record("expected queueUnreadable, got \(error)")
     }
 }
 
-@Test func atomicWriteLeavesNoTemp() throws {
+@Test func writesLeaveNoTempFiles() throws {
     let dir = DataDirectory(try temporaryDirectory())
     let store = try MachineStore(dir)
     try store.save(queue: [QueueRecord(name: "a", addedAt: t0)])
