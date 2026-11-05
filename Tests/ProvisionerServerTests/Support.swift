@@ -34,3 +34,19 @@ extension Schemas.MachineEvent {
         }
     }
 }
+
+final class TestFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
+}
+
+/// Waits until `condition` holds or `limit` passes.
+func poll(within limit: Duration, _ condition: () -> Bool) async throws {
+    let deadline = ContinuousClock.now + limit
+    while !condition() && ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+}
