@@ -8,9 +8,9 @@ import ProvisionerAPI
 import Testing
 
 /// A live server on an ephemeral port, its data directory, and a ProvisionerKit client for it.
-func withLiveServer(streamOptions: StreamOptions = .init(),
+func withLiveServer(dataDirectory: URL? = nil, streamOptions: StreamOptions = .init(),
                     _ body: @Sendable (ProvisionerClient, any TestClientProtocol, URL) async throws -> Void) async throws {
-    let dataDirectory = try temporaryDirectory()
+    let dataDirectory = try dataDirectory ?? temporaryDirectory()
     let files = try temporaryDirectory()
     let configuration = ServerConfiguration(port: 0, bind: "127.0.0.1", files: files, dataDirectory: dataDirectory,
                                             advertiseAddress: "127.0.0.1:8234")
