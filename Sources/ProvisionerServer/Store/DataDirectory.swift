@@ -26,7 +26,9 @@ struct DataDirectory: Sendable {
 }
 
 /// Writes `data` to a temporary file beside `url`, syncs it, renames it over
-/// `url`, then syncs the directory so the rename survives a power loss.
+/// `url`, then syncs the directory so the rename survives a power loss. The
+/// rename is the commit: a directory sync that fails after it doesn't fail the
+/// write, since callers roll back on failure and the new content is already live.
 func writeAtomically(_ data: Data, to url: URL, mode: Int = 0o644) throws {
     let fm = FileManager.default
     let directory = url.deletingLastPathComponent()
@@ -47,12 +49,12 @@ func writeAtomically(_ data: Data, to url: URL, mode: Int = 0o644) throws {
         try? fm.removeItem(at: temp)
         throw error
     }
-    try syncDirectory(directory)
+    syncDirectory(directory)
 }
 
-private func syncDirectory(_ directory: URL) throws {
+private func syncDirectory(_ directory: URL) {
     let descriptor = open(directory.path, O_RDONLY)
-    guard descriptor >= 0 else { throw StoreError.io("cannot open \(directory.path)") }
-    defer { close(descriptor) }
-    guard fsync(descriptor) == 0 else { throw StoreError.io("cannot sync \(directory.path)") }
+    guard descriptor >= 0 else { return }
+    fsync(descriptor)
+    close(descriptor)
 }
