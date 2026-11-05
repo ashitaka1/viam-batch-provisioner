@@ -53,7 +53,6 @@ ${PACKAGES}
     - curtin in-target -- systemctl disable bluetooth || true
     - curtin in-target -- systemctl disable cups || true
     - curtin in-target -- systemctl disable NetworkManager-wait-online.service || true
-    - curtin in-target -- systemctl disable systemd-networkd-wait-online.service || true
 
     # Set boot order: disk first. Attempted in-target during install (so the
     # post-install reboot already has the right order). If that fails — e.g.
@@ -131,6 +130,7 @@ ${PACKAGES}
             addresses:
               - 192.168.20.1/24
             dhcp4: false
+            optional: true
       NETPLAN
       fi
 
