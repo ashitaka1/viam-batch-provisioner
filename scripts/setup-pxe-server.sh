@@ -9,7 +9,14 @@ ISO_FILE="${REPO_ROOT}/ubuntu-24.04.4-live-server-amd64.iso"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-command -v 7z &>/dev/null || die "p7zip required. Install: brew install p7zip (macOS) or apt install p7zip-full (Linux)"
+if ! command -v 7z &>/dev/null; then
+    if [[ "$(uname -s)" == "Darwin" ]] && command -v brew &>/dev/null; then
+        echo "Installing p7zip..."
+        brew install p7zip
+    else
+        die "p7zip required. Install: brew install p7zip (macOS) or apt install p7zip-full (Linux)"
+    fi
+fi
 
 echo "=== PXE Server Setup ==="
 

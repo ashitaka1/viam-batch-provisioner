@@ -97,8 +97,8 @@ fi
 
 # Mode-specific — a missing one warns rather than blocking an operator who
 # doesn't use that mode.
-check 7z      p7zip        "ISO extraction (just setup)"           optional "x86 only"
-check dnsmasq dnsmasq      "PXE DHCP proxy + TFTP (just serve)"    optional "x86 only"
+check 7z      p7zip        "ISO extraction (just setup)"
+check dnsmasq dnsmasq      "PXE DHCP proxy + TFTP (just serve)"
 check xz      xz          "Pi image decompress (just flash / download-pi-image)" optional "Pi only"
 
 # envsubst is needed by build-config.sh and flash-usb.sh (template stamping)
