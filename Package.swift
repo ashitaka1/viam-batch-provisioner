@@ -7,6 +7,9 @@ let package = Package(
     products: [
         .library(name: "ProvisionerPXE", targets: ["ProvisionerPXE"]),
         .executable(name: "provisioner-pxe", targets: ["provisioner-pxe"]),
+        .library(name: "ProvisionerHelperXPC", targets: ["ProvisionerHelperXPC"]),
+        .executable(name: "ProvisionerHelper", targets: ["ProvisionerHelper"]),
+        .executable(name: "provisioner-helperctl", targets: ["provisioner-helperctl"]),
         .library(name: "ProvisionerAPI", targets: ["ProvisionerAPI"]),
         .library(name: "ProvisionerKit", targets: ["ProvisionerKit"]),
         .library(name: "ViamAPI", targets: ["ViamAPI"]),
@@ -46,6 +49,29 @@ let package = Package(
             dependencies: [
                 "ProvisionerPXE",
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+            ]
+        ),
+        .target(name: "ProvisionerHelperXPC"),
+        .target(
+            name: "ProvisionerHelperCore",
+            dependencies: ["ProvisionerHelperXPC", "ProvisionerPXE"]
+        ),
+        .executableTarget(
+            name: "ProvisionerHelper",
+            dependencies: ["ProvisionerHelperCore", "ProvisionerHelperXPC"]
+        ),
+        .executableTarget(
+            name: "provisioner-helperctl",
+            dependencies: ["ProvisionerHelperXPC"]
+        ),
+        .testTarget(
+            name: "ProvisionerHelperTests",
+            dependencies: [
+                "ProvisionerHelperCore",
+                "ProvisionerHelperXPC",
+                "ProvisionerPXE",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
             ]
