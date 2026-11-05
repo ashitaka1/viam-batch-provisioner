@@ -94,7 +94,7 @@ struct APIHandler: APIProtocol {
     }
 
     /// The responses every operation shares: 400s and the `default` 500.
-    private func failure<Output: FailureOutput>(_ error: ProvisionerFailure) -> Output {
+    func failure<Output: FailureOutput>(_ error: ProvisionerFailure) -> Output {
         switch error {
         case .invalid(let message, let details):
             return .badRequest(badRequest(.invalidRequest, message, details: details))

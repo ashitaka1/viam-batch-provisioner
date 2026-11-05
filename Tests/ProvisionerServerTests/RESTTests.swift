@@ -201,7 +201,8 @@ private func internalMessage(_ response: TestResponse) throws -> String {
     return error.message
 }
 
-@Test func internalFailuresAnswerWithAFixedSentence() async throws {
+@Test(.enabled(if: geteuid() != 0, "root ignores the read-only credentials directory"))
+func internalFailuresAnswerWithAFixedSentence() async throws {
     try await withLiveServer { _, client, dataDirectory in
         let credentialsRoot = DataDirectory(dataDirectory).credentialsRoot
         let staged = #"[{"name":"m-1","credentials":{"cloud":{"id":"a","secret":"s"}}}]"#
@@ -217,4 +218,24 @@ private func internalMessage(_ response: TestResponse) throws -> String {
         #expect(try internalMessage(remove) == "m-1 could not be removed")
         #expect(try internalMessage(stage) == "credentials could not be staged; nothing was queued")
     }
+}
+
+@Test func unexpectedFailureAnswersGenericallyAndIsLogged() throws {
+    let log = CapturedLog()
+    let directory = try temporaryDirectory()
+    let handler = APIHandler(
+        provisioner: try Provisioner(dataDirectory: DataDirectory(directory), logger: testLogger),
+        configuration: ServerConfiguration(port: 0, bind: "127.0.0.1", files: directory, dataDirectory: directory,
+                                           advertiseAddress: nil),
+        streamOptions: .init(), streams: StreamLimiter(), serverName: "test", logger: log.logger)
+
+    let output: Operations.GetQueueEntry.Output = handler.failure(.queueUnreadable("queue.json is torn"))
+
+    guard case .default(let status, let response) = output, case .json(let body) = response.body else {
+        Issue.record("expected the default response, got \(output)")
+        return
+    }
+    #expect(status == 500)
+    #expect(body.error.message == "internal error")
+    #expect(log.errors.contains { $0.contains("queue.json is torn") })
 }

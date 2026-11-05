@@ -223,3 +223,16 @@ func invalidLookupName(name: String) async throws {
 
     #expect(try await provisioner.entry("m-1").status == .queued)
 }
+
+@Test(.enabled(if: geteuid() != 0, "root ignores the read-only credentials directory"))
+func failedRemovalLogsTheUnderlyingError() async throws {
+    let log = CapturedLog()
+    let dir = DataDirectory(try temporaryDirectory())
+    let provisioner = try Provisioner(dataDirectory: dir, now: { t0 }, logger: log.logger)
+    _ = try await provisioner.provision([request("m-1", credentials: creds("A"))])
+    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.credentialsRoot.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.credentialsRoot.path) }
+
+    #expect(await failure { try await provisioner.remove("m-1") } == .internal("m-1 could not be removed"))
+    #expect(log.errors.contains { $0.hasPrefix("removing m-1 failed: ") && $0.count > "removing m-1 failed: ".count })
+}

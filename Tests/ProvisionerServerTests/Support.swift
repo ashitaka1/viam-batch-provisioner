@@ -1,5 +1,6 @@
 import AsyncHTTPClient
 import Foundation
+import Logging
 import NIOCore
 import Testing
 import ProvisionerAPI
@@ -91,4 +92,31 @@ func postReport(port: Int, _ json: String) async throws -> UInt {
     let response = try await HTTPClient.shared.execute(request, timeout: .seconds(5))
     _ = try await response.body.collect(upTo: 1 << 16)
     return response.status.code
+}
+
+/// A logger whose error messages the test reads back.
+final class CapturedLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var errors: [String] { lock.withLock { lines } }
+    fileprivate func append(_ line: String) { lock.withLock { lines.append(line) } }
+
+    var logger: Logger { Logger(label: "captured") { _ in CapturingHandler(log: self) } }
+}
+
+private struct CapturingHandler: LogHandler {
+    let log: CapturedLog
+    var metadata: Logger.Metadata = [:]
+    var logLevel: Logger.Level = .trace
+
+    subscript(metadataKey key: String) -> Logger.Metadata.Value? {
+        get { metadata[key] }
+        set { metadata[key] = newValue }
+    }
+
+    func log(level: Logger.Level, message: Logger.Message, metadata: Logger.Metadata?,
+             source: String, file: String, function: String, line: UInt) {
+        if level >= .error { log.append(message.description) }
+    }
 }

@@ -256,6 +256,23 @@ private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
     ids(frames.map { String(decoding: $0, as: UTF8.self) }.joined())
 }
 
+@Test func backlogLargerThanTheBufferIsSentWhole() async throws {
+    let (provisioner, _) = try makeProvisioner()
+    _ = try await provisioner.provision([request("m-1")])
+    for stage in Array(repeating: [Schemas.InstallStage.lateCommands, .identity], count: 5).joined() {
+        _ = try await provisioner.report(report(.progress, stage, name: "m-1"))
+    }
+    let released = TestFlag()
+
+    let body = sseBody(await provisioner.subscribe(after: 0), keepalive: .seconds(60), buffer: 4) { released.set() }
+
+    var frames: [ArraySlice<UInt8>] = []
+    var iterator = body.makeAsyncIterator()
+    for _ in 0..<11 { frames.append(try #require(try await iterator.next())) }
+    #expect(frameIDs(frames) == (1...10).map(String.init))
+    #expect(!released.isSet, "the backlog alone overflowed the buffer")
+}
+
 @Test func stalledClientIsDroppedOnceItsBufferFills() async throws {
     let (provisioner, _) = try makeProvisioner()
     _ = try await provisioner.provision([request("m-1")])
@@ -272,7 +289,10 @@ private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
     #expect(frameIDs(frames) == ["1", "2", "3", "4"], "the client resumes after the last id it received")
 }
 
-@Test func subscriptionThatHasEndedReleasesItsSlot() async throws {
+/// The ordering race this once guarded (a stream ending before its termination
+/// handler was set) doesn't reproduce on demand; the handler is now installed
+/// before the tasks that can end the stream start.
+@Test func endedSubscriptionEndsTheStreamAndReleasesItsSlot() async throws {
     let (live, continuation) = AsyncStream.makeStream(of: Schemas.MachineEvent.self)
     continuation.finish()
     let cancelled = TestFlag()
@@ -286,19 +306,21 @@ private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
     #expect(cancelled.isSet)
 }
 
-/// Events every 50 ms on a 300 ms keepalive leave no interval silent.
+/// Events every 100 ms on a 1 s keepalive leave no interval silent. The stream
+/// opens first, so the events arrive live across two keepalive intervals.
 @Test func eventsSuppressKeepalive() async throws {
-    try await withLiveServer(streamOptions: .init(keepalive: .milliseconds(300))) { client, test, _ in
+    try await withLiveServer(streamOptions: .init(keepalive: .seconds(1))) { client, test, _ in
         _ = try await client.provision([ProvisionRequest(name: "m-1")])
         let reporter = Task {
-            for stage in Array(repeating: ["late-commands", "identity"], count: 10).joined() {
+            try await Task.sleep(for: .milliseconds(100))
+            for stage in Array(repeating: ["late-commands", "identity"], count: 12).joined() {
                 try await postReport(port: test.port!, #"{"kind":"progress","stage":"\#(stage)","name":"m-1"}"#)
-                try await Task.sleep(for: .milliseconds(50))
+                try await Task.sleep(for: .milliseconds(100))
             }
         }
         defer { reporter.cancel() }
 
-        let text = try await readEvents(port: test.port!, lastEventID: 0) { ids($0).count >= 20 }
+        let text = try await readEvents(port: test.port!) { ids($0).count >= 24 }
 
         #expect(!text.contains(": keepalive"))
     }

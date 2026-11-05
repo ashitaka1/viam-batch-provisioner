@@ -35,7 +35,7 @@ private func scratchTree() throws -> (root: URL, files: URL) {
     return (root, files)
 }
 
-@Test(arguments: ["files", "files/data", "files/a/b"])
+@Test(arguments: ["files", "files/data", "files/a/b", "other/../files/data"])
 func dataDirectoryInsideFilesIsRefused(relative: String) throws {
     let (root, files) = try scratchTree()
     defer { try? FileManager.default.removeItem(at: root) }

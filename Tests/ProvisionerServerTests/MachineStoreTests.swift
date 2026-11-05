@@ -100,3 +100,16 @@ func posixMode(_ url: URL) throws -> Int {
     #expect(reopened.machine("bad") == nil)
     #expect(reopened.machine("good")?.stage == "tooling")
 }
+
+@Test func atomicWriteReplacesContentAndLeavesNoTemporaryFile() throws {
+    let directory = try temporaryDirectory()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let target = directory.appending(path: "queue.json")
+
+    try writeAtomically(Data("first".utf8), to: target, mode: 0o600)
+    try writeAtomically(Data("second".utf8), to: target, mode: 0o600)
+
+    #expect(try String(contentsOf: target, encoding: .utf8) == "second")
+    #expect(try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int == 0o600)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["queue.json"])
+}
