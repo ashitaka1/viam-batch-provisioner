@@ -16,11 +16,18 @@ public final class HelperService: NSObject, NSXPCListenerDelegate, Sendable {
 
     let files: TFTPRootFiles
     let host: PXEHost
+    private let acceptPeer: @Sendable (NSXPCConnection) -> Bool
     private let peers = OSAllocatedUnfairLock(uncheckedState: [ObjectIdentifier: NSXPCConnection]())
     static let log = Logger(subsystem: ProvisionerHelperXPC.machServiceName, category: "helper")
 
-    public init(root: URL, configure: @escaping Configure = HelperService.standardConfiguration) {
+    /// `acceptPeer` runs on each connection, after the listener's code signing requirement.
+    public init(
+        root: URL,
+        acceptPeer: @escaping @Sendable (NSXPCConnection) -> Bool = { _ in true },
+        configure: @escaping Configure = HelperService.standardConfiguration
+    ) {
         files = TFTPRootFiles(root: root)
+        self.acceptPeer = acceptPeer
         let peers = peers
         host = PXEHost(root: root, configure: configure) { event in
             guard let data = try? HelperEvent(event).encoded() else { return }
@@ -31,6 +38,10 @@ public final class HelperService: NSObject, NSXPCListenerDelegate, Sendable {
     }
 
     public func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        guard acceptPeer(connection) else {
+            Self.log.error("refused peer \(connection.processIdentifier) running as uid \(connection.effectiveUserIdentifier)")
+            return false
+        }
         connection.exportedInterface = ProvisionerHelperXPC.helperInterface()
         connection.exportedObject = HelperEndpoint(service: self)
         connection.remoteObjectInterface = ProvisionerHelperXPC.eventsInterface()

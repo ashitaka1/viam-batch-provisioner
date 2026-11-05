@@ -3,8 +3,10 @@ import os
 
 /// The helper's peer side: calls the helper and streams its events.
 ///
-/// Connects on first use. When launchd restarts the helper, the client asks it to serve again
-/// with the last `serve` arguments. After an invalidation, the next call connects afresh.
+/// Connects on first use. When launchd restarts the helper, the client reconnects, so `events`
+/// continues, and asks it to serve again with the arguments of the last `serve` that succeeded
+/// and wasn't followed by a failed `serve` or a `stopServing`. After an invalidation, the next
+/// call connects afresh.
 public final class HelperClient: Sendable {
     /// Every event from the helper, across reconnections. Finishes on `invalidate()`.
     public let events: AsyncStream<HelperEvent>
@@ -29,8 +31,14 @@ public final class HelperClient: Sendable {
     }
 
     public func serve(interface: String, bootFilename: String) async throws {
-        try await call { helper, reply in helper.serve(interface: interface, bootFilename: bootFilename, reply: reply) }
-        state.withLockUnchecked { $0.serving = (interface, bootFilename) }
+        do {
+            try await call { helper, reply in helper.serve(interface: interface, bootFilename: bootFilename, reply: reply) }
+            state.withLockUnchecked { $0.serving = (interface, bootFilename) }
+        } catch HelperError.serveFailed(let detail) {
+            // The helper stopped the old server before the new one failed.
+            state.withLockUnchecked { $0.serving = nil }
+            throw HelperError.serveFailed(detail)
+        }
     }
 
     public func stopServing() async throws {
@@ -108,12 +116,17 @@ public final class HelperClient: Sendable {
         return connection
     }
 
-    /// The helper restarted and serves nothing; ask again for what it served.
+    /// The helper restarted and serves nothing. Any message reconnects this client for events;
+    /// then ask again for what it served.
     private func resumeServing() {
-        guard let serving = state.withLockUnchecked({ $0.serving }) else { return }
+        let serving = state.withLockUnchecked { $0.serving }
         Task {
             do {
-                try await call { helper, reply in helper.serve(interface: serving.interface, bootFilename: serving.bootFilename, reply: reply) }
+                if let serving {
+                    try await call { helper, reply in helper.serve(interface: serving.interface, bootFilename: serving.bootFilename, reply: reply) }
+                } else {
+                    _ = try await servingInterface()
+                }
             } catch {
                 Logger(subsystem: ProvisionerHelperXPC.machServiceName, category: "client")
                     .error("serving again after the helper restarted failed: \(String(describing: error), privacy: .public)")

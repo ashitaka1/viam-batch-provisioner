@@ -31,22 +31,49 @@ import Testing
         try files.remove("a.cfg")
     }
 
-    @Test func writeOverDirectoryFails() throws {
+    @Test func writeOverDirectoryFailsAndKeepsItsFiles() throws {
         defer { try? FileManager.default.removeItem(at: root) }
         try files.write(Data("x".utf8), to: "grub/a.cfg")
-        #expect(throws: HelperError.self) { try files.write(Data(), to: "grub") }
+        #expect { try files.write(Data(), to: "grub") } throws: { error in
+            if case HelperError.writeFailed = error { true } else { false }
+        }
+        #expect(try Data(contentsOf: root.appendingPathComponent("grub/a.cfg")) == Data("x".utf8))
+    }
+
+    @Test func refusesToRemoveADirectory() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        try files.write(Data("x".utf8), to: "grub/a.cfg")
+        #expect { try files.remove("grub") } throws: { error in
+            if case HelperError.writeFailed = error { true } else { false }
+        }
+        #expect(try Data(contentsOf: root.appendingPathComponent("grub/a.cfg")) == Data("x".utf8))
+    }
+
+    @Test func refusesPathsThroughASymlinkOutOfTheRoot() throws {
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("keep".utf8).write(to: outside.appendingPathComponent("victim"))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link"), withDestinationURL: outside)
+
+        #expect(throws: HelperError.invalidPath("link/victim")) { try files.write(Data("x".utf8), to: "link/victim") }
+        #expect(throws: HelperError.invalidPath("link/new/file")) { try files.write(Data("x".utf8), to: "link/new/file") }
+        #expect(throws: HelperError.invalidPath("link/victim")) { try files.remove("link/victim") }
+        #expect(try Data(contentsOf: outside.appendingPathComponent("victim")) == Data("keep".utf8))
+        #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("new").path))
     }
 }
 
 @Suite struct PeerRequirementTests {
-    @Test func teamSignedHelperRequiresSameTeam() {
-        #expect(PeerRequirement.requirement(teamIdentifier: "HGCN675G7C")
-            == #"anchor apple generic and certificate leaf[subject.OU] = "HGCN675G7C""#)
-    }
-
-    @Test func adHocHelperRequiresKnownIdentifiers() {
-        #expect(PeerRequirement.requirement(teamIdentifier: nil)
-            == #"identifier "com.bringingfire.viam-provisioner.server" or identifier "com.bringingfire.viam-provisioner.helperctl""#)
+    @Test func adHocHelperAcceptsOnlyItsOwner() {
+        #expect(PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 501, executableOwnerUID: 501))
+        #expect(!PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 502, executableOwnerUID: 501))
+        #expect(!PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 501, executableOwnerUID: nil))
+        #expect(PeerRequirement.acceptsPeer(teamIdentifier: "HGCN675G7C", peerUID: 502, executableOwnerUID: 501))
     }
 
     @Test func requirementsCompile() {

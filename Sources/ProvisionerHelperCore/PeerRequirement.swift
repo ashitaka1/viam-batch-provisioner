@@ -13,6 +13,20 @@ public enum PeerRequirement {
         return ProvisionerHelperXPC.peerIdentifiers.map { #"identifier "\#($0)""# }.joined(separator: " or ")
     }
 
+    /// Whether a peer may connect beyond the code signing requirement. An ad-hoc identifier proves
+    /// nothing, so an ad-hoc helper also requires the peer to run as the user who owns the helper's
+    /// executable: the developer who built and registered it.
+    public static func acceptsPeer(teamIdentifier: String?, peerUID: uid_t, executableOwnerUID: uid_t?) -> Bool {
+        teamIdentifier != nil || peerUID == executableOwnerUID
+    }
+
+    /// The owner of this process's executable file.
+    public static func executableOwnerUID() -> uid_t? {
+        guard let path = Bundle.main.executablePath, let owner = try? FileManager.default.attributesOfItem(atPath: path)[.ownerAccountID] as? NSNumber
+        else { return nil }
+        return owner.uint32Value
+    }
+
     /// The team that signed this process, nil when it is ad hoc or unsigned.
     public static func currentTeamIdentifier() -> String? {
         var code: SecCode?

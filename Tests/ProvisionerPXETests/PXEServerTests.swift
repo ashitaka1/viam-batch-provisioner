@@ -164,6 +164,31 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
         }
     }
 
+    @Test func learnsMACFromARequestOnThePXEPort() async throws {
+        try await withHarness { harness in
+            try await harness.client.send(pxeDiscover(messageType: 3, ciaddr: 0x7F00_0001).encoded(), to: harness.ports.pxe)
+            _ = try #require(await harness.client.receive(), "no ack")
+
+            _ = try await harness.client.fetch("grubx64.efi", port: harness.ports.tftp)
+            #expect(try #require(await harness.delivered.next()).mac == MACAddress(bytes: fixtureMAC))
+        }
+    }
+
+    @Test func reportsATransferOnceWhenTheLastAckRepeats() async throws {
+        try await withHarness { harness in
+            try await harness.client.send(readRequest("grubx64.efi", options: [TFTPOption(name: "blksize", value: "8192")]), to: harness.ports.tftp)
+            let optionAck = try #require(await harness.client.receive())
+            try await harness.client.send(TFTPPacket.ack(block: 0).encoded(), to: optionAck.remoteAddress)
+            // 4096 bytes in 8192-byte blocks: one short DATA block ends the transfer.
+            _ = try #require(await harness.client.receive())
+            try await harness.client.send(TFTPPacket.ack(block: 1).encoded(), to: optionAck.remoteAddress)
+            try await harness.client.send(TFTPPacket.ack(block: 1).encoded(), to: optionAck.remoteAddress)
+
+            #expect(await harness.delivered.next() != nil, "no fileSent event")
+            #expect(await harness.delivered.next(timeout: .milliseconds(300)) == nil, "reported one transfer twice")
+        }
+    }
+
     @Test func reportsFileSentWithoutMACForUnknownAddress() async throws {
         try await withHarness { harness in
             _ = try await harness.client.fetch("/vmlinuz", port: harness.ports.tftp)

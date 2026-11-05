@@ -116,7 +116,7 @@ All under `http-server/machines/` unless noted. Every file the root watcher crea
 - **The Swift PXE server serves only inside its TFTP root.** `TFTPRoot` rejects paths that resolve outside it. Block size is capped by the interface MTU, and concurrent transfers by `maxTransfers`; a request beyond the cap gets a TFTP error.
 - **A `PXEServer` starts once and stops once.** `start()` throws on a server that is starting, running or stopped, so no second set of sockets replaces the first; a failed bind closes the sockets already bound, and a `stop()` during `start()` returns only after that start has closed them. `events` keeps only the newest `eventBufferLimit` unread events, since every discover, firmware retries included, yields one.
 - **The helper binds nothing until a peer asks.** It stores no interface or boot file; `HelperClient` asks again after a restart (`docs/decisions/0045-helper-serves-on-request.md`).
-- **The helper writes only inside its TFTP root.** `TFTPRootFiles` refuses absolute paths and empty, `.` or `..` components, and the helper creates no symlinks.
+- **The helper writes only inside its TFTP root.** `TFTPRootFiles` refuses absolute paths, empty, `.` or `..` components, and paths whose directory resolves outside the root through a symlink. It removes only regular files.
 - **The Swift DHCP sockets bind 0.0.0.0 pinned to the interface.** They use `IP_BOUND_IF`, because on macOS a socket bound to a unicast address never receives broadcast discovers. See `docs/decisions/0028-bind-dhcp-to-interface.md`.
 - **One process owns the Swift server's state.** The `Provisioner` actor reads and writes its data directory; nothing else does, so it takes no file locks. A record is saved before its event is journaled, and a journal failure is logged and loses only the event. A newly queued name starts with no record and no staged files; anything left under its key is cleared first. An unreadable machine record is logged and skipped, and an append after a torn journal line starts a new line.
 - **Swift server status derives from the machine record:** `failed`, then `installed`, then `installing` once any report arrived, else `queued`. `done` completes an install. Removal is refused only while `installing`.
@@ -138,7 +138,8 @@ All under `http-server/machines/` unless noted. Every file the root watcher crea
 - **The API runs as the operator, unauthenticated, on `0.0.0.0`.** It assumes a trusted lab network. It skips `getfqdn()` at bind so startup never waits on reverse DNS.
 - **The org API key stays on the host.** Targets receive only their own `viam.json`.
 - **The pairing listener binds loopback and caps request bodies at 64 KiB.**
-- **The helper accepts XPC peers by code signature.** A team-signed helper requires the peer's team; an ad-hoc one, the identifiers `com.bringingfire.viam-provisioner.server` and `.helperctl`, which any ad-hoc binary can claim. `provisioner-helperctl` passes either check, so every local user of a server Mac can drive the helper.
+- **The helper accepts XPC peers by code signature.** A team-signed helper requires the peer's team, and `provisioner-helperctl` passes it, so every local user of a server Mac can drive the helper. An ad-hoc helper requires the identifiers `com.bringingfire.viam-provisioner.server` or `.helperctl`, which any ad-hoc binary can claim, and a peer running as the user who owns the helper's executable.
+- **The helper's TFTP root is root's alone.** Running as root, it refuses to start on a root owned by another user or writable by group or others; writes check the resolved directory before creating anything.
 - **Under `just serve-usb` no watcher runs.** The API appends installer reports to the journal itself.
 
 ## API

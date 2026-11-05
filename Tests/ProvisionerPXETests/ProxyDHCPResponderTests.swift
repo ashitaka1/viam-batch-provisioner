@@ -45,6 +45,19 @@ import Testing
     @Test func learnsLeaseFromClientAddress() throws {
         let lease = try #require(responder.lease(in: pxeDiscover(messageType: 3, ciaddr: 0xC0A8_0743)))
         #expect(lease.address == 0xC0A8_0743)
+        #expect(lease.mac == MACAddress(bytes: fixtureMAC))
+    }
+
+    @Test func requestedAddressWinsOverClientAddress() throws {
+        let request = pxeDiscover(messageType: 3, ciaddr: 0xC0A8_0743, requestedAddress: 0xC0A8_0742)
+        #expect(try #require(responder.lease(in: request)).address == 0xC0A8_0742)
+    }
+
+    @Test func noLeaseFromMalformedOrRelayedRequest() {
+        var malformed = pxeDiscover(messageType: 3)
+        malformed.options.append(DHCPOption(code: 50, data: [192, 168, 7]))
+        #expect(responder.lease(in: malformed) == nil, "a 3-byte option 50")
+        #expect(responder.lease(in: pxeDiscover(messageType: 3, giaddr: 0x0A00_0001, requestedAddress: 0xC0A8_0742)) == nil, "a relayed request")
     }
 
     @Test func noLeaseWithoutAddressOrFromDiscover() {

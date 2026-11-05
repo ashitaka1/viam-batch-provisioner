@@ -27,7 +27,8 @@ enum HelperDaemonCommand {
         do {
             switch action {
             case "register":
-                try service.register()
+                // register() throws "Operation not permitted" when the daemon awaits approval.
+                do { try service.register() } catch where service.status == .requiresApproval {}
                 if service.status == .requiresApproval {
                     SMAppService.openSystemSettingsLoginItems()
                 }

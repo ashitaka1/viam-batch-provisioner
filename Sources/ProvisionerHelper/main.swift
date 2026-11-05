@@ -27,9 +27,23 @@ do {
     exit(1)
 }
 
-let service = HelperService(root: root)
+// As root, refuse a root that another user could swap or fill: it must be root's and writable by root alone.
+if getuid() == 0 {
+    var status = stat()
+    let resolved = root.resolvingSymlinksInPath().path
+    guard stat(resolved, &status) == 0, status.st_uid == 0, status.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
+        FileHandle.standardError.write(Data("ProvisionerHelper: \(resolved) must be owned by root and not group- or world-writable\n".utf8))
+        exit(1)
+    }
+}
+
+let team = PeerRequirement.currentTeamIdentifier()
+let owner = PeerRequirement.executableOwnerUID()
+let service = HelperService(root: root, acceptPeer: { connection in
+    PeerRequirement.acceptsPeer(teamIdentifier: team, peerUID: connection.effectiveUserIdentifier, executableOwnerUID: owner)
+})
 let listener = NSXPCListener(machServiceName: ProvisionerHelperXPC.machServiceName)
-listener.setConnectionCodeSigningRequirement(PeerRequirement.requirement(teamIdentifier: PeerRequirement.currentTeamIdentifier()))
+listener.setConnectionCodeSigningRequirement(PeerRequirement.requirement(teamIdentifier: team))
 listener.delegate = service
 listener.resume()
 
