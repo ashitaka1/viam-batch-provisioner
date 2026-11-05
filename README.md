@@ -124,8 +124,10 @@ labels it on disk. To flash one stick: `just flash-usb /dev/disk5 my-machine-1`.
 Each x86 machine model needs a one-time BIOS configuration with a monitor attached:
 
 1. **Enable PXE/Network Boot** — look for "UEFI PXE" or "Network Stack"
-2. **Set Network as first boot option** (temporary — the installer resets this to disk-first)
+2. **Set the boot order to disk, USB, then network** — a blank disk falls through to a USB stick or PXE, and an installed machine boots its disk
 3. **Set "Restore on AC Power Loss" to Power On** — so machines boot when plugged in
+
+A machine that already has an OS on its disk needs one network boot: the boot-menu key at power-on, or `sudo efibootmgr --bootnext <PXE entry>` from its running OS.
 4. **Disable Secure Boot** — if the machine rejects the GRUB bootloader
 
 Keys, menu paths and quirks for each tested model are in [docs/hardware.md](docs/hardware.md).

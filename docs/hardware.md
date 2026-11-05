@@ -7,9 +7,8 @@ Per-model preparation for x86 targets. Each model needs this once, with a monito
 - [ ] Note the BIOS version; update only if this page lists a newer validated one.
 - [ ] Enable UEFI network boot (PXE over IPv4). Save and reboot: most firmware lists the PXE entry only after that.
 - [ ] Disable Secure Boot. The PXE chain serves GRUB without shim ([#129](https://github.com/ashitaka1/viam-batch-provisioner/issues/129)).
-- [ ] Choose how it reaches PXE:
-  - **Unattended:** network first in the boot order, and Restore on AC Power Loss set to Power On. Plugging the machine in starts the install; the installer then puts the disk first.
-  - **At the keyboard:** leave the boot order alone and pick the PXE entry from the one-time boot menu or the network-boot key.
+- [ ] Boot order: disk, USB, then network, with Restore on AC Power Loss set to Power On. A machine with a blank disk installs from a stick or over PXE when plugged in; an installed machine boots its disk.
+- [ ] A machine that arrives with an OS installed: boot the network once from the boot menu.
 - [ ] Wake-on-LAN, where offered: Power On – Normal Boot.
 - [ ] Cable the onboard port listed below to the serving network. It becomes the uplink; the next `enp*` port becomes the robot network.
 - [ ] Record the cabled port's MAC. The queue identifies the machine by it.
@@ -87,13 +86,12 @@ Installs over PXE on the HWE kernel. Port pinning and a second SSD are open in [
 |---|---|
 | BIOS validated | R1.8 (CRBLAM18), 07/31/2026, AMI Aptio 2.22.1299 |
 | BIOS setup | Esc |
-| Boot menu | — |
+| Boot menu | F7 |
 | Power button | none; it powers on when plugged in |
 | NICs | 4 × I226-V; PXE on two only: PCI 1c.0 and 1c.5 |
 | Port to cable | a PXE-capable port; validated on PCI 1c.0, which becomes `enp2s0` |
 | Install time | 10.6 min from PXE to `done` |
 
-- Boot order: NVMe first. The firmware puts PXE back ahead of the disk after the installer sets disk-first, and its PXE ROM can take over a minute to fetch GRUB, so network-first slows every reboot.
-- A blank NVMe falls through to the network, so a new unit installs when plugged in. To reinstall, use `efibootmgr --bootnext` from the running OS.
+- The firmware puts PXE back ahead of the disk after the installer sets disk-first, and its PXE ROM can take over a minute to fetch GRUB. Set the boot order by hand.
 - After install: `enp2s0` uplink, `enp3s0` robot network, `enp4s0` and `enp5s0` unmanaged.
 - Kernel: the installer boots 6.17 HWE; the installed system runs the current HWE kernel (7.0 as of 2026-11).
