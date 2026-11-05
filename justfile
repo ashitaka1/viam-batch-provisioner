@@ -18,7 +18,7 @@ serve:
         echo "The always-on daemons are installed. Use 'just daemon-status', or 'just stop-daemon' before 'just serve'." >&2
         exit 1
     fi
-    mkdir -p logs
+    mkdir -p logs http-server/machines
     cleanup() {
         echo ""
         echo "Shutting down..."
@@ -72,7 +72,7 @@ serve-daemon:
     set -euo pipefail
     echo "Generating autoinstall config..."
     ./scripts/build-config.sh
-    mkdir -p logs
+    mkdir -p logs http-server/machines
     echo ""
     echo "Starting HTTP server..."
     API_PORT="$(./scripts/api-service.sh port)"  # nginx forwards installer reports to it
@@ -142,7 +142,7 @@ api:
 dhcp:
     #!/usr/bin/env bash
     set -euo pipefail
-    mkdir -p logs
+    mkdir -p logs http-server/machines
     sudo dnsmasq {{dnsmasq_args}} --dhcp-range="$(./scripts/pxe-subnet.sh)" --no-daemon 2>&1 | grep -v '^dnsmasq-dhcp'
 
 # Start HTTP server only (Docker)
