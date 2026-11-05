@@ -8,6 +8,8 @@ struct ViamProvisionerApp: App {
     @State private var session: ViamSession
     @State private var organizations: OrganizationsModel
     @State private var environments: EnvironmentsModel
+    @State private var servers = ServerSelection()
+    @State private var history = BatchHistory()
 
     init() {
         ImportEnvironmentCommand.runIfRequested()
@@ -31,10 +33,12 @@ struct ViamProvisionerApp: App {
 
     var body: some Scene {
         Window("Viam Provisioner", id: "main") {
-            MainWindow(session: session, organizations: organizations, environments: environments)
+            MainWindow(session: session, organizations: organizations, environments: environments,
+                       servers: servers, history: history)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
                     environments.load()
+                    history.load()
                     await session.load()
                 }
                 .onChange(of: session.state) { _, state in

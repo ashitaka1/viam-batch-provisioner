@@ -1,21 +1,31 @@
 import ProvisionerKit
 import SwiftUI
 
-/// The main window: environments in the sidebar, the selected one's editor in
-/// the detail pane. Queue and History join the sidebar with #38.
+/// The main window: the queue, the batch history and the environments in the
+/// sidebar; the selected one in the detail pane.
 struct MainWindow: View {
     let session: ViamSession
     let organizations: OrganizationsModel
     let environments: EnvironmentsModel
+    let servers: ServerSelection
+    let history: BatchHistory
 
-    @SceneStorage("selectedEnvironment") private var selectedID: String?
+    @SceneStorage("sidebarSelection") private var selectedItem: String?
+    @State private var queue: QueueModel?
+    @State private var provisioning: ProvisionerKit.Environment?
     @State private var renamingID: UUID?
     @State private var deleting: ProvisionerKit.Environment?
     @State private var failure: String?
     @SwiftUI.Environment(\.undoManager) private var undoManager
 
+    private var sidebarSelection: Binding<SidebarItem?> {
+        Binding(get: { selectedItem.flatMap(SidebarItem.init(storage:)) }, set: { selectedItem = $0?.storage })
+    }
+
+    /// The selected environment's ID; setting it selects that environment.
     private var selection: Binding<UUID?> {
-        Binding(get: { selectedID.flatMap(UUID.init(uuidString:)) }, set: { selectedID = $0?.uuidString })
+        Binding(get: { sidebarSelection.wrappedValue?.environmentID },
+                set: { sidebarSelection.wrappedValue = $0.map(SidebarItem.environment) })
     }
 
     private var selected: ProvisionerKit.Environment? {
@@ -25,7 +35,7 @@ struct MainWindow: View {
     var body: some View {
         NavigationSplitView {
             EnvironmentSidebar(
-                environments: environments, selection: selection, renamingID: $renamingID,
+                environments: environments, queue: queue, selection: sidebarSelection, renamingID: $renamingID,
                 create: { create() }, duplicate: duplicate, delete: { deleting = $0 }, failure: $failure)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
@@ -42,9 +52,40 @@ struct MainWindow: View {
                 detail.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle(selected?.name ?? "Viam Provisioner")
+        .navigationTitle(title)
         .toolbar {
+            if let environment = selected {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { provisioning = environment } label: { Label("Provision…", systemImage: "play.fill") }
+                        .help("Provision a batch of machines from \(environment.name)")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) { ServerPicker(servers: servers, queue: queue) }
             ToolbarItem(placement: .primaryAction) { AccountStatus(session: session) }
+        }
+        .task {
+            // Browsing fails until Local Network access is granted; keep trying.
+            while !Task.isCancelled {
+                await servers.browse()
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+        .task(id: servers.selected) {
+            guard let server = servers.selected else {
+                queue = nil
+                return
+            }
+            let model = QueueModel(serverName: server.name, source: ProvisionerClient(baseURL: server.baseURL))
+            queue = model
+            await model.run()
+        }
+        .sheet(item: $provisioning) { environment in
+            ProvisionSheet(environment: environment, environments: environments, servers: servers, history: history,
+                           refreshQueue: { server in
+                               if let queue, queue.serverName == server.name { await queue.refresh() }
+                           }) {
+                sidebarSelection.wrappedValue = .queue
+            }
         }
         .focusedSceneValue(\.environmentActions, EnvironmentActions(
             create: { create() },
@@ -66,8 +107,20 @@ struct MainWindow: View {
         }
     }
 
+    private var title: String {
+        switch sidebarSelection.wrappedValue {
+        case .queue: queue.map { "Queue on \($0.serverName)" } ?? "Queue"
+        case .history: "History"
+        case .environment, nil: selected?.name ?? "Viam Provisioner"
+        }
+    }
+
     @ViewBuilder private var detail: some View {
-        if let environment = selected {
+        if sidebarSelection.wrappedValue == .queue {
+            QueueView(servers: servers, queue: queue)
+        } else if sidebarSelection.wrappedValue == .history {
+            HistoryView(history: history, queue: queue)
+        } else if let environment = selected {
             EnvironmentEditor(session: session, organizations: organizations, environments: environments, environment: environment)
                 .id(environment.id)
         } else if environments.environments.isEmpty && environments.loadError == nil {

@@ -34,6 +34,8 @@ For Viam `full` mode:
 
 The macOS app signs in to Viam through the Viam CLI's login, so it needs the CLI too. Its **Sign in to Viam** button runs `viam login` in the browser and shows the code to match on Viam's device-login page.
 
+The app provisions into a running server. Choose the server from the toolbar: servers on the network appear by name (allow Local Network access when macOS asks), and **Connect to Address…** takes a host and the API port (8235). Select an environment and click **Provision…** to queue a batch: in full mode the app creates each machine in Viam and sends its credentials; agent and OS-only batches send names only. **Queue** shows each machine live, from waiting through installed or failed, with its MAC, install stage, times and failure reason; **History** lists the batches provisioned from this Mac. The Python server installs from `config/site.env`, not from the environment's account, network and package settings.
+
 Run `just doctor` at any time to verify all of the above are installed. The
 setup wizard runs the same check before prompting, and creates the Python
 venv with `viam-sdk` for you when you choose `full` mode.

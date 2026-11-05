@@ -1,9 +1,39 @@
 import ProvisionerKit
 import SwiftUI
 
+/// What the sidebar selects.
+enum SidebarItem: Hashable {
+    case queue
+    case history
+    case environment(UUID)
+
+    init?(storage: String) {
+        switch storage {
+        case "queue": self = .queue
+        case "history": self = .history
+        default:
+            guard let id = UUID(uuidString: storage) else { return nil }
+            self = .environment(id)
+        }
+    }
+
+    var storage: String {
+        switch self {
+        case .queue: "queue"
+        case .history: "history"
+        case .environment(let id): id.uuidString
+        }
+    }
+
+    var environmentID: UUID? {
+        if case .environment(let id) = self { id } else { nil }
+    }
+}
+
 struct EnvironmentSidebar: View {
     let environments: EnvironmentsModel
-    @Binding var selection: UUID?
+    let queue: QueueModel?
+    @Binding var selection: SidebarItem?
     @Binding var renamingID: UUID?
     let create: () -> Void
     let duplicate: (ProvisionerKit.Environment) -> Void
@@ -13,29 +43,36 @@ struct EnvironmentSidebar: View {
 
     var body: some View {
         List(selection: $selection) {
+            Section("Provisioning") {
+                Label("Queue", systemImage: "list.bullet.rectangle")
+                    .badge(queue.map { $0.counts.installing + $0.counts.waiting } ?? 0)
+                    .tag(SidebarItem.queue)
+                Label("History", systemImage: "clock")
+                    .tag(SidebarItem.history)
+            }
             Section("Environments") {
                 ForEach(environments.environments) { environment in
                     EnvironmentRow(
                         environment: environment, problems: environments.problems(for: environment),
                         renaming: Binding(get: { renamingID == environment.id }, set: { if !$0 { renamingID = nil } }),
                         rename: { try environments.rename(id: environment.id, to: $0) })
-                        .tag(environment.id)
+                        .tag(SidebarItem.environment(environment.id))
                 }
             }
         }
         .focused($listFocused)
         .focusedSceneValue(\.sidebarFocused, listFocused)
-        .contextMenu(forSelectionType: UUID.self) { ids in
+        .contextMenu(forSelectionType: SidebarItem.self) { items in
             Button("New Environment") { create() }
-            if let id = ids.first, let environment = environments.environments.first(where: { $0.id == id }) {
+            if let id = items.first?.environmentID, let environment = environments.environments.first(where: { $0.id == id }) {
                 Button("Duplicate") { duplicate(environment) }
                 Button("Rename") { renamingID = id }
                 Divider()
                 Button("Delete…") { delete(environment) }
             }
-        } primaryAction: { ids in
-            // Double-click or Return on a row renames it.
-            renamingID = ids.first
+        } primaryAction: { items in
+            // Double-click or Return on an environment renames it.
+            renamingID = items.first?.environmentID
         }
         .safeAreaInset(edge: .bottom) {
             HStack {

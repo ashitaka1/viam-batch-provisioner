@@ -154,6 +154,32 @@ public final class EnvironmentsModel {
         }
     }
 
+    // MARK: Provisioning
+
+    public struct ProvisioningSettings: Sendable {
+        public var config: EnvironmentConfig
+        /// The environment's org, in full mode.
+        public var fleet: (any ViamFleet)?
+    }
+
+    /// What a batch is provisioned with. Throws every problem the environment
+    /// has, its secrets and org included.
+    public func provisioningSettings(id: UUID) throws -> ProvisioningSettings {
+        let environment = try stored(id)
+        let secrets = try store.secrets(id: id)
+        var problems = self.problems(for: environment)
+        let config: EnvironmentConfig?
+        do {
+            config = try environment.config(secrets: secrets)
+        } catch .invalid(let more) {
+            problems += more.filter { !problems.contains($0) }
+            config = nil
+        }
+        guard let config, problems.isEmpty else { throw EnvironmentError.invalid(problems) }
+        let fleet = environment.provisionMode == .full ? environment.orgID.map { self.fleet($0) } : nil
+        return ProvisioningSettings(config: config, fleet: fleet)
+    }
+
     // MARK: Problems and orgs
 
     /// Every reason the environment can't provision: its own rules, its secrets

@@ -358,4 +358,46 @@ private final class Harness {
         #expect(model.environments.isEmpty)
         #expect(model.loadError == "Couldn't read the environments in /tmp/environments.json: bad")
     }
+
+    @Test func provisioningSettingsCarryTheSecretsAndTheOrgsFleet() throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop")
+        shop.locationID = "loc-1"
+        shop.sshPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl test"
+        try h.model.update(shop)
+        try h.model.setPassword("hunter22", id: shop.id)
+
+        let settings = try h.model.provisioningSettings(id: shop.id)
+
+        #expect(settings.config.passwordHash.hasPrefix("$6$"))
+        #expect(settings.fleet != nil)
+        #expect(h.fleetOrgs.withLock { $0 } == ["org-1"])
+    }
+
+    @Test func provisioningSettingsOutsideFullModeNeedNoOrg() throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop", mode: .osOnly)
+        shop.sshPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl test"
+        try h.model.update(shop)
+        try h.model.setPassword("hunter22", id: shop.id)
+        h.orgs = .signedOut
+
+        let settings = try h.model.provisioningSettings(id: shop.id)
+
+        #expect(settings.fleet == nil)
+    }
+
+    @Test func provisioningSettingsRefuseAnEnvironmentWithProblems() throws {
+        let h = Harness()
+        let shop = try h.model.create(name: "Shop")
+        h.orgs = .signedOut
+
+        #expect {
+            try h.model.provisioningSettings(id: shop.id)
+        } throws: { error in
+            guard case EnvironmentError.invalid(let problems) = error else { return false }
+            return problems.contains(EnvironmentProblem(field: .org, message: "Sign in to Viam to use Acme."))
+                && problems.contains { $0.field == .password }
+        }
+    }
 }

@@ -20,6 +20,12 @@
 	<string>14.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Viam Provisioner finds provisioning servers on your network and follows their install queue.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_viam-provisioner._tcp</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
