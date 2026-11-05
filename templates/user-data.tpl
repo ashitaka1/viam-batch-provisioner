@@ -17,6 +17,9 @@ autoinstall:
     authorized-keys:
       - "${SSH_PUBLIC_KEY}"
 
+  kernel:
+    flavor: hwe
+
   storage:
     layout:
       name: lvm

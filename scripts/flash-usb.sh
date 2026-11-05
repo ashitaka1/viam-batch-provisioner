@@ -52,8 +52,8 @@ PROVISION_MODE="${PROVISION_MODE:-os-only}"
 HTTP_PORT="${HTTP_PORT:-8234}"
 
 [[ -f "${NETBOOT_DIR}/grubx64.efi" ]] || die "GRUB binary missing. Run 'just setup' first."
-[[ -f "${NETBOOT_DIR}/vmlinuz" ]]    || die "vmlinuz missing. Run 'just setup' first."
-[[ -f "${NETBOOT_DIR}/initrd" ]]     || die "initrd missing. Run 'just setup' first."
+[[ -f "${NETBOOT_DIR}/hwe-vmlinuz" ]] || die "hwe-vmlinuz missing. Run 'just setup' first."
+[[ -f "${NETBOOT_DIR}/hwe-initrd" ]]  || die "hwe-initrd missing. Run 'just setup' first."
 [[ -d "${NETBOOT_DIR}/grub/x86_64-efi" ]] || die "GRUB modules missing. Run 'just setup' first."
 
 # --- Determine the provisioning host address ---
@@ -161,7 +161,7 @@ sh_run() {
 # --- Lay out the boot stick ---
 # Layout (FAT32, ~270 MB):
 #   /EFI/BOOT/BOOTX64.EFI          -- GRUB EFI binary (UEFI fallback path)
-#   /vmlinuz, /initrd              -- Ubuntu installer kernel + initramfs
+#   /hwe-vmlinuz, /hwe-initrd      -- Ubuntu installer HWE kernel + initramfs
 #   /grub/grub.cfg                 -- per-stick: server IP + machine name
 #   /grub/x86_64-efi/*.mod         -- GRUB modules (linux, http, etc.)
 #   /MACHINE.txt                   -- human-readable label for stick swaps
@@ -169,8 +169,8 @@ sh_run() {
 echo "Copying GRUB + kernel + initrd..."
 sh_run mkdir -p "${BOOT_MOUNT}/EFI/BOOT" "${BOOT_MOUNT}/grub"
 sh_run cp "${NETBOOT_DIR}/grubx64.efi" "${BOOT_MOUNT}/EFI/BOOT/BOOTX64.EFI"
-sh_run cp "${NETBOOT_DIR}/vmlinuz"     "${BOOT_MOUNT}/vmlinuz"
-sh_run cp "${NETBOOT_DIR}/initrd"      "${BOOT_MOUNT}/initrd"
+sh_run cp "${NETBOOT_DIR}/hwe-vmlinuz" "${BOOT_MOUNT}/hwe-vmlinuz"
+sh_run cp "${NETBOOT_DIR}/hwe-initrd"  "${BOOT_MOUNT}/hwe-initrd"
 sh_run cp -R "${NETBOOT_DIR}/grub/x86_64-efi" "${BOOT_MOUNT}/grub/x86_64-efi"
 
 echo "Writing per-stick grub.cfg..."

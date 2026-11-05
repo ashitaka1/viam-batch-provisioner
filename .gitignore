@@ -20,9 +20,13 @@ http-server/config/tailscale.key
 # Ubuntu installer binaries (large, downloaded separately)
 http-server/ubuntu/vmlinuz
 http-server/ubuntu/initrd
+http-server/ubuntu/hwe-vmlinuz
+http-server/ubuntu/hwe-initrd
 http-server/ubuntu/casper/
 netboot/vmlinuz
 netboot/initrd
+netboot/hwe-vmlinuz
+netboot/hwe-initrd
 netboot/grubx64.efi
 netboot/grub/x86_64-efi/
 

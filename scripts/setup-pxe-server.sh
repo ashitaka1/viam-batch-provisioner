@@ -40,22 +40,24 @@ fi
 
 echo "Using ISO: ${ISO_FILE}"
 
-# --- Extract kernel + initrd for TFTP and HTTP ---
+# --- Extract the HWE kernel + initrd for TFTP and HTTP ---
+# The HWE kernel (6.17 on 24.04.4) carries support for current Intel
+# platforms such as Panther Lake that the GA 6.8 kernel lacks.
 
-if [[ -f "${NETBOOT_DIR}/vmlinuz" && -f "${NETBOOT_DIR}/initrd" ]]; then
+if [[ -f "${NETBOOT_DIR}/hwe-vmlinuz" && -f "${NETBOOT_DIR}/hwe-initrd" ]]; then
     echo "Kernel+initrd already present in netboot/, skipping."
 else
     echo "Extracting kernel + initrd..."
-    7z e "${ISO_FILE}" casper/vmlinuz casper/initrd -o"${NETBOOT_DIR}" -y -bso0
-    echo "  vmlinuz: $(du -h "${NETBOOT_DIR}/vmlinuz" | cut -f1)"
-    echo "  initrd:  $(du -h "${NETBOOT_DIR}/initrd" | cut -f1)"
+    7z e "${ISO_FILE}" casper/hwe-vmlinuz casper/hwe-initrd -o"${NETBOOT_DIR}" -y -bso0
+    echo "  hwe-vmlinuz: $(du -h "${NETBOOT_DIR}/hwe-vmlinuz" | cut -f1)"
+    echo "  hwe-initrd:  $(du -h "${NETBOOT_DIR}/hwe-initrd" | cut -f1)"
 fi
 
 # Copy to HTTP server dir too (for url= ISO fetch, these aren't used directly
 # but kept in sync)
 mkdir -p "${UBUNTU_DIR}"
-cp -n "${NETBOOT_DIR}/vmlinuz" "${UBUNTU_DIR}/vmlinuz" 2>/dev/null || true
-cp -n "${NETBOOT_DIR}/initrd" "${UBUNTU_DIR}/initrd" 2>/dev/null || true
+cp -n "${NETBOOT_DIR}/hwe-vmlinuz" "${UBUNTU_DIR}/hwe-vmlinuz" 2>/dev/null || true
+cp -n "${NETBOOT_DIR}/hwe-initrd" "${UBUNTU_DIR}/hwe-initrd" 2>/dev/null || true
 
 # --- Extract GRUB network boot binary + modules ---
 
