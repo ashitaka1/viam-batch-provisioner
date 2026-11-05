@@ -93,16 +93,26 @@ public final class HelperClient: Sendable {
         }
     }
 
+    /// Publishes a connection only once it is configured and resumed, so a concurrent caller never
+    /// gets one without its interfaces. A caller that loses the race to publish invalidates its own.
     private func connection() -> NSXPCConnection? {
-        let (connection, created) = state.withLockUnchecked { state -> (NSXPCConnection?, Bool) in
-            guard !state.invalidated else { return (nil, false) }
-            if let connection = state.connection { return (connection, false) }
-            let connection = makeConnection()
-            state.connection = connection
-            return (connection, true)
-        }
-        guard let connection, created else { return connection }
+        let (invalidated, existing) = state.withLockUnchecked { ($0.invalidated, $0.connection) }
+        if invalidated { return nil }
+        if let existing { return existing }
 
+        let fresh = configuredConnection()
+        let published = state.withLockUnchecked { state -> NSXPCConnection? in
+            guard !state.invalidated else { return nil }
+            if let connection = state.connection { return connection }
+            state.connection = fresh
+            return fresh
+        }
+        if published !== fresh { fresh.invalidate() }
+        return published
+    }
+
+    private func configuredConnection() -> NSXPCConnection {
+        let connection = makeConnection()
         connection.remoteObjectInterface = ProvisionerHelperXPC.helperInterface()
         connection.exportedInterface = ProvisionerHelperXPC.eventsInterface()
         connection.exportedObject = EventReceiver(continuation: continuation)
