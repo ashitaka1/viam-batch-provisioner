@@ -285,3 +285,21 @@ private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
     #expect(released.isSet)
     #expect(cancelled.isSet)
 }
+
+/// Events every 50 ms on a 300 ms keepalive leave no interval silent.
+@Test func eventsSuppressKeepalive() async throws {
+    try await withLiveServer(streamOptions: .init(keepalive: .milliseconds(300))) { client, test, _ in
+        _ = try await client.provision([ProvisionRequest(name: "m-1")])
+        let reporter = Task {
+            for stage in Array(repeating: ["late-commands", "identity"], count: 10).joined() {
+                try await postReport(port: test.port!, #"{"kind":"progress","stage":"\#(stage)","name":"m-1"}"#)
+                try await Task.sleep(for: .milliseconds(50))
+            }
+        }
+        defer { reporter.cancel() }
+
+        let text = try await readEvents(port: test.port!, lastEventID: 0) { ids($0).count >= 20 }
+
+        #expect(!text.contains(": keepalive"))
+    }
+}
