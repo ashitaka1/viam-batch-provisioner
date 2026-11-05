@@ -51,7 +51,7 @@ enum ImportEnvironmentCommand {
     }
 }
 
-private final class Locked<Value: Sendable>: @unchecked Sendable {
+final class Locked<Value: Sendable>: @unchecked Sendable {
     private var value: Value
     private let lock = NSLock()
     init(_ value: Value) { self.value = value }

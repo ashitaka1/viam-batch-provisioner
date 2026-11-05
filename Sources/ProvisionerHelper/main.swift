@@ -34,9 +34,10 @@ listener.delegate = service
 listener.resume()
 
 signal(SIGTERM, SIG_IGN)
-let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-terminate.setEventHandler {
-    Task {
+// After dispatchMain() the main queue runs on whichever thread drains it, so the handler stays off the main actor.
+let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: DispatchQueue(label: "sigterm"))
+terminate.setEventHandler { @Sendable [service] in
+    Task.detached {
         await service.shutdown()
         exit(0)
     }

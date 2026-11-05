@@ -124,6 +124,11 @@ app:
 
 # Import config/environments/<name>.env and its packages file into the macOS
 # app's environments (builds the app; replaces an environment of that name)
+# Register, unregister or show the ProvisionerHelper launch daemon (register asks for approval in System Settings)
+helper action="status":
+    ./scripts/bundle-app.sh >/dev/null
+    "build/Viam Provisioner.app/Contents/MacOS/ViamProvisioner" --helper-daemon {{action}}
+
 import-env name:
     ./scripts/bundle-app.sh >/dev/null
     "build/Viam Provisioner.app/Contents/MacOS/ViamProvisioner" --import-environment "config/environments/{{name}}.env"

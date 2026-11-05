@@ -13,6 +13,7 @@ struct ViamProvisionerApp: App {
 
     init() {
         ImportEnvironmentCommand.runIfRequested()
+        HelperDaemonCommand.runIfRequested()
         let session = ViamSession()
         let tokens = session.tokens
         let baseURL = session.baseURL
