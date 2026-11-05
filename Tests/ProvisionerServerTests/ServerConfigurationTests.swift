@@ -26,3 +26,54 @@ import Testing
 func badFlagsThrow(arguments: [String]) {
     #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(arguments) }
 }
+
+/// A fresh directory holding `files/`.
+private func scratchTree() throws -> (root: URL, files: URL) {
+    let root = FileManager.default.temporaryDirectory.appending(path: "config-\(UUID().uuidString)")
+    let files = root.appending(path: "files")
+    try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
+    return (root, files)
+}
+
+@Test(arguments: ["files", "files/data", "files/a/b"])
+func dataDirectoryInsideFilesIsRefused(relative: String) throws {
+    let (root, files) = try scratchTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(throws: ConfigurationError.self) {
+        try ServerConfiguration.parse(["--files", files.path, "--data-dir", root.appending(path: relative).path])
+    }
+}
+
+@Test func dataDirectoryReachingFilesThroughASymlinkIsRefused() throws {
+    let (root, files) = try scratchTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let link = root.appending(path: "link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: files)
+
+    #expect(throws: ConfigurationError.self) {
+        try ServerConfiguration.parse(["--files", files.path, "--data-dir", link.appending(path: "data").path])
+    }
+}
+
+@Test func filesReachedThroughASymlinkStillContainTheDataDirectory() throws {
+    let (root, files) = try scratchTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let link = root.appending(path: "link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: files)
+
+    #expect(throws: ConfigurationError.self) {
+        try ServerConfiguration.parse(["--files", link.path, "--data-dir", files.appending(path: "data").path])
+    }
+}
+
+@Test(arguments: ["data", "files-data", "files2/data"])
+func dataDirectoryBesideFilesIsAccepted(relative: String) throws {
+    let (root, files) = try scratchTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let configuration = try ServerConfiguration.parse(
+        ["--files", files.path, "--data-dir", root.appending(path: relative).path])
+
+    #expect(configuration.dataDirectory.path == root.appending(path: relative).path)
+}

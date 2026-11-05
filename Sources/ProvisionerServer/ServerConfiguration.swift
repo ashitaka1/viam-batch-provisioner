@@ -44,11 +44,36 @@ struct ServerConfiguration: Sendable {
             }
             port = value
         }
-        return ServerConfiguration(
+        let configuration = ServerConfiguration(
             port: port,
             bind: values["--bind"] ?? "0.0.0.0",
             files: URL(filePath: files),
             dataDirectory: values["--data-dir"].map { URL(filePath: $0) } ?? defaultDataDirectory,
             advertiseAddress: values["--advertise-address"])
+        if contains(configuration.files, configuration.dataDirectory) {
+            throw ConfigurationError(description: "--data-dir must be outside --files, which is served to the network")
+        }
+        return configuration
+    }
+
+    /// Whether `inner` is `outer` or lies under it, after resolving symlinks.
+    private static func contains(_ outer: URL, _ inner: URL) -> Bool {
+        let outer = resolved(outer).pathComponents
+        let inner = resolved(inner).pathComponents
+        return inner.starts(with: outer)
+    }
+
+    /// `url` with symlinks resolved in its deepest existing ancestor; a data
+    /// directory need not exist yet.
+    private static func resolved(_ url: URL) -> URL {
+        var existing = url.standardizedFileURL
+        var missing: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path), existing.pathComponents.count > 1 {
+            missing.insert(existing.lastPathComponent, at: 0)
+            existing.deleteLastPathComponent()
+        }
+        guard let real = realpath(existing.path, nil) else { return url.standardizedFileURL }
+        defer { free(real) }
+        return missing.reduce(URL(filePath: String(cString: real))) { $0.appending(path: $1) }
     }
 }
