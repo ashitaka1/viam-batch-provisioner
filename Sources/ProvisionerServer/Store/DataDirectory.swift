@@ -25,14 +25,19 @@ struct DataDirectory: Sendable {
     }
 }
 
-/// Writes `data` to a temporary file beside `url`, then renames it over `url`.
+/// Writes `data` to a temporary file beside `url`, syncs it, renames it over
+/// `url`, then syncs the directory so the rename survives a power loss.
 func writeAtomically(_ data: Data, to url: URL, mode: Int = 0o644) throws {
     let fm = FileManager.default
-    let temp = url.deletingLastPathComponent().appending(path: ".\(url.lastPathComponent).\(UUID().uuidString).tmp")
+    let directory = url.deletingLastPathComponent()
+    let temp = directory.appending(path: ".\(url.lastPathComponent).\(UUID().uuidString).tmp")
     guard fm.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: mode]) else {
         throw StoreError.io("cannot write \(temp.path)")
     }
     do {
+        let handle = try FileHandle(forUpdating: temp)
+        defer { try? handle.close() }
+        try handle.synchronize()
         if fm.fileExists(atPath: url.path) {
             _ = try fm.replaceItemAt(url, withItemAt: temp)
         } else {
@@ -42,4 +47,12 @@ func writeAtomically(_ data: Data, to url: URL, mode: Int = 0o644) throws {
         try? fm.removeItem(at: temp)
         throw error
     }
+    try syncDirectory(directory)
+}
+
+private func syncDirectory(_ directory: URL) throws {
+    let descriptor = open(directory.path, O_RDONLY)
+    guard descriptor >= 0 else { throw StoreError.io("cannot open \(directory.path)") }
+    defer { close(descriptor) }
+    guard fsync(descriptor) == 0 else { throw StoreError.io("cannot sync \(directory.path)") }
 }
