@@ -70,7 +70,8 @@ actor Provisioner {
             }
         } catch {
             for record in added { try? store.remove(key: record.key) }
-            throw .internal("credentials could not be staged; nothing was queued: \(error)")
+            logger.error("staging credentials failed: \(error)")
+            throw .internal("credentials could not be staged; nothing was queued")
         }
         return results
     }
@@ -94,7 +95,8 @@ actor Provisioner {
             try store.remove(key: record.key)
             try store.save(queue: store.queue.filter { $0.key != record.key })
         } catch {
-            throw .internal("could not remove \(record.name): \(error)")
+            logger.error("removing \(record.name) failed: \(error)")
+            throw .internal("\(record.name) could not be removed")
         }
     }
 

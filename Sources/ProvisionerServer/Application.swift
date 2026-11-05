@@ -17,7 +17,7 @@ func buildApplication(_ configuration: ServerConfiguration, provisioner: Provisi
     router.add(middleware: StaticFiles(root: configuration.files.path, logger: logger))
     let handler = APIHandler(provisioner: provisioner, configuration: configuration, streamOptions: streamOptions,
                              streams: StreamLimiter(limit: streamOptions.limit),
-                             serverName: localHostName())
+                             serverName: localHostName(), logger: logger)
     try handler.registerHandlers(on: router, serverURL: URL(string: "/")!)
     return Application(
         router: router,

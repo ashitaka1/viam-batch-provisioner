@@ -192,3 +192,29 @@ func reportForUnknownMachineIs404(body: String) async throws {
         #expect(try errorCode(response) == "not-found")
     }
 }
+
+/// The message of a 500 response, which names the failure without Swift error text.
+private func internalMessage(_ response: TestResponse) throws -> String {
+    #expect(response.status == .internalServerError)
+    let error = try JSONDecoder().decode(Schemas._Error.self, from: Data(buffer: response.body)).error
+    #expect(error.code == ._internal)
+    return error.message
+}
+
+@Test func internalFailuresAnswerWithAFixedSentence() async throws {
+    try await withLiveServer { _, client, dataDirectory in
+        let credentialsRoot = DataDirectory(dataDirectory).credentialsRoot
+        let staged = #"[{"name":"m-1","credentials":{"cloud":{"id":"a","secret":"s"}}}]"#
+        _ = try await client.execute(uri: "/api/v1/provision", method: .post, headers: jsonHeaders, body: json(staged))
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: credentialsRoot.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: credentialsRoot.path) }
+
+        let remove = try await client.execute(uri: "/api/v1/queue/m-1", method: .delete)
+        let stage = try await client.execute(
+            uri: "/api/v1/provision", method: .post, headers: jsonHeaders,
+            body: json(#"[{"name":"m-2","credentials":{"cloud":{"id":"b","secret":"s"}}}]"#))
+
+        #expect(try internalMessage(remove) == "m-1 could not be removed")
+        #expect(try internalMessage(stage) == "credentials could not be staged; nothing was queued")
+    }
+}

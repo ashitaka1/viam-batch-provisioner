@@ -10,6 +10,7 @@ struct APIHandler: APIProtocol {
     let streamOptions: StreamOptions
     let streams: StreamLimiter
     let serverName: String
+    let logger: Logger
 
     func provision(_ input: Operations.Provision.Input) async throws -> Operations.Provision.Output {
         guard case .json(let items) = input.body else { return .badRequest(badRequest(.invalidRequest, "expected JSON")) }
@@ -17,8 +18,6 @@ struct APIHandler: APIProtocol {
             return .ok(.init(body: .json(.init(results: try await provisioner.provision(items)))))
         } catch .queueUnreadable(let message) {
             return .serviceUnavailable(.init(body: .json(errorPayload(.queueUnreadable, message))))
-        } catch .internal(let message) {
-            return .internalServerError(.init(body: .json(errorPayload(._internal, message))))
         } catch {
             return failure(error)
         }
@@ -101,8 +100,11 @@ struct APIHandler: APIProtocol {
             return .badRequest(badRequest(.invalidRequest, message, details: details))
         case .invalidName(let message):
             return .badRequest(badRequest(.invalidName, message))
+        case .internal(let message):
+            return .default(statusCode: 500, .init(body: .json(errorPayload(._internal, message))))
         default:
-            return .default(statusCode: 500, .init(body: .json(errorPayload(._internal, "\(error)"))))
+            logger.error("unhandled failure: \(error)")
+            return .default(statusCode: 500, .init(body: .json(errorPayload(._internal, "internal error"))))
         }
     }
 }
