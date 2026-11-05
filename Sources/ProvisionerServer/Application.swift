@@ -17,11 +17,18 @@ func buildApplication(_ configuration: ServerConfiguration, provisioner: Provisi
     router.add(middleware: StaticFiles(root: configuration.files.path, logger: logger))
     let handler = APIHandler(provisioner: provisioner, configuration: configuration, streamOptions: streamOptions,
                              streams: StreamLimiter(limit: streamOptions.limit),
-                             serverName: ProcessInfo.processInfo.hostName)
+                             serverName: localHostName())
     try handler.registerHandlers(on: router, serverURL: URL(string: "/")!)
     return Application(
         router: router,
         configuration: .init(address: .hostname(configuration.bind, port: configuration.port),
                              serverName: "provisioner-server"),
         logger: logger)
+}
+
+/// The kernel's host name. `ProcessInfo.hostName` can block on a reverse DNS lookup.
+func localHostName() -> String {
+    var buffer = [CChar](repeating: 0, count: 256)
+    guard gethostname(&buffer, buffer.count) == 0 else { return "localhost" }
+    return String(cString: buffer)
 }
