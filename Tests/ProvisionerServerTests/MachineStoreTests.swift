@@ -88,3 +88,15 @@ func posixMode(_ url: URL) throws -> Int {
     #expect(!FileManager.default.fileExists(atPath: dir.credentials("m-1").path))
     #expect(try MachineStore(dir).machine("m-1") == nil)
 }
+
+@Test func unreadableRecordIsSkipped() throws {
+    let dir = DataDirectory(try temporaryDirectory())
+    let store = try MachineStore(dir)
+    try store.save(machine: MachineRecord(attempt: 1, stage: "tooling"), key: "good")
+    try Data().write(to: dir.machine("bad"))
+
+    let reopened = try MachineStore(dir)
+
+    #expect(reopened.machine("bad") == nil)
+    #expect(reopened.machine("good")?.stage == "tooling")
+}

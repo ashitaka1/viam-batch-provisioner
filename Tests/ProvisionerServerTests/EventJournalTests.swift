@@ -63,3 +63,19 @@ private func progress(_ name: String) -> (Int) -> Components.Schemas.MachineEven
     #expect(reopened.events(after: 0).map(\.id) == [1, 2])
     #expect(reopened.append(progress("c"))?.id == 3)
 }
+
+@Test func appendAfterTornLineKeepsTheEvent() throws {
+    let url = try temporaryDirectory().appending(path: "events.jsonl")
+    let journal = try EventJournal(url: url, logger: testLogger)
+    _ = journal.append(progress("a"))
+    let handle = try FileHandle(forWritingTo: url)
+    try handle.seekToEnd()
+    try handle.write(contentsOf: Data(#"{"id":2,"type":"install-prog"#.utf8))
+    try handle.close()
+
+    let afterCrash = try EventJournal(url: url, logger: testLogger)
+    #expect(afterCrash.append(progress("b"))?.id == 2)
+
+    let reopened = try EventJournal(url: url, logger: testLogger)
+    #expect(reopened.lastID == 2, "the event appended after a torn line was lost on reload")
+}

@@ -6,6 +6,8 @@ final class MachineStore {
     private let dir: DataDirectory
     private(set) var queue: [QueueRecord]
     private var machines: [String: MachineRecord]
+    /// Records that failed to load; their machines read as having no record.
+    private(set) var skippedRecords: [String] = []
 
     init(_ dir: DataDirectory) throws(StoreError) {
         self.dir = dir
@@ -32,7 +34,7 @@ final class MachineStore {
             do {
                 machines[key] = try StoreCoding.decoder.decode(MachineRecord.self, from: data)
             } catch {
-                throw .io("\(dir.machine(key).path) is not a valid machine record: \(error)")
+                skippedRecords.append("\(dir.machine(key).path) is not a valid machine record: \(error)")
             }
         }
     }
@@ -69,10 +71,10 @@ final class MachineStore {
     }
 
     func remove(key: String) throws {
+        machines[key] = nil
         let fm = FileManager.default
         for url in [dir.machine(key), dir.credentials(key)] where fm.fileExists(atPath: url.path) {
             try fm.removeItem(at: url)
         }
-        machines[key] = nil
     }
 }

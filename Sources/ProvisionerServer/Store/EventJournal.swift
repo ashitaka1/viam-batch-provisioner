@@ -42,9 +42,16 @@ final class EventJournal {
                     throw StoreError.io("cannot create \(url.path)")
                 }
             }
-            let handle = try FileHandle(forWritingTo: url)
+            let handle = try FileHandle(forUpdating: url)
             defer { try? handle.close() }
-            try handle.seekToEnd()
+            let end = try handle.seekToEnd()
+            if end > 0 {
+                try handle.seek(toOffset: end - 1)
+                if handle.readData(ofLength: 1) != Data([UInt8(ascii: "\n")]) {
+                    line.insert(UInt8(ascii: "\n"), at: 0)
+                }
+                try handle.seekToEnd()
+            }
             try handle.write(contentsOf: line)
             try handle.synchronize()
         } catch {

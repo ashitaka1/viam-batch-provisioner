@@ -33,6 +33,9 @@ actor Provisioner {
             loadError = message
         }
         journal = try EventJournal(url: dataDirectory.journal, logger: logger)
+        for problem in store?.skippedRecords ?? [] {
+            logger.error("skipping machine record: \(problem)")
+        }
     }
 
     var lastEventID: Int { journal.lastID }
@@ -52,6 +55,7 @@ actor Provisioner {
                 } else if !seen.insert(key).inserted {
                     results.append(.init(name: item.name, result: .skipped, reason: .duplicateInRequest))
                 } else {
+                    try store.remove(key: key)
                     if item.credentials != nil || item.environment != nil {
                         try store.stage(credentials: try item.credentials.map { try StoreCoding.encoder.encode($0) },
                                         environment: try item.environment.map { try StoreCoding.encoder.encode($0) },
@@ -87,8 +91,8 @@ actor Provisioner {
             throw .alreadyAssigned(record.name)
         }
         do {
-            try store.save(queue: store.queue.filter { $0.key != record.key })
             try store.remove(key: record.key)
+            try store.save(queue: store.queue.filter { $0.key != record.key })
         } catch {
             throw .internal("could not remove \(record.name): \(error)")
         }

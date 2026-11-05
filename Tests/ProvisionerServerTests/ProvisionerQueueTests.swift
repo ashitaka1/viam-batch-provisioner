@@ -173,15 +173,13 @@ func invalidLookupName(name: String) async throws {
 
 @Test func stagingFailureQueuesNothing() async throws {
     let (provisioner, dir) = try makeProvisioner()
-    try FileManager.default.createDirectory(at: dir.credentialsRoot, withIntermediateDirectories: true)
-    try Data("in the way".utf8).write(to: dir.credentials("m-2"))
+    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.credentialsRoot.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.credentialsRoot.path) }
 
-    let result = await failure { try await provisioner.provision([request("m-1", credentials: creds("A")),
-                                                                  request("m-2", credentials: creds("B"))]) }
+    let result = await failure { try await provisioner.provision([request("m-1"), request("m-2", credentials: creds("B"))]) }
 
     #expect(result?.kind == "internal")
     #expect(try await provisioner.snapshot().entries.isEmpty)
-    #expect(!FileManager.default.fileExists(atPath: dir.credentials("m-1").path))
 }
 
 @Test func unreadableQueue() async throws {
@@ -203,4 +201,25 @@ func invalidLookupName(name: String) async throws {
     let (provisioner, _) = try makeProvisioner(root)
 
     #expect(try await provisioner.snapshot().lastEventID == 3)
+}
+
+@Test func leftoverCredentialsNeverReachANewEntry() async throws {
+    let (provisioner, dir) = try makeProvisioner()
+    try FileManager.default.createDirectory(at: dir.credentials("m-1"), withIntermediateDirectories: true)
+    try Data(#"{"cloud":{"id":"old","secret":"old"}}"#.utf8).write(to: dir.credentials("m-1").appending(path: "viam.json"))
+
+    _ = try await provisioner.provision([request("m-1")])
+
+    #expect(try await !provisioner.entry("m-1").hasCredentials)
+    #expect(!FileManager.default.fileExists(atPath: dir.credentials("m-1").appending(path: "viam.json").path))
+}
+
+@Test func leftoverRecordNeverReachesANewEntry() async throws {
+    let root = try temporaryDirectory()
+    try MachineStore(DataDirectory(root)).save(machine: MachineRecord(attempt: 1, stage: "done", completedAt: t0), key: "m-1")
+    let (provisioner, _) = try makeProvisioner(root)
+
+    _ = try await provisioner.provision([request("m-1")])
+
+    #expect(try await provisioner.entry("m-1").status == .queued)
 }
