@@ -41,6 +41,18 @@ Runs `swift test` over the root package (Swift 6, macOS 14+). The ProvisionerPXE
 
 `swift run provisioner-pxe --interface en0 --root netboot` serves proxy DHCP and TFTP on the default ports 67, 4011 and 69 (sudo) and prints each PXE client it answers and each file a client reads, with the MAC its DHCP request named. `--dhcp-port`, `--pxe-port` and `--tftp-port` override the ports; `--offer-to <ip>:<port>` redirects offers away from the broadcast address, for testing without privileges. It runs beside no dnsmasq: stop `just dhcp` first.
 
+### ProvisionerHelper
+
+`just app` also puts the `ProvisionerHelper` launch daemon inside the bundle and builds `build/provisioner-helperctl`. `just helper register` registers the daemon from the app's process and opens System Settings → General → Login Items & Extensions, where it must be allowed; `just helper status` and `just helper unregister` do the rest. The daemon runs as root and serves only when asked:
+
+```bash
+build/provisioner-helperctl push netboot   # copy netboot/ into /Library/Application Support/Viam Provisioner/TFTP
+build/provisioner-helperctl serve en5      # serve PXE on en5 and print each offer and file sent until ^C
+build/provisioner-helperctl stop
+```
+
+Serving continues after `serve` exits. Its log: `log stream --predicate 'subsystem == "com.bringingfire.viam-provisioner.helper"'`. Stop dnsmasq (`just stop`) first; both bind port 67.
+
 ### The Mac app in a QA guest
 
 The app's GUI and the Keychain tests run in a disposable guest through `qa-vm` (ashitaka1/macos-qa-vm); the `dev-tools:macos-app-qa` skill drives the GUI. What a guest needs lives on the host:
@@ -88,3 +100,5 @@ Broadcast a forged PXE DHCPDISCOVER from an unprivileged UDP socket bound to the
 ## Validate on hardware
 
 A change to the boot chain, autoinstall config, watcher or install reports is finished when a real machine has installed through it. The testbed is a Minisforum UM890 Pro on Ubuntu 24.04.
+
+The helper's run: with `netboot/` filled by `just setup`, the HTTP server up (`just up`) and dnsmasq stopped, register and allow the helper, `push netboot`, then `serve <interface>` and PXE-boot the machine. It passes when `serve` prints an `offered` line for the machine's MAC, `sent` lines for `grubx64.efi`, the GRUB config, kernel and initrd carrying that MAC, and the machine installs.
