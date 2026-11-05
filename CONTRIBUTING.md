@@ -41,6 +41,33 @@ Runs `swift test` over the root package (Swift 6, macOS 14+). The ProvisionerPXE
 
 `swift run provisioner-pxe --interface en0 --root netboot` serves proxy DHCP and TFTP on the default ports 67, 4011 and 69 (sudo) and prints each PXE client it answers. `--dhcp-port`, `--pxe-port` and `--tftp-port` override the ports; `--offer-to <ip>:<port>` redirects offers away from the broadcast address, for testing without privileges. It runs beside no dnsmasq: stop `just dhcp` first.
 
+### The Mac app in a QA guest
+
+The app's GUI and the Keychain tests run in a disposable guest through `qa-vm` (ashitaka1/macos-qa-vm); the `dev-tools:macos-app-qa` skill drives the GUI. What a guest needs lives on the host:
+
+- `~/.config/qa-vm/secrets/viam/.viam`: a `viam` CLI login for the app, made once with `HOME=~/.config/qa-vm/secrets/viam viam login`. Its refresh token works once, so every run hands the refreshed login back, and only one guest uses it at a time.
+- `~/.config/qa-vm/secrets/viam-batch-provisioner/environments/`: copies of `config/environments/`, which `sync --ref` leaves out because they're gitignored. Copy them again when an environment changes.
+- The public key each environment's `SSH_PUBLIC_KEY_FILE` names, such as `~/.ssh/id_tcos_hosts.pub`.
+
+A session, from the main checkout:
+
+```bash
+vm=$(qa-vm up)
+qa-vm sync --ref <branch> $vm ~/eng/viam-batch-provisioner
+qa-vm inject $vm ~/.config/qa-vm/secrets/viam/.viam .viam
+qa-vm inject $vm ~/.config/qa-vm/secrets/viam-batch-provisioner/environments src/viam-batch-provisioner/config/environments
+qa-vm inject $vm ~/.ssh/id_tcos_hosts.pub .ssh/id_tcos_hosts.pub
+# … build, import, drive the app …
+qa-vm collect $vm .viam ~/.config/qa-vm/secrets/viam/.viam
+qa-vm down $vm
+```
+
+The guest has no `just`: run a recipe's commands from the `justfile`, such as `./scripts/bundle-app.sh` then the app binary with `--import-environment config/environments/<env>.env`. Commands that use the Keychain unlock it first in the same `ssh` command: `security unlock-keychain -p admin ~/Library/Keychains/login.keychain-db && …`. Headless tests run in one command:
+
+```bash
+qa-vm run --ref <branch> --unlock-keychain --persist ~/.config/qa-vm/secrets/viam/.viam:.viam ~/eng/viam-batch-provisioner -- 'swift test'
+```
+
 ## Run pieces alone
 
 | Command | Runs |
