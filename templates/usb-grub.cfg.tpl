@@ -10,7 +10,7 @@ set timeout=3
 set default=autoinstall
 
 menuentry "Viam Provisioning Install (${MACHINE_NAME})" --id=autoinstall {
-    linux /hwe-vmlinuz ip=dhcp url=http://${PXE_SERVER}/ubuntu/ubuntu-24.04.4-live-server-amd64.iso autoinstall ds=nocloud-net\;s=http://${PXE_SERVER}/autoinstall/ viam_hostname=${MACHINE_NAME} nomodeset vga=791 quiet ---
+    linux /hwe-vmlinuz ip=dhcp url=http://${PXE_SERVER}/ubuntu/ubuntu-24.04.4-live-server-amd64.iso autoinstall cloud-config-url=/dev/null ds=nocloud-net\;s=http://${PXE_SERVER}/autoinstall/ viam_hostname=${MACHINE_NAME} nomodeset vga=791 quiet ---
     initrd /hwe-initrd
 }
 
