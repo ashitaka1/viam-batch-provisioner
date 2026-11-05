@@ -128,7 +128,7 @@ Each x86 machine model needs a one-time BIOS configuration with a monitor attach
 3. **Set "Restore on AC Power Loss" to Power On** — so machines boot when plugged in
 4. **Disable Secure Boot** — if the machine rejects the GRUB bootloader
 
-The exact menu locations vary by vendor.
+Keys, menu paths and quirks for each tested model are in [docs/hardware.md](docs/hardware.md).
 
 ## How it works
 
@@ -302,6 +302,8 @@ Installed automatically:
 | AAEON CEXD-INTRBL | Intel Core Ultra (Panther Lake), four I226-V NICs | Installs over PXE; port choice and a second disk are open ([#128](https://github.com/ashitaka1/viam-batch-provisioner/issues/128)) |
 | Raspberry Pi 5 | ARM64 | Fully validated |
 | Raspberry Pi 4 | ARM64 | Untested (should work) |
+
+BIOS preparation for each x86 model: [docs/hardware.md](docs/hardware.md).
 
 ## Known issues
 
