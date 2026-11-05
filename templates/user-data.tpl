@@ -256,18 +256,22 @@ ${PACKAGES}
       UNIT
     - curtin in-target -- systemctl enable viam-agent.service
 
-    - sh /tmp/install-report.sh ${PXE_SERVER} progress tailscale || true
-
-    # Install Tailscale and set up first-boot join
-    - curtin in-target -- bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'
+    # Tailscale, only when the server has an auth key for this site. Each step
+    # below checks for the fetched key, so a site without one installs nothing.
     - |
       LOG=/target/var/log/provisioning.log
       if curl -sf http://${PXE_SERVER}/config/tailscale.key -o /target/etc/tailscale-authkey; then
         echo "Tailscale key installed" >> $LOG
       else
-        echo "FAILED to fetch Tailscale key" >> $LOG
+        rm -f /target/etc/tailscale-authkey
+        echo "No Tailscale key on the server; skipping Tailscale" >> $LOG
       fi
     - |
+      [ -f /target/etc/tailscale-authkey ] || exit 0
+      sh /tmp/install-report.sh ${PXE_SERVER} progress tailscale || true
+      curtin in-target -- bash -c 'curl -fsSL https://tailscale.com/install.sh | sh'
+    - |
+      [ -f /target/etc/tailscale-authkey ] || exit 0
       cat > /target/etc/systemd/system/tailscale-join.service <<'TSUNIT'
       [Unit]
       Description=Tailscale first-boot join
@@ -283,7 +287,7 @@ ${PACKAGES}
       [Install]
       WantedBy=multi-user.target
       TSUNIT
-    - curtin in-target -- systemctl enable tailscale-join.service
+      curtin in-target -- systemctl enable tailscale-join.service
 
     # Last, so a machine that reached here is never timed out as silent.
     - sh /tmp/install-report.sh ${PXE_SERVER} progress done || true
