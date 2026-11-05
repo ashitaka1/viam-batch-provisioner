@@ -3,10 +3,12 @@ import Hummingbird
 import Logging
 import OpenAPIHummingbird
 
-/// SSE settings; tests shorten the keepalive and lower the stream limit.
+/// SSE settings; tests shorten the keepalive and lower the limits.
 struct StreamOptions: Sendable {
     var keepalive: Duration = .seconds(15)
     var limit = 64
+    /// Frames a stream holds for a client that isn't reading before it drops the client.
+    var buffer = 256
 }
 
 func buildApplication(_ configuration: ServerConfiguration, provisioner: Provisioner, logger: Logger,

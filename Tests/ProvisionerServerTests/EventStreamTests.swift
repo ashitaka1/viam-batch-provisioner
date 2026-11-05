@@ -184,7 +184,7 @@ private func pollStatus(port: Int, until: (UInt) -> Bool, within limit: Duration
     try await testGracefulShutdown { trigger in
         let (provisioner, _) = try makeProvisioner()
         let released = TestFlag()
-        let body = sseBody(await provisioner.subscribe(after: nil), keepalive: .seconds(60)) { released.set() }
+        let body = sseBody(await provisioner.subscribe(after: nil), keepalive: .seconds(60), buffer: 16) { released.set() }
         var frames = body.makeAsyncIterator()
         _ = try await frames.next()
 
@@ -229,4 +229,59 @@ private func pollStatus(port: Int, until: (UInt) -> Bool, within limit: Duration
         let names = text.split(separator: "\n").filter { $0.hasPrefix("event: ") }.map { String($0.dropFirst(7)) }
         #expect(names == ["install-progress", "install-complete", "install-failed"])
     }
+}
+
+private struct StreamDidNotEnd: Error {}
+
+/// Every frame of `body`, which must end within two seconds.
+private func drain(_ body: HTTPBody) async throws -> [ArraySlice<UInt8>] {
+    try await withThrowingTaskGroup(of: [ArraySlice<UInt8>].self) { group in
+        group.addTask {
+            var frames: [ArraySlice<UInt8>] = []
+            for try await frame in body { frames.append(frame) }
+            return frames
+        }
+        group.addTask {
+            try await Task.sleep(for: .seconds(2))
+            throw StreamDidNotEnd()
+        }
+        let frames = try await group.next()!
+        group.cancelAll()
+        return frames
+    }
+}
+
+/// The `id:` lines in the frames read so far.
+private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
+    ids(frames.map { String(decoding: $0, as: UTF8.self) }.joined())
+}
+
+@Test func stalledClientIsDroppedOnceItsBufferFills() async throws {
+    let (provisioner, _) = try makeProvisioner()
+    _ = try await provisioner.provision([request("m-1")])
+    let released = TestFlag()
+    let body = sseBody(await provisioner.subscribe(after: nil), keepalive: .seconds(60), buffer: 4) { released.set() }
+
+    for stage in Array(repeating: [Schemas.InstallStage.lateCommands, .identity], count: 5).joined() {
+        _ = try await provisioner.report(report(.progress, stage, name: "m-1"))
+    }
+    try await poll(within: .seconds(2)) { released.isSet }
+
+    let frames = try await drain(body)
+    #expect(released.isSet, "a stalled stream still holds its slot")
+    #expect(frameIDs(frames) == ["1", "2", "3", "4"], "the client resumes after the last id it received")
+}
+
+@Test func subscriptionThatHasEndedReleasesItsSlot() async throws {
+    let (live, continuation) = AsyncStream.makeStream(of: Schemas.MachineEvent.self)
+    continuation.finish()
+    let cancelled = TestFlag()
+    let released = TestFlag()
+    let subscription = EventSubscription(backlog: .events([]), live: live, cancel: { cancelled.set() })
+
+    let body = sseBody(subscription, keepalive: .seconds(60), buffer: 4) { released.set() }
+    _ = try await drain(body)
+
+    #expect(released.isSet)
+    #expect(cancelled.isSet)
 }
