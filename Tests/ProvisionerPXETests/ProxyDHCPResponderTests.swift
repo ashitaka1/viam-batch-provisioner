@@ -35,6 +35,25 @@ import Testing
         #expect(client == nil, "only discovers are reported")
     }
 
+    @Test func learnsLeaseFromRequestedAddress() throws {
+        let request = pxeDiscover(messageType: 3, requestedAddress: 0xC0A8_0742)
+        let lease = try #require(responder.lease(in: request))
+        #expect(lease.address == 0xC0A8_0742)
+        #expect(lease.mac == MACAddress(bytes: fixtureMAC))
+    }
+
+    @Test func learnsLeaseFromClientAddress() throws {
+        let lease = try #require(responder.lease(in: pxeDiscover(messageType: 3, ciaddr: 0xC0A8_0743)))
+        #expect(lease.address == 0xC0A8_0743)
+    }
+
+    @Test func noLeaseWithoutAddressOrFromDiscover() {
+        #expect(responder.lease(in: pxeDiscover(messageType: 3)) == nil, "a request naming no address")
+        #expect(responder.lease(in: pxeDiscover(requestedAddress: 0xC0A8_0742)) == nil, "a discover")
+        #expect(responder.lease(in: pxeDiscover(vendorClass: "MSFT 5.0", messageType: 3, requestedAddress: 0xC0A8_0742)) == nil,
+                "a request from a non-PXE client")
+    }
+
     @Test func acceptsArch9() {
         #expect(responder.reply(to: pxeDiscover(arch: 9), on: .dhcp) != nil)
     }

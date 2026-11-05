@@ -65,7 +65,12 @@ interrupt.setEventHandler {
 }
 interrupt.resume()
 
-for await client in server.clients {
-    let uuid = client.uuid.map { $0.map { String(format: "%02x", $0) }.joined() } ?? "-"
-    print("pxe \(client.mac) arch \(client.architecture) uuid \(uuid)")
+for await event in server.events {
+    switch event {
+    case let .offered(client):
+        let uuid = client.uuid.map { $0.map { String(format: "%02x", $0) }.joined() } ?? "-"
+        print("pxe \(client.mac) arch \(client.architecture) uuid \(uuid)")
+    case let .fileSent(delivery):
+        print("tftp \(delivery.filename) to \(delivery.clientAddress) mac \(delivery.mac.map(String.init(describing:)) ?? "-") \(delivery.bytes) bytes")
+    }
 }

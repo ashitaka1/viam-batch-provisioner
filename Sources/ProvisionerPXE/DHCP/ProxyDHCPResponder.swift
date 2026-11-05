@@ -18,7 +18,18 @@ struct ProxyDHCPResponder: Sendable {
     /// Option 43, sub-option 6 (PXE_DISCOVERY_CONTROL) = 8: boot from the filename in this packet.
     private static let pxeVendorOptions: [UInt8] = [6, 1, 8, 255]
 
-    func reply(to request: DHCPPacket, on listener: DHCPListener) -> (packet: DHCPPacket, client: PXEClient?)? {
+    /// The address a PXE client's DHCP request (to any server) names for itself: option 50, else `ciaddr`.
+    func lease(in request: DHCPPacket) -> (address: UInt32, mac: MACAddress)? {
+        guard let (mac, _) = Self.pxeClient(request), request.messageType == Self.request else { return nil }
+        let requested = request.option(50).flatMap { bytes in
+            bytes.count == 4 ? bytes.reduce(UInt32(0)) { $0 << 8 | UInt32($1) } : nil
+        }
+        guard let address = requested ?? (request.ciaddr != 0 ? request.ciaddr : nil) else { return nil }
+        return (address, mac)
+    }
+
+    /// The MAC and architecture of a direct (unrelayed) request from an x86-64 UEFI PXE client.
+    private static func pxeClient(_ request: DHCPPacket) -> (MACAddress, UInt16)? {
         guard request.op == 1,
               request.giaddr == 0,
               let mac = request.clientMAC,
@@ -27,7 +38,12 @@ struct ProxyDHCPResponder: Sendable {
               let arch = request.option(93), arch.count == 2
         else { return nil }
         let architecture = UInt16(arch[0]) << 8 | UInt16(arch[1])
-        guard Self.x86_64EFIArchitectures.contains(architecture) else { return nil }
+        guard x86_64EFIArchitectures.contains(architecture) else { return nil }
+        return (mac, architecture)
+    }
+
+    func reply(to request: DHCPPacket, on listener: DHCPListener) -> (packet: DHCPPacket, client: PXEClient?)? {
+        guard let (mac, architecture) = Self.pxeClient(request) else { return nil }
 
         let replyType: UInt8
         switch (listener, request.messageType) {

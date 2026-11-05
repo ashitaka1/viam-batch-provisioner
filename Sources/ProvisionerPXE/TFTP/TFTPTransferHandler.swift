@@ -12,14 +12,20 @@ final class TFTPTransferHandler: ChannelInboundHandler {
     private var descriptor: CInt
     private let client: SocketAddress
     private let timeout: TimeAmount
+    private let completed: () -> Void
     private var timer: Scheduled<Void>?
 
-    init(transfer: TFTPTransfer, negotiation: TFTPNegotiation, descriptor: CInt, client: SocketAddress, timeout: TimeAmount) {
+    /// `completed` runs once the client has acknowledged the last block.
+    init(
+        transfer: TFTPTransfer, negotiation: TFTPNegotiation, descriptor: CInt, client: SocketAddress,
+        timeout: TimeAmount, completed: @escaping () -> Void
+    ) {
         self.transfer = transfer
         self.negotiation = negotiation
         self.descriptor = descriptor
         self.client = client
         self.timeout = timeout
+        self.completed = completed
     }
 
     func channelActive(context: ChannelHandlerContext) {
@@ -69,7 +75,10 @@ final class TFTPTransferHandler: ChannelInboundHandler {
             }
             context.writeAndFlush(wrapOutboundOut(AddressedEnvelope(remoteAddress: client, data: buffer)), promise: nil)
             armTimer(context: context)
-        case .finished, .failed:
+        case .finished:
+            completed()
+            finish(context: context)
+        case .failed:
             finish(context: context)
         case .none:
             return

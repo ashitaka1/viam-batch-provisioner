@@ -10,9 +10,14 @@ func pxeDiscover(
     uuid: [UInt8]? = fixtureUUID,
     vendorClass: String? = "PXEClient:Arch:00007:UNDI:003016",
     messageType: UInt8 = 1,
-    giaddr: UInt32 = 0
+    giaddr: UInt32 = 0,
+    ciaddr: UInt32 = 0,
+    requestedAddress: UInt32? = nil
 ) -> DHCPPacket {
     var options = [DHCPOption(code: 53, data: [messageType])]
+    if let requestedAddress {
+        options.append(DHCPOption(code: 50, data: withUnsafeBytes(of: requestedAddress.bigEndian, Array.init)))
+    }
     if let vendorClass {
         options.append(DHCPOption(code: 60, data: Array(vendorClass.utf8)))
     }
@@ -23,7 +28,7 @@ func pxeDiscover(
     return DHCPPacket(
         op: 1, htype: 1, hlen: 6, hops: 0,
         xid: 0xDEAD_BEEF, secs: 4, flags: 0x8000,
-        ciaddr: 0, yiaddr: 0, siaddr: 0, giaddr: giaddr,
+        ciaddr: ciaddr, yiaddr: 0, siaddr: 0, giaddr: giaddr,
         chaddr: mac + [UInt8](repeating: 0, count: 16 - mac.count),
         sname: "", file: "",
         options: options

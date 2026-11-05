@@ -17,14 +17,15 @@ private final class Harness: Sendable {
     let client: UDPTestClient
     let server: PXEServer
     let reported = Inbox<PXEClient>()
-    /// Receives one element when the `clients` stream finishes.
-    let clientsFinished = Inbox<Void>()
+    let delivered = Inbox<TFTPDelivery>()
+    /// Receives one element when the `events` stream finishes.
+    let eventsFinished = Inbox<Void>()
     let ports: (dhcp: Int, pxe: Int, tftp: Int)
     let kernel = randomData(100_000)
     let bootloader = randomData(4096)
 
-    /// `readClients: false` leaves the `clients` stream unread, for tests that inspect its buffer.
-    init(tftpTimeout: TimeAmount, maxTransfers: Int = 64, clientBufferLimit: Int = 256, readClients: Bool = true) async throws {
+    /// `readEvents: false` leaves the `events` stream unread, for tests that inspect its buffer.
+    init(tftpTimeout: TimeAmount, maxTransfers: Int = 64, eventBufferLimit: Int = 256, readEvents: Bool = true) async throws {
         base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         root = base.appendingPathComponent("root")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("grub"), withIntermediateDirectories: true)
@@ -40,18 +41,24 @@ private final class Harness: Sendable {
         configuration.offerDestination = client.address
         configuration.tftpTimeout = tftpTimeout
         configuration.maxTransfers = maxTransfers
-        configuration.clientBufferLimit = clientBufferLimit
+        configuration.eventBufferLimit = eventBufferLimit
         server = PXEServer(configuration: configuration)
         try await server.start()
         ports = server.boundPorts!
-        guard readClients else { return }
+        guard readEvents else { return }
 
         let reported = reported
-        let clientsFinished = clientsFinished
-        let clients = server.clients
+        let delivered = delivered
+        let eventsFinished = eventsFinished
+        let events = server.events
         Task {
-            for await pxeClient in clients { reported.push(pxeClient) }
-            clientsFinished.push(())
+            for await event in events {
+                switch event {
+                case let .offered(pxeClient): reported.push(pxeClient)
+                case let .fileSent(delivery): delivered.push(delivery)
+                }
+            }
+            eventsFinished.push(())
         }
     }
 
@@ -66,12 +73,12 @@ private final class Harness: Sendable {
 private func withHarness(
     tftpTimeout: TimeAmount = .seconds(1),
     maxTransfers: Int = 64,
-    clientBufferLimit: Int = 256,
-    readClients: Bool = true,
+    eventBufferLimit: Int = 256,
+    readEvents: Bool = true,
     _ body: (Harness) async throws -> Void
 ) async throws {
     let harness = try await Harness(
-        tftpTimeout: tftpTimeout, maxTransfers: maxTransfers, clientBufferLimit: clientBufferLimit, readClients: readClients)
+        tftpTimeout: tftpTimeout, maxTransfers: maxTransfers, eventBufferLimit: eventBufferLimit, readEvents: readEvents)
     do {
         try await body(harness)
     } catch {
@@ -141,6 +148,36 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
             let options = [TFTPOption(name: "blksize", value: "1468"), TFTPOption(name: "tsize", value: "0")]
             let data = try await harness.client.fetch("vmlinuz", options: options, port: harness.ports.tftp)
             #expect(data == harness.kernel, "got \(data.count) of \(harness.kernel.count) bytes")
+        }
+    }
+
+    @Test func reportsFileSentWithMACFromDHCPRequest() async throws {
+        try await withHarness { harness in
+            let request = pxeDiscover(messageType: 3, requestedAddress: 0x7F00_0001)
+            try await harness.client.send(request.encoded(), to: harness.ports.dhcp)
+            #expect(await harness.client.receive(timeout: .milliseconds(200)) == nil, "answered a DHCP request on port 67")
+
+            _ = try await harness.client.fetch("grubx64.efi", port: harness.ports.tftp)
+            let delivery = try #require(await harness.delivered.next(), "no fileSent event")
+            #expect(delivery == TFTPDelivery(
+                filename: "grubx64.efi", clientAddress: "127.0.0.1", mac: MACAddress(bytes: fixtureMAC), bytes: 4096))
+        }
+    }
+
+    @Test func reportsFileSentWithoutMACForUnknownAddress() async throws {
+        try await withHarness { harness in
+            _ = try await harness.client.fetch("/vmlinuz", port: harness.ports.tftp)
+            let delivery = try #require(await harness.delivered.next(), "no fileSent event")
+            #expect(delivery == TFTPDelivery(filename: "vmlinuz", clientAddress: "127.0.0.1", mac: nil, bytes: 100_000))
+        }
+    }
+
+    @Test func abortedTransferIsNotReported() async throws {
+        try await withHarness { harness in
+            try await harness.client.send(readRequest("grubx64.efi"), to: harness.ports.tftp)
+            let first = try #require(await harness.client.receive())
+            try await harness.client.send(TFTPPacket.error(code: 0, message: "abort").encoded(), to: first.remoteAddress)
+            #expect(await harness.delivered.next(timeout: .milliseconds(300)) == nil, "reported a transfer the client aborted")
         }
     }
 
@@ -286,12 +323,12 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
         }
     }
 
-    @Test func stopReleasesPortsAndFinishesClients() async throws {
+    @Test func stopReleasesPortsAndFinishesEvents() async throws {
         let harness = try await Harness(tftpTimeout: .seconds(1))
         let tftp = harness.ports.tftp
         await harness.server.stop()
 
-        #expect(await harness.clientsFinished.next() != nil, "clients stream still open after stop")
+        #expect(await harness.eventsFinished.next() != nil, "events stream still open after stop")
         let rebound = try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton)
             .bind(host: "127.0.0.1", port: tftp)
             .get()
@@ -357,7 +394,7 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
         try await harness.server.listeningChannels[0].close()
         await harness.server.stop()
 
-        #expect(await harness.clientsFinished.next() != nil, "clients stream still open after stop")
+        #expect(await harness.eventsFinished.next() != nil, "events stream still open after stop")
         let rebound = try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton)
             .bind(host: "127.0.0.1", port: tftp)
             .get()
@@ -387,8 +424,8 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
         }
     }
 
-    @Test func unreadClientsKeepNewest() async throws {
-        try await withHarness(clientBufferLimit: 2, readClients: false) { harness in
+    @Test func unreadEventsKeepNewest() async throws {
+        try await withHarness(eventBufferLimit: 2, readEvents: false) { harness in
             let macs: [[UInt8]] = (1...3).map { [0x02, 0, 0, 0, 0, $0] }
             for mac in macs {
                 try await harness.client.send(pxeDiscover(mac: mac).encoded(), to: harness.ports.dhcp)
@@ -398,7 +435,7 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
             await harness.server.stop()
 
             var buffered: [MACAddress] = []
-            for await client in harness.server.clients { buffered.append(client.mac) }
+            for await case let .offered(client) in harness.server.events { buffered.append(client.mac) }
             #expect(buffered == macs.suffix(2).map { MACAddress(bytes: $0)! })
         }
     }
@@ -428,7 +465,7 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
     @Test func stopBeforeStartEndsServer() async throws {
         let server = PXEServer(configuration: PXEConfiguration(interface: "lo0", tftpRoot: FileManager.default.temporaryDirectory))
         await server.stop()
-        for await _ in server.clients {}
+        for await _ in server.events {}
         await #expect(throws: PXEServerError.stopped) {
             try await server.start()
         }

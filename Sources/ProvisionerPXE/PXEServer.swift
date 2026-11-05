@@ -18,8 +18,8 @@ public struct PXEConfiguration: Sendable {
     public var tftpTimeout: TimeAmount = .seconds(1)
     /// Concurrent TFTP transfers; a read request beyond this gets an error.
     public var maxTransfers = 64
-    /// Reports `clients` holds for a reader that falls behind; older ones are dropped first. At least 1.
-    public var clientBufferLimit = 256
+    /// Events `events` holds for a reader that falls behind; older ones are dropped first. At least 1.
+    public var eventBufferLimit = 256
 
     public init(interface: String, tftpRoot: URL) {
         self.interface = interface
@@ -32,9 +32,9 @@ public struct PXEConfiguration: Sendable {
 /// A server starts once and stops once: `start()` throws on a server that is starting,
 /// running or stopped. A `start()` that throws for any other reason may be retried.
 public final class PXEServer: Sendable {
-    /// One report per PXE discover, firmware retries included. Finishes on `stop()`.
-    /// It holds the newest `clientBufferLimit` reports that no one has read.
-    public let clients: AsyncStream<PXEClient>
+    /// One `offered` per PXE discover, firmware retries included, and one `fileSent` per completed
+    /// TFTP read. Finishes on `stop()`. It holds the newest `eventBufferLimit` events that no one has read.
+    public let events: AsyncStream<PXEEvent>
 
     private enum State {
         case idle
@@ -46,15 +46,15 @@ public final class PXEServer: Sendable {
 
     private let configuration: PXEConfiguration
     private let group: any EventLoopGroup
-    private let clientsContinuation: AsyncStream<PXEClient>.Continuation
+    private let eventsContinuation: AsyncStream<PXEEvent>.Continuation
     private let state = NIOLockedValueBox(State.idle)
 
     public init(configuration: PXEConfiguration, group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) {
-        precondition(configuration.clientBufferLimit >= 1, "clientBufferLimit must be at least 1")
+        precondition(configuration.eventBufferLimit >= 1, "eventBufferLimit must be at least 1")
         self.configuration = configuration
         self.group = group
-        (clients, clientsContinuation) = AsyncStream.makeStream(
-            of: PXEClient.self, bufferingPolicy: .bufferingNewest(configuration.clientBufferLimit))
+        (events, eventsContinuation) = AsyncStream.makeStream(
+            of: PXEEvent.self, bufferingPolicy: .bufferingNewest(configuration.eventBufferLimit))
     }
 
     /// The ports bound by `start()`, which differ from the configuration when it asks for port 0.
@@ -92,16 +92,20 @@ public final class PXEServer: Sendable {
         let host = Self.dottedQuad(interface.address)
         let responder = ProxyDHCPResponder(serverAddress: interface.address, bootFilename: configuration.bootFilename)
         let offerDestination = try configuration.offerDestination ?? SocketAddress(ipAddress: "255.255.255.255", port: 68)
-        let report: @Sendable (PXEClient) -> Void = { [clientsContinuation] in clientsContinuation.yield($0) }
+        let events = eventsContinuation
+        let leases = LeaseTable()
 
         var bound: [any Channel] = []
         let listener = TFTPListenerHandler(
             root: TFTPRoot(configuration.tftpRoot), host: host, defaultTimeout: configuration.tftpTimeout,
-            mtu: interface.mtu, maxTransfers: configuration.maxTransfers
+            mtu: interface.mtu, maxTransfers: configuration.maxTransfers,
+            leases: leases, report: { events.yield(.fileSent($0)) }
         )
         do {
             for (listener, port) in [(DHCPListener.dhcp, configuration.dhcpPort), (.pxe, configuration.pxePort)] {
-                let handler = DHCPHandler(listener: listener, responder: responder, offerDestination: offerDestination, report: report)
+                let handler = DHCPHandler(
+                    listener: listener, responder: responder, offerDestination: offerDestination,
+                    leases: leases, report: { events.yield(.offered($0)) })
                 bound.append(try await bindDHCP(port: port, interfaceIndex: interface.index, handler: handler))
             }
             bound.append(try await DatagramBootstrap(group: group)
@@ -134,7 +138,7 @@ public final class PXEServer: Sendable {
         }
     }
 
-    /// Releases the ports, ends transfers and finishes `clients`. The server cannot start again.
+    /// Releases the ports, ends transfers and finishes `events`. The server cannot start again.
     /// During a `start()`, waits for that start to close what it bound.
     public func stop() async {
         let previous = state.withLockedValue { state in
@@ -146,7 +150,7 @@ public final class PXEServer: Sendable {
         case let .starting(started): try? await started.get()
         case .idle, .stopped: break
         }
-        clientsContinuation.finish()
+        eventsContinuation.finish()
     }
 
     private static func close(_ channels: [any Channel], _ listener: TFTPListenerHandler) async {

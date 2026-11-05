@@ -29,15 +29,22 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
     private let defaultTimeout: TimeAmount
     private let maxBlockSize: Int
     private let maxTransfers: Int
+    private let leases: LeaseTable
+    private let report: @Sendable (TFTPDelivery) -> Void
     private let registry = NIOLockedValueBox(Registry())
 
-    init(root: TFTPRoot, host: String, defaultTimeout: TimeAmount, mtu: Int, maxTransfers: Int) {
+    init(
+        root: TFTPRoot, host: String, defaultTimeout: TimeAmount, mtu: Int, maxTransfers: Int,
+        leases: LeaseTable, report: @escaping @Sendable (TFTPDelivery) -> Void
+    ) {
         self.root = root
         self.host = host
         self.defaultTimeout = defaultTimeout
         // IPv4 (20) and UDP (8) headers plus the 4-byte DATA header.
         maxBlockSize = min(mtu - 32, Self.largestSendableBlock)
         self.maxTransfers = maxTransfers
+        self.leases = leases
+        self.report = report
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -85,13 +92,15 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
         let negotiation = TFTPNegotiation(requested: options, fileSize: Int(status.st_size), maxBlockSize: maxBlockSize)
         let timeout = negotiation.timeoutSeconds.map { TimeAmount.seconds(Int64($0)) } ?? defaultTimeout
         let transfer = TFTPTransfer(fileSize: Int(status.st_size), negotiation: negotiation)
+        let delivery = delivery(of: filename, bytes: Int(status.st_size), to: client)
 
         DatagramBootstrap(group: context.eventLoop)
             .channelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandler(TFTPTransferHandler(
                         transfer: transfer, negotiation: negotiation, descriptor: descriptor,
-                        client: client, timeout: timeout
+                        client: client, timeout: timeout,
+                        completed: { [self] in report(delivery()) }
                     ))
                 }
             }
@@ -105,6 +114,19 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
                     release(client, id: id)
                 }
             }
+    }
+
+    /// Builds the report when the transfer completes, so a DHCP request seen meanwhile still names the MAC.
+    private func delivery(of filename: String, bytes: Int, to client: SocketAddress) -> () -> TFTPDelivery {
+        let name = String(filename.drop { $0 == "/" })
+        var address: UInt32?
+        if case let .v4(v4) = client {
+            address = UInt32(bigEndian: v4.address.sin_addr.s_addr)
+        }
+        let clientAddress = client.ipAddress ?? "\(client)"
+        return { [leases] in
+            TFTPDelivery(filename: name, clientAddress: clientAddress, mac: address.flatMap(leases.mac(at:)), bytes: bytes)
+        }
     }
 
     /// Claims the client's slot, ending any transfer it already has. nil when the server is full or stopped.
