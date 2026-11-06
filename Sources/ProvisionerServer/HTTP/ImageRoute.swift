@@ -14,21 +14,21 @@ func addImageRoute(to router: Router<some RequestContext>, provisioner: Provisio
         let handle = try FileHandle(forReadingFrom: image.url)
         let body = ResponseBody(contentLength: image.size) { writer in
             defer { try? handle.close() }
-            await provisioner.downloadStarted(name, total: image.size)
+            let download = await provisioner.downloadStarted(name, total: image.size)
             var sent = 0
             do {
                 while sent < image.size,
                       let chunk = try handle.read(upToCount: min(chunkSize, image.size - sent)), !chunk.isEmpty {
                     try await writer.write(ByteBuffer(bytes: chunk))
                     sent += chunk.count
-                    await provisioner.downloadProgressed(name, bytes: sent)
+                    if let download { await provisioner.downloadProgressed(download, bytes: sent) }
                 }
                 try await writer.finish(nil)
             } catch {
-                await provisioner.downloadEnded(name, bytes: sent)
+                if let download { await provisioner.downloadEnded(download, bytes: sent) }
                 throw error
             }
-            await provisioner.downloadEnded(name, bytes: sent)
+            if let download { await provisioner.downloadEnded(download, bytes: sent) }
         }
         return Response(status: .ok, headers: [.contentType: "application/octet-stream"], body: body)
     }

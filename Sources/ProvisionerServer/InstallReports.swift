@@ -23,6 +23,14 @@ func sanitizeReason(_ text: String?) -> String {
     return cut.isEmpty ? defaultFailureReason : cut
 }
 
+func reportedStep(_ stage: Components.Schemas.InstallStage) -> Components.Schemas.ProvisioningStep? {
+    switch stage {
+    case .lateCommands, .identity, .tooling, .tailscale: .configuring
+    case .done: .installed
+    default: nil
+    }
+}
+
 extension Provisioner {
     func report(_ report: Components.Schemas.InstallReport) throws(ProvisionerFailure) -> Components.Schemas.InstallReportResult.ResultPayload {
         try validate(report)
@@ -76,14 +84,6 @@ extension Provisioner {
                                         reason: reason, source: .installer, step: failureStep)) }
         }
         return .recorded
-    }
-
-    private func reportedStep(_ stage: Components.Schemas.InstallStage) -> Components.Schemas.ProvisioningStep? {
-        switch stage {
-        case .lateCommands, .identity, .tooling, .tailscale: .configuring
-        case .done: .installed
-        default: nil
-        }
     }
 
     private func validate(_ report: Components.Schemas.InstallReport) throws(ProvisionerFailure) {

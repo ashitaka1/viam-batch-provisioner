@@ -23,6 +23,19 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
     #expect(steps == ["step-reached m-1 configuring", "step-reached m-1 installed"])
 }
 
+@Test func installerStagesReachTheirSteps() async throws {
+    #expect(reportedStep(.installer) == nil)
+    #expect(reportedStep(.identity) == .configuring)
+    #expect(reportedStep(.tailscale) == .configuring)
+    #expect(reportedStep(.done) == .installed)
+
+    let (provisioner, _) = try await queued()
+    _ = try await provisioner.report(report(.progress, .identity, name: "m-1"))
+    _ = try await provisioner.report(report(.progress, .tailscale, name: "m-1"))
+    #expect(try await provisioner.entry("m-1").steps?.map(\.step) == [.configuring])
+    #expect(await eventSummary(provisioner).filter { $0.hasPrefix("step-reached") } == ["step-reached m-1 configuring"])
+}
+
 @Test func installerFailureNamesInstalling() async throws {
     let (provisioner, _) = try await queued()
     _ = try await provisioner.report(report(.failed, .installer, name: "m-1", reason: "disk"))
@@ -67,18 +80,26 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
     let entry = try await reopened.entry("m-1")
     #expect(entry.status == .assigned)
     #expect(entry.steps?.map(\.step) == [.found])
-    #expect(derivedStatus(MachineRecord(attempt: 2, steps: record.steps)) == .queued)
+}
+
+@Test func stepsOfAnEarlierAttemptAloneReadQueued() {
+    let steps = [StepRecord(step: "found", at: t0, attempt: 1)]
+    #expect(derivedStatus(MachineRecord(attempt: 2, steps: steps)) == .queued)
 }
 
 @Test func beginAttemptKeepsStepsAndClearsTheRest() async throws {
     let (provisioner, _) = try await queued()
-    var record = MachineRecord(attempt: 1, stage: "tooling", failedAt: t0, failureReason: "x", failureSource: "installer",
+    let earlier = t0.addingTimeInterval(-600)
+    var record = MachineRecord(attempt: 1, stage: "tooling", attemptStartedAt: earlier, progressAt: earlier,
+                               failedAt: t0, failureReason: "x", failureSource: "installer",
                                steps: [StepRecord(step: "found", at: t0, attempt: 1)], bootFilesSent: ["a"],
                                downloadBytes: 1, downloadTotal: 2, failureStep: "configuring")
     await provisioner.beginAttempt(&record)
 
     #expect(record.attempt == 2)
-    #expect(record.stage == nil && record.failedAt == nil && record.failureStep == nil)
+    #expect(record.attemptStartedAt == t0)
+    #expect(record.stage == nil && record.progressAt == nil && record.failedAt == nil && record.failureStep == nil)
+    #expect(record.failureReason == nil && record.failureSource == nil)
     #expect(record.bootFilesSent.isEmpty && record.downloadBytes == nil && record.downloadTotal == nil)
     #expect(record.steps.count == 1)
     #expect(derivedStatus(record) == .queued)
@@ -105,7 +126,8 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
     #expect(await eventSummary(provisioner) == ["step-reached m-1 found"])
 }
 
-@Test func failedSaveEmitsNoStepReached() async throws {
+@Test(.enabled(if: directoryPermissionsApply))
+func failedSaveEmitsNoStepReached() async throws {
     let (provisioner, dir) = try await queued()
     try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.machines.path)
     defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.machines.path) }

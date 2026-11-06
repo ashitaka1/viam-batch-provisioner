@@ -117,13 +117,18 @@ private struct CapturingHandler: LogHandler {
         set { metadata[key] = newValue }
     }
 
-    func log(level: Logger.Level, message: Logger.Message, metadata: Logger.Metadata?,
-             source: String, file: String, function: String, line: UInt) {
-        if level >= .error { log.append(message.description) }
+    func log(event: LogEvent) {
+        if event.level >= .error { log.append(event.message.description) }
     }
 }
 
-/// Binds `aa:bb:cc:00:00:01` to `m-1`.
+/// Root writes into a directory whatever its mode, so a test that fails a save
+/// by taking away write permission can't run as root.
+let directoryPermissionsApply = getuid() != 0
+
+/// Binds `aa:bb:cc:00:00:01` to `m-1` and `aa:bb:cc:00:00:02` to `m-2`.
 struct FixedBindings: MachineBindings {
-    func name(boundTo mac: String) async -> String? { mac == "aa:bb:cc:00:00:01" ? "m-1" : nil }
+    func name(boundTo mac: String) async -> String? {
+        ["aa:bb:cc:00:00:01": "m-1", "aa:bb:cc:00:00:02": "m-2"][mac]
+    }
 }

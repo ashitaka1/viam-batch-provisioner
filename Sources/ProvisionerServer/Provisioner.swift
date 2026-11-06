@@ -22,8 +22,8 @@ actor Provisioner {
     let journal: EventJournal
     let bootImage: BootImage?
     private var fanout = EventFanout()
-    /// The last journaled progress of each download in flight, by queue key.
-    var downloads: [String: DownloadMark] = [:]
+    /// Each image stream in flight, by the id `downloadStarted` gave it.
+    var downloads: [UUID: DownloadMark] = [:]
 
     init(dataDirectory: DataDirectory, bindings: any MachineBindings = NoBindings(), bootImage: BootImage? = nil,
          now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {

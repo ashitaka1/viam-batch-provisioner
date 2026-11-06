@@ -98,5 +98,6 @@ func dataDirectoryBesideFilesIsAccepted(relative: String) throws {
 
     #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(base + ["--boot-image", "../x.iso"]) }
     #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(base + ["--boot-image", "ubuntu/missing.iso"]) }
+    #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(base + ["--boot-image", "ubuntu"]) }
     #expect(try ServerConfiguration.parse(base + ["--boot-image", "ubuntu/x.iso"]).bootImage == "ubuntu/x.iso")
 }

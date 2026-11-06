@@ -5,8 +5,8 @@ import Testing
 
 private let mac = "aa:bb:cc:00:00:01"
 
-private func bound() async throws -> Provisioner {
-    let (provisioner, _) = try makeProvisioner(bindings: FixedBindings())
+private func bound(now: @escaping @Sendable () -> Date = { t0 }) async throws -> Provisioner {
+    let (provisioner, _) = try makeProvisioner(bindings: FixedBindings(), now: now)
     _ = try await provisioner.provision([request("m-1")])
     return provisioner
 }
@@ -22,6 +22,7 @@ private func stepList(_ provisioner: Provisioner) async throws -> [String] {
     let entry = try await provisioner.entry("m-1")
     #expect(try await stepList(provisioner) == ["found@1"])
     #expect(entry.status == .assigned)
+    #expect(await provisioner.machineRecord("m-1")?.attemptStartedAt == t0)
     #expect(await eventSummary(provisioner) == ["step-reached m-1 found"])
 }
 
@@ -62,8 +63,10 @@ private func stepList(_ provisioner: Provisioner) async throws -> [String] {
 }
 
 @Test func offerAfterFailureClearsIt() async throws {
-    let provisioner = try await bound()
+    let clock = TestClock()
+    let provisioner = try await bound(now: { clock.now })
     _ = try await provisioner.report(report(.failed, .installer, name: "m-1", reason: "disk"))
+    clock.advance(60)
     await provisioner.observe(.offered(mac: mac))
 
     let entry = try await provisioner.entry("m-1")
@@ -71,6 +74,29 @@ private func stepList(_ provisioner: Provisioner) async throws -> [String] {
     #expect(entry.failureReason == nil)
     #expect(entry.failureStep == nil)
     #expect(await provisioner.machineRecord("m-1")?.attempt == 2)
+    #expect(await provisioner.machineRecord("m-1")?.attemptStartedAt == t0.addingTimeInterval(60))
+}
+
+@Test func bootFilesBeforeAnyOfferAreIgnored() async throws {
+    let provisioner = try await bound()
+    await provisioner.observe(.fileSent(filename: "hwe-initrd", mac: mac))
+    await provisioner.observe(.fileSent(filename: "hwe-vmlinuz", mac: mac))
+
+    #expect(await provisioner.machineRecord("m-1") == nil)
+    #expect(await eventSummary(provisioner).isEmpty)
+}
+
+@Test func failedMachineBootsWithinItsAttempt() async throws {
+    let provisioner = try await bound()
+    await provisioner.observe(.offered(mac: mac))
+    _ = try await provisioner.report(report(.failed, .installer, name: "m-1", reason: "disk"))
+    await provisioner.observe(.fileSent(filename: "hwe-initrd", mac: mac))
+    await provisioner.observe(.fileSent(filename: "hwe-vmlinuz", mac: mac))
+
+    let entry = try await provisioner.entry("m-1")
+    #expect(try await stepList(provisioner) == ["found@1", "booting@1"])
+    #expect(entry.status == .failed)
+    #expect(entry.failureReason == "disk")
 }
 
 @Test func offerToInstalledChangesNothing() async throws {
@@ -93,7 +119,8 @@ private func stepList(_ provisioner: Provisioner) async throws -> [String] {
     #expect(await eventSummary(provisioner).isEmpty)
 }
 
-@Test func saveFailureEmitsNothing() async throws {
+@Test(.enabled(if: directoryPermissionsApply))
+func saveFailureEmitsNothing() async throws {
     let log = CapturedLog()
     let dir = DataDirectory(try temporaryDirectory())
     let provisioner = try Provisioner(dataDirectory: dir, bindings: FixedBindings(), logger: log.logger)

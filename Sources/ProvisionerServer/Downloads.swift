@@ -1,9 +1,13 @@
 import Foundation
 import ProvisionerAPI
 
+/// One image stream in flight and its last journaled progress.
 struct DownloadMark: Sendable {
+    let key: String
+    /// The queue entry's `addedAt`, so a stream that outlives its entry records nothing on a re-queued one.
+    let entry: Date
+    let total: Int
     var bytes: Int
-    var total: Int
     var at: Date
 }
 
@@ -19,9 +23,12 @@ extension Provisioner {
         return bootImage
     }
 
-    func downloadStarted(_ name: String, total: Int) {
-        guard let (queued, store, found) = downloadingMachine(name) else { return }
-        var record = found
+    /// Records the start of a stream to `name` and returns the id the stream
+    /// reports under; nil when nothing is recorded for it.
+    func downloadStarted(_ name: String, total: Int) -> UUID? {
+        guard let (queued, store) = try? lookup(name) else { return nil }
+        var record = store.machine(queued.key) ?? MachineRecord()
+        guard derivedStatus(record) != .installed else { return nil }
         if record.attempt == 0 {
             record.attempt = 1
             record.attemptStartedAt = now()
@@ -29,29 +36,31 @@ extension Provisioner {
         let added = reach(.downloading, &record)
         record.downloadBytes = 0
         record.downloadTotal = total
-        guard save(record, queued, store) else { return }
-        downloads[queued.key] = DownloadMark(bytes: 0, total: total, at: now())
+        guard save(record, queued, store) else { return nil }
+        let id = UUID()
+        downloads[id] = DownloadMark(key: queued.key, entry: queued.addedAt, total: total, bytes: 0, at: now())
         if let added { announce(added, name: queued.name, mac: nil) }
         emitProgress(queued.name, bytes: 0, total: total)
+        return id
     }
 
-    func downloadProgressed(_ name: String, bytes: Int) {
-        let key = name.lowercased()
-        guard let mark = downloads[key] else { return }
+    func downloadProgressed(_ id: UUID, bytes: Int) {
+        guard let mark = downloads[id] else { return }
         let time = now()
         guard Double(bytes - mark.bytes) >= progressFraction * Double(mark.total),
               time.timeIntervalSince(mark.at) >= progressInterval,
-              let (queued, store, found) = downloadingMachine(name) else { return }
+              let (queued, store, found) = downloadingMachine(mark) else { return }
         var record = found
         record.downloadBytes = bytes
         guard save(record, queued, store) else { return }
-        downloads[key] = DownloadMark(bytes: bytes, total: mark.total, at: time)
+        downloads[id]?.bytes = bytes
+        downloads[id]?.at = time
         emitProgress(queued.name, bytes: bytes, total: mark.total)
     }
 
-    func downloadEnded(_ name: String, bytes: Int) {
-        guard let mark = downloads.removeValue(forKey: name.lowercased()),
-              let (queued, store, found) = downloadingMachine(name) else { return }
+    func downloadEnded(_ id: UUID, bytes: Int) {
+        guard let mark = downloads.removeValue(forKey: id),
+              let (queued, store, found) = downloadingMachine(mark) else { return }
         var record = found
         record.downloadBytes = bytes
         let added = bytes == mark.total ? reach(.installing, &record) : nil
@@ -60,9 +69,10 @@ extension Provisioner {
         emitProgress(queued.name, bytes: bytes, total: mark.total)
     }
 
-    /// The queued machine `name` and its record, unless it is installed.
-    private func downloadingMachine(_ name: String) -> (QueueRecord, MachineStore, MachineRecord)? {
-        guard let (queued, store) = try? lookup(name) else { return nil }
+    /// The entry the stream started for and its record, unless that entry is
+    /// gone or the machine is installed.
+    private func downloadingMachine(_ mark: DownloadMark) -> (QueueRecord, MachineStore, MachineRecord)? {
+        guard let (queued, store) = try? lookup(mark.key), queued.addedAt == mark.entry else { return nil }
         let record = store.machine(queued.key) ?? MachineRecord()
         return derivedStatus(record) == .installed ? nil : (queued, store, record)
     }
