@@ -336,7 +336,7 @@ private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
         provisioner: provisioner,
         configuration: ServerConfiguration(port: 0, bind: "127.0.0.1", files: directory, dataDirectory: directory,
                                            advertiseAddress: "127.0.0.1:8234"),
-        streamOptions: StreamOptions(keepalive: .seconds(60), limit: 1, buffer: 4), streams: StreamLimiter(limit: 1),
+        streamOptions: StreamOptions(keepalive: .seconds(60), buffer: 4), streams: StreamLimiter(),
         serverName: "test", logger: testLogger)
 
     guard case .ok(let ok) = try await handler.streamEvents(.init(query: .init(), headers: .init())),
@@ -346,16 +346,13 @@ private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
         _ = try await provisioner.report(report(.progress, stage, name: "m-1"))
     }
 
-    let freed = TestFlag()
-    try await poll(within: .seconds(2)) {
-        if await handler.streams.acquire() { freed.set() }
-        return freed.isSet
-    }
-    #expect(freed.isSet, "the stalled stream still holds its slot, so it was never dropped")
-    withExtendedLifetime(body) {}
+    let frames = try await drain(body)
+    #expect(frames.count == 5, "expected retry and 4 events before the stream ended; got \(frames.count) frames")
+    #expect(frameIDs(frames) == ["1", "2", "3", "4"])
 }
 
-/// With no room past the `retry` frame, the first keepalive overflows and ends the stream.
+/// With no live events and `buffer: 0`, the `retry` frame fills the buffer, so the only
+/// frame that can overflow it is the first keepalive.
 @Test func keepaliveIntoAFullBufferEndsTheStream() async throws {
     let (live, _) = AsyncStream.makeStream(of: Schemas.MachineEvent.self)
     let cancelled = TestFlag()
@@ -367,5 +364,6 @@ private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
 
     #expect(released.isSet, "a keepalive into a full buffer left the stream open")
     #expect(cancelled.isSet)
-    withExtendedLifetime(body) {}
+    let frames = try await drain(body)
+    #expect(frames.map { String(decoding: $0, as: UTF8.self) } == ["retry: 3000\n\n"], "the client should see retry, then the end")
 }
