@@ -4,7 +4,7 @@ Date: 2026-11-04
 
 ## Status
 
-Accepted. Supersedes 40 for the Mac app.
+Superseded by 49. It superseded 40 for the Mac app.
 
 ## Context
 
