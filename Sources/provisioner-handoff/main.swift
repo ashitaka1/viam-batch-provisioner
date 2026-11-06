@@ -1,11 +1,11 @@
 import AppKit
 import Foundation
 import ProvisionerKit
-import ProvisionerPairHost
+import ProvisionerKeyHandoffHost
 import SystemConfiguration
 
 let usage = """
-    usage: provisioner-pair [--org-id <id>]
+    usage: provisioner-handoff [--org-id <id>]
 
     Signs the Viam Provisioner app in to one Viam organization: creates an API key
     for the app with your viam CLI login and hands it to the app after you confirm
@@ -24,7 +24,7 @@ var requestedOrgID: String?
 while let argument = arguments.popFirst() {
     switch argument {
     case "--org-id": requestedOrgID = arguments.popFirst() ?? { fail(usage) }()
-    case "--qr": fail("QR pairing ships with the iOS app.")
+    case "--qr": fail("QR handoff ships with the iOS app.")
     case "-h", "--help": print(usage); exit(0)
     default: fail(usage)
     }
@@ -32,10 +32,10 @@ while let argument = arguments.popFirst() {
 
 // MARK: Pick the org
 
-guard let executable = await ViamCLI.locate() else { fail(pairingCLIMessage(ViamCLIError.notInstalled)) }
+guard let executable = await ViamCLI.locate() else { fail(handoffCLIMessage(ViamCLIError.notInstalled)) }
 let cli = ViamCLI(run: ViamCLI.processRunner(executable: executable))
 let orgs: [(id: String, name: String)]
-do { orgs = try await cli.organizations() } catch { fail(pairingCLIMessage(error)) }
+do { orgs = try await cli.organizations() } catch { fail(handoffCLIMessage(error)) }
 
 let org: (id: String, name: String)
 if let requestedOrgID {
@@ -53,18 +53,18 @@ if let requestedOrgID {
     org = orgs[choice - 1]
 }
 
-// MARK: Pair
+// MARK: Handoff
 
 /// Everything the main flow waits on: host events and the operator's answers.
 enum Input: Sendable {
-    case event(PairingHost.Event)
+    case event(HandoffHost.Event)
     case line(String?)
 }
 
 let (inputs, input) = AsyncStream<Input>.makeStream()
-let host = PairingHost(orgID: org.id, orgName: org.name)
-let server: PairingHTTPServer
-do { server = try await PairingHTTPServer.start(host: host) } catch { fail("Couldn't start the pairing listener: \(error)") }
+let host = HandoffHost(orgID: org.id, orgName: org.name)
+let server: HandoffHTTPServer
+do { server = try await HandoffHTTPServer.start(host: host) } catch { fail("Couldn't start the handoff listener: \(error)") }
 Task {
     for await event in host.events { input.yield(.event(event)) }
 }
@@ -75,7 +75,7 @@ func finish(_ message: String, status: Int32) async -> Never {
     exit(status)
 }
 
-let link = PairingLink(host: "127.0.0.1", port: server.port, nonce: host.nonce)
+let link = HandoffLink(host: "127.0.0.1", port: server.port, nonce: host.nonce)
 guard await MainActor.run(body: { NSWorkspace.shared.open(link.url) }) else {
     await host.cancel()
     await finish("Couldn't open the Viam Provisioner app. Build and register it with 'just app', then try again.", status: 1)
@@ -95,7 +95,7 @@ func converse() async -> Never {
         }
     }
 
-    print("Pairing with \(org.name).")
+    print("Handing off a key for \(org.name).")
     let shownCode = isatty(STDOUT_FILENO) != 0 && ProcessInfo.processInfo.environment["NO_COLOR"] == nil
         ? "\u{1B}[1;36m\(code!)\u{1B}[0m" : code!
     print("Does the app show \(shownCode)? [y/N] ", terminator: "")

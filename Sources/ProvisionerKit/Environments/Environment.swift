@@ -6,7 +6,7 @@ public struct Environment: Codable, Sendable, Equatable, Identifiable {
     public var id: UUID
     public var name: String
     public var orgID: String?
-    /// The org's name when it was chosen, shown when the org is no longer paired.
+    /// The org's name when it was chosen, shown when the org is no longer listed.
     public var orgName: String?
     public var locationID: String?
     /// The location's name when it was chosen, shown while Viam can't be reached.

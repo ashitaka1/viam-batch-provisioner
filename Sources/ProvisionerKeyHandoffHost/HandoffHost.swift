@@ -1,7 +1,7 @@
 import Foundation
 public import ProvisionerKit
 
-public enum PairingHostError: Error, Equatable, Sendable {
+public enum HandoffHostError: Error, Equatable, Sendable {
     case wrongNonce
     case alreadyConnected
     /// The request's app key isn't the one that said hello, or no app has.
@@ -13,34 +13,34 @@ public enum PairingHostError: Error, Equatable, Sendable {
     case finished
 }
 
-/// The command's side of one pairing session, independent of transport: accepts
+/// The command's side of one handoff session, independent of transport: accepts
 /// the first app that says hello, takes its commitment, shows the code once the
 /// app reveals what it committed to, hands it the sealed key once the operator
 /// confirms, and ends on the app's result, a cancel from either side, or a
 /// deadline: `timeout` from creation until the key is released, then
 /// `resultTimeout` for the app to validate and report.
-public actor PairingHost {
+public actor HandoffHost {
     public enum Event: Equatable, Sendable {
         case connected(code: String)
         case cancelledByApp
-        case result(PairingResult.Outcome, message: String?)
+        case result(HandoffResult.Outcome, message: String?)
         case timedOut
     }
 
     private enum State {
         case waiting
         case committed(Data)
-        case connected(appKey: String, secrets: PairingSecrets)
+        case connected(appKey: String, secrets: HandoffSecrets)
         case released(appKey: String, sealed: Data)
-        case ended(PairingHostError)
+        case ended(HandoffHostError)
     }
 
-    public nonisolated let nonce: PairingNonce
+    public nonisolated let nonce: HandoffNonce
     public nonisolated let events: AsyncStream<Event>
     private let continuation: AsyncStream<Event>.Continuation
     private let orgID: String
     private let orgName: String
-    private let keys = PairingKeyPair()
+    private let keys = HandoffKeyPair()
     private var state = State.waiting
     private var keyWaiters: [CheckedContinuation<Data, any Error>] = []
     private var keyRequestedWaiters: [CheckedContinuation<Void, Never>] = []
@@ -54,8 +54,8 @@ public actor PairingHost {
     /// How long the app has, after the key is released, to report the result.
     public static let defaultResultTimeout: Duration = .seconds(120)
 
-    public init(orgID: String, orgName: String, nonce: PairingNonce = .random(), timeout: Duration = .seconds(120),
-                resultTimeout: Duration = PairingHost.defaultResultTimeout,
+    public init(orgID: String, orgName: String, nonce: HandoffNonce = .random(), timeout: Duration = .seconds(120),
+                resultTimeout: Duration = HandoffHost.defaultResultTimeout,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.orgID = orgID
         self.orgName = orgName
@@ -85,64 +85,64 @@ public actor PairingHost {
 
     // MARK: Requests from the app
 
-    public func hello(_ hello: PairingHello) throws -> PairingHelloReply {
-        guard hello.nonce == nonce.base64URL else { throw PairingHostError.wrongNonce }
+    public func hello(_ hello: HandoffHello) throws -> HandoffHelloReply {
+        guard hello.nonce == nonce.base64URL else { throw HandoffHostError.wrongNonce }
         switch state {
         case .waiting: break
         case .ended(let error): throw error
-        case .committed, .connected, .released: throw PairingHostError.alreadyConnected
+        case .committed, .connected, .released: throw HandoffHostError.alreadyConnected
         }
         guard let commitment = Data(base64Encoded: hello.commitment), commitment.count == 32 else {
-            throw PairingHostError.unknownSession
+            throw HandoffHostError.unknownSession
         }
         state = .committed(commitment)
-        return PairingHelloReply(commandPublicKey: keys.publicKey.base64EncodedString(), orgID: orgID, orgName: orgName)
+        return HandoffHelloReply(commandPublicKey: keys.publicKey.base64EncodedString(), orgID: orgID, orgName: orgName)
     }
 
     /// The app reveals the key and nonce it committed to; the code is shown only now.
-    public func reveal(_ reveal: PairingReveal) throws {
-        guard reveal.nonce == nonce.base64URL else { throw PairingHostError.wrongNonce }
+    public func reveal(_ reveal: HandoffReveal) throws {
+        guard reveal.nonce == nonce.base64URL else { throw HandoffHostError.wrongNonce }
         let commitment: Data
         switch state {
         case .committed(let committed): commitment = committed
         case .ended(let error): throw error
-        case .waiting, .connected, .released: throw PairingHostError.unknownSession
+        case .waiting, .connected, .released: throw HandoffHostError.unknownSession
         }
         guard let appKey = Data(base64Encoded: reveal.appPublicKey),
-              let appNonce = PairingNonce(base64URL: reveal.appNonce),
-              PairingCommitment.verify(commitment, appPublicKey: appKey, appNonce: appNonce) else {
-            throw PairingHostError.commitmentMismatch
+              let appNonce = HandoffNonce(base64URL: reveal.appNonce),
+              HandoffCommitment.verify(commitment, appPublicKey: appKey, appNonce: appNonce) else {
+            throw HandoffHostError.commitmentMismatch
         }
-        let secrets: PairingSecrets
+        let secrets: HandoffSecrets
         do {
-            secrets = try PairingSecrets(own: keys, peerPublicKey: appKey, nonce: nonce, commandPublicKey: keys.publicKey,
+            secrets = try HandoffSecrets(own: keys, peerPublicKey: appKey, nonce: nonce, commandPublicKey: keys.publicKey,
                                          appPublicKey: appKey, appNonce: appNonce)
         } catch {
-            throw PairingHostError.commitmentMismatch
+            throw HandoffHostError.commitmentMismatch
         }
         state = .connected(appKey: reveal.appPublicKey, secrets: secrets)
         continuation.yield(.connected(code: secrets.code))
     }
 
     /// Returns once the operator confirms; throws if the session ends first.
-    public func awaitKey(_ request: PairingSessionRequest) async throws -> PairingSealed {
+    public func awaitKey(_ request: HandoffSessionRequest) async throws -> HandoffSealed {
         try checkSession(request.nonce, request.appPublicKey)
-        if case .released(_, let sealed) = state { return PairingSealed(sealed: sealed.base64EncodedString()) }
+        if case .released(_, let sealed) = state { return HandoffSealed(sealed: sealed.base64EncodedString()) }
         let sealed = try await withCheckedThrowingContinuation { waiter in
             keyWaiters.append(waiter)
             for waiter in keyRequestedWaiters { waiter.resume() }
             keyRequestedWaiters = []
         }
-        return PairingSealed(sealed: sealed.base64EncodedString())
+        return HandoffSealed(sealed: sealed.base64EncodedString())
     }
 
-    public func report(_ result: PairingResult) throws {
+    public func report(_ result: HandoffResult) throws {
         try checkSession(result.nonce, result.appPublicKey)
-        guard case .released = state else { throw PairingHostError.unknownSession }
+        guard case .released = state else { throw HandoffHostError.unknownSession }
         end(.finished, event: .result(result.outcome, message: result.message))
     }
 
-    public func appCancel(_ request: PairingSessionRequest) throws {
+    public func appCancel(_ request: HandoffSessionRequest) throws {
         try checkSession(request.nonce, request.appPublicKey)
         end(.cancelled, event: .cancelledByApp)
     }
@@ -150,9 +150,9 @@ public actor PairingHost {
     // MARK: From the command
 
     /// Seals the key for the connected app. Call only after the operator confirms the code.
-    public func release(_ payload: PairingPayload) throws {
+    public func release(_ payload: HandoffPayload) throws {
         switch state {
-        case .waiting, .committed, .released: throw PairingHostError.unknownSession
+        case .waiting, .committed, .released: throw HandoffHostError.unknownSession
         case .ended(let error): throw error
         case .connected(let appKey, let secrets):
             let sealed = try secrets.seal(payload)
@@ -177,16 +177,16 @@ public actor PairingHost {
     }
 
     private func checkSession(_ requestNonce: String, _ appKey: String) throws {
-        guard requestNonce == nonce.base64URL else { throw PairingHostError.wrongNonce }
+        guard requestNonce == nonce.base64URL else { throw HandoffHostError.wrongNonce }
         switch state {
-        case .waiting, .committed: throw PairingHostError.unknownSession
+        case .waiting, .committed: throw HandoffHostError.unknownSession
         case .ended(let error): throw error
         case .connected(let connected, _), .released(let connected, _):
-            guard connected == appKey else { throw PairingHostError.unknownSession }
+            guard connected == appKey else { throw HandoffHostError.unknownSession }
         }
     }
 
-    private func end(_ error: PairingHostError, event: Event?) {
+    private func end(_ error: HandoffHostError, event: Event?) {
         if case .ended = state { return }
         state = .ended(error)
         deadline.cancel()

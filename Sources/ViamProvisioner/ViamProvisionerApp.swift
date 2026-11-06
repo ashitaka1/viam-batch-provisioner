@@ -49,7 +49,7 @@ struct ViamProvisionerApp: App {
                         organizations.clear()
                     }
                 }
-                // The scheme stays registered for a later OAuth callback; pairing links are ignored.
+                // The scheme stays registered for a later OAuth callback; key handoff links are ignored.
                 .onOpenURL { _ in NSApp.activate() }
         }
         .commands { EnvironmentCommands() }

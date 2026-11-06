@@ -14,7 +14,7 @@ let package = Package(
         .library(name: "ProvisionerKit", targets: ["ProvisionerKit"]),
         .library(name: "ViamAPI", targets: ["ViamAPI"]),
         .executable(name: "provisioner-probe", targets: ["provisioner-probe"]),
-        .executable(name: "provisioner-pair", targets: ["provisioner-pair"]),
+        .executable(name: "provisioner-handoff", targets: ["provisioner-handoff"]),
         .executable(name: "ViamProvisioner", targets: ["ViamProvisioner"]),
         .library(name: "ProvisionerServer", targets: ["ProvisionerServer"]),
         .executable(name: "provisioner-server", targets: ["provisioner-server"]),
@@ -116,7 +116,7 @@ let package = Package(
             ]
         ),
         .target(
-            name: "ProvisionerPairHost",
+            name: "ProvisionerKeyHandoffHost",
             dependencies: [
                 "ProvisionerKit",
                 .product(name: "NIOCore", package: "swift-nio"),
@@ -129,12 +129,12 @@ let package = Package(
             dependencies: ["ProvisionerKit", "ViamAPI"]
         ),
         .executableTarget(
-            name: "provisioner-pair",
-            dependencies: ["ProvisionerPairHost", "ProvisionerKit"]
+            name: "provisioner-handoff",
+            dependencies: ["ProvisionerKeyHandoffHost", "ProvisionerKit"]
         ),
         .testTarget(
-            name: "ProvisionerPairHostTests",
-            dependencies: ["ProvisionerPairHost", "ProvisionerKit"]
+            name: "ProvisionerKeyHandoffHostTests",
+            dependencies: ["ProvisionerKeyHandoffHost", "ProvisionerKit"]
         ),
         .testTarget(
             name: "ProvisionerKitTests",

@@ -1,6 +1,6 @@
 import Foundation
 import ProvisionerKit
-@testable import ProvisionerPairHost
+@testable import ProvisionerKeyHandoffHost
 import Testing
 
 private let keyName = "provisioner-app studio 2026-10-31"
@@ -16,7 +16,7 @@ private func cli(stdout: String = keyOutput, before: @escaping @Sendable () asyn
 
 /// A host whose app has connected and is waiting for the key.
 private func connectedApp(timer: ManualTimer = ManualTimer()) async throws
-    -> (host: PairingHost, app: AppSide, key: Task<PairingSealed, any Error>) {
+    -> (host: HandoffHost, app: AppSide, key: Task<HandoffSealed, any Error>) {
     let host = makeHost(timer: timer)
     let app = AppSide(nonce: host.nonce)
     _ = try await app.connect(host)
@@ -25,8 +25,8 @@ private func connectedApp(timer: ManualTimer = ManualTimer()) async throws
     return (host, app, key)
 }
 
-/// Runs the handoff against `host`'s events, as provisioner-pair does after the operator confirms.
-private func handOff(_ host: PairingHost, _ cli: ViamCLI) -> Task<PairingEnd, Never> {
+/// Runs the handoff against `host`'s events, as provisioner-handoff does after the operator confirms.
+private func handOff(_ host: HandoffHost, _ cli: ViamCLI) -> Task<HandoffEnd, Never> {
     Task {
         var events = host.events.makeAsyncIterator()
         return await KeyHandoff(host: host, cli: cli, orgID: "o1", orgName: "Acme", keyName: keyName)
@@ -39,15 +39,15 @@ private func handOff(_ host: PairingHost, _ cli: ViamCLI) -> Task<PairingEnd, Ne
     let end = handOff(host, cli())
     _ = try await key.value
     try await host.report(app.result(.stored))
-    #expect(await end.value == PairingEnd(message: "Signed in to Acme.", succeeded: true))
+    #expect(await end.value == HandoffEnd(message: "Signed in to Acme.", succeeded: true))
 }
 
 @Test(.timeLimit(.minutes(1))) func cliFailureCancelsWithoutAKey() async throws {
     let (host, _, key) = try await connectedApp()
     let loggedOut = ViamCLI(run: { _, _ in (1, "", "Error: not logged in") })
     let end = await handOff(host, loggedOut).value
-    #expect(end == PairingEnd(message: "Run 'viam login' first.", succeeded: false))
-    await #expect(throws: PairingHostError.cancelled, "the app is told the session ended") { try await key.value }
+    #expect(end == HandoffEnd(message: "Run 'viam login' first.", succeeded: false))
+    await #expect(throws: HandoffHostError.cancelled, "the app is told the session ended") { try await key.value }
 }
 
 @Test(arguments: [
@@ -57,7 +57,7 @@ private func handOff(_ host: PairingHost, _ cli: ViamCLI) -> Task<PairingEnd, Ne
     (.unparsableOrganizations, "Couldn't read the viam CLI's organization list. Update it with 'viam update'."),
 ])
 func cliMessages(error: ViamCLIError, expected: String) {
-    #expect(pairingCLIMessage(error) == expected)
+    #expect(handoffCLIMessage(error) == expected)
 }
 
 @Test(.timeLimit(.minutes(1))) func eventsEndingAfterReleaseIsATimeout() async throws {
@@ -72,28 +72,28 @@ func cliMessages(error: ViamCLIError, expected: String) {
     let events = Feed([.connected(code: "1234"), .result(.stored, message: nil)])
     let end = Task { await KeyHandoff(host: host, cli: cli(), orgID: "o1", orgName: "Acme", keyName: keyName).run { await events.next() } }
     _ = try await key.value
-    #expect(await end.value == PairingEnd(message: "Signed in to Acme.", succeeded: true))
+    #expect(await end.value == HandoffEnd(message: "Signed in to Acme.", succeeded: true))
 }
 
 /// Hands out scripted events, then nil.
 private actor Feed {
-    private var events: [PairingHost.Event]
-    init(_ events: [PairingHost.Event]) { self.events = events }
-    func next() -> PairingHost.Event? { events.isEmpty ? nil : events.removeFirst() }
+    private var events: [HandoffHost.Event]
+    init(_ events: [HandoffHost.Event]) { self.events = events }
+    func next() -> HandoffHost.Event? { events.isEmpty ? nil : events.removeFirst() }
 }
 
 @Test(.timeLimit(.minutes(1))) func unparsableKeyCancelsAndNamesTheKey() async throws {
     let (host, _, key) = try await connectedApp()
     let end = await handOff(host, cli(stdout: "Created.\n")).value
-    #expect(end == PairingEnd(message: "The viam CLI created a key but its output couldn't be read. \(hint)", succeeded: false))
-    await #expect(throws: PairingHostError.cancelled, "the app is told the session ended") { try await key.value }
+    #expect(end == HandoffEnd(message: "The viam CLI created a key but its output couldn't be read. \(hint)", succeeded: false))
+    await #expect(throws: HandoffHostError.cancelled, "the app is told the session ended") { try await key.value }
 }
 
 @Test(.timeLimit(.minutes(1))) func sessionEndingBeforeReleaseNamesTheKey() async throws {
     let (host, app, _) = try await connectedApp()
     let cancelWhileCreating = cli(before: { try? await host.appCancel(app.session) })
     let end = await handOff(host, cancelWhileCreating).value
-    #expect(end == PairingEnd(message: "The pairing ended before the key was sent. \(hint)", succeeded: false))
+    #expect(end == HandoffEnd(message: "The handoff ended before the key was sent. \(hint)", succeeded: false))
 }
 
 @Test(.timeLimit(.minutes(1))) func timeoutAfterReleaseNamesTheKey() async throws {
@@ -103,7 +103,7 @@ private actor Feed {
     _ = try await key.value
     await timer.waitForSleeps(2)
     await timer.fire(sleep: 1)
-    #expect(await end.value == PairingEnd(message: """
+    #expect(await end.value == HandoffEnd(message: """
         Timed out waiting for the app after creating key "\(keyName)". If the app's Settings → Organizations \
         doesn't list Acme, delete it in Viam: Organization → API keys → "\(keyName)".
         """, succeeded: false))
@@ -114,7 +114,7 @@ private actor Feed {
     let end = handOff(host, cli())
     _ = try await key.value
     try await host.report(app.result(.rejected, "key revoked"))
-    #expect(await end.value == PairingEnd(message: "The app couldn't use key \"\(keyName)\": key revoked. \(hint)", succeeded: false))
+    #expect(await end.value == HandoffEnd(message: "The app couldn't use key \"\(keyName)\": key revoked. \(hint)", succeeded: false))
 }
 
 @Test(.timeLimit(.minutes(1))) func appCancelAfterReleaseNamesTheKey() async throws {
@@ -122,5 +122,5 @@ private actor Feed {
     let end = handOff(host, cli())
     _ = try await key.value
     try await host.appCancel(app.session)
-    #expect(await end.value == PairingEnd(message: "Cancelled in the app after the key was created. \(hint)", succeeded: false))
+    #expect(await end.value == HandoffEnd(message: "Cancelled in the app after the key was created. \(hint)", succeeded: false))
 }

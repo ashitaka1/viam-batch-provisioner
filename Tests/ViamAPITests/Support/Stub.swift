@@ -96,7 +96,7 @@ func organization(_ id: String, _ name: String) -> Viam_App_V1_GetOrganizationRe
 }
 
 let credential = OrgCredential(
-    PairingPayload(orgID: "o1", orgName: "Acme", keyID: "kid", key: "kval", keyName: "provisioner-app studio 2026-10-31"),
+    HandoffPayload(orgID: "o1", orgName: "Acme", keyID: "kid", key: "kval", keyName: "provisioner-app studio 2026-10-31"),
     addedAt: Date(timeIntervalSince1970: 0))
 
 final class Locked<Value>: @unchecked Sendable {

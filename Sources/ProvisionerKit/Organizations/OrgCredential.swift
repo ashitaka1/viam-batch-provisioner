@@ -11,7 +11,7 @@ public struct OrgCredential: Codable, Sendable, Equatable, Identifiable, CustomS
 
     public var id: String { orgID }
 
-    public init(_ payload: PairingPayload, addedAt: Date) {
+    public init(_ payload: HandoffPayload, addedAt: Date) {
         orgID = payload.orgID
         orgName = payload.orgName
         keyID = payload.keyID

@@ -33,7 +33,7 @@ public enum SiteEnvImportError: Error, Sendable, Equatable, LocalizedError {
 
 /// Turns a `config/environments/<env>.env` and its packages file into an
 /// environment. Viam API keys in the file are ignored: the app acts in an org
-/// only through a key paired with `just pair-app`.
+/// only through its own sign-in.
 public enum SiteEnvImport {
     public static func environment(
         name: String, settings: [String: String], packagesText: String?,

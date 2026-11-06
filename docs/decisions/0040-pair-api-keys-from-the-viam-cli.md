@@ -6,6 +6,8 @@ Date: 2026-11-01
 
 Accepted. Superseded for the Mac app by 43; still the path for an iPhone app.
 
+The code now calls this the key handoff: `ProvisionerKit/KeyHandoff`, `ProvisionerKeyHandoffHost`, `provisioner-handoff`, and links of the form `viam-provisioner://handoff?…`.
+
 ## Context
 
 Until OAuth sign-in (decision 9) has a registered client, the app needs an org API key for each Viam organization it acts in. An org API key has full write access to its org. The operator already has the `viam` CLI logged in, and that CLI can create org keys but not list or delete them. Other software running as the same macOS user can read process arguments and URLs, and can register the app's URL scheme.

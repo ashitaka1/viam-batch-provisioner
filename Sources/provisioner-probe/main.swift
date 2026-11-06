@@ -171,7 +171,7 @@ func viamDeleteKey(_ arguments: ArraySlice<String>) async {
     do {
         guard let key = environmentKey() else { fail(usage) }
         let credential = OrgCredential(
-            PairingPayload(orgID: arguments[0], orgName: "", keyID: key.id, key: key.key, keyName: "environment"), addedAt: Date())
+            HandoffPayload(orgID: arguments[0], orgName: "", keyID: key.id, key: key.key, keyName: "environment"), addedAt: Date())
         try await ViamKeyDeleter().deleteKey(id: arguments[1], using: credential)
         print("deleted key \(arguments[1])")
     } catch {

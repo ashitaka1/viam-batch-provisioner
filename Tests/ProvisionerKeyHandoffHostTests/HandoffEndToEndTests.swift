@@ -1,13 +1,13 @@
 import Darwin
 import Foundation
 import ProvisionerKit
-@testable import ProvisionerPairHost
+@testable import ProvisionerKeyHandoffHost
 import Testing
 
 private func withServer(timer: ManualTimer = ManualTimer(),
-                        _ body: (PairingHost, PairingHTTPServer) async throws -> Void) async throws {
+                        _ body: (HandoffHost, HandoffHTTPServer) async throws -> Void) async throws {
     let host = makeHost(timer: timer)
-    let server = try await PairingHTTPServer.start(host: host)
+    let server = try await HandoffHTTPServer.start(host: host)
     do {
         try await body(host, server)
     } catch {
@@ -17,13 +17,13 @@ private func withServer(timer: ManualTimer = ManualTimer(),
     await server.stop()
 }
 
-private func link(_ host: PairingHost, _ server: PairingHTTPServer) -> PairingLink {
-    PairingLink(host: "127.0.0.1", port: server.port, nonce: host.nonce)
+private func link(_ host: HandoffHost, _ server: HandoffHTTPServer) -> HandoffLink {
+    HandoffLink(host: "127.0.0.1", port: server.port, nonce: host.nonce)
 }
 
-@Test(.timeLimit(.minutes(1))) func pairsOverLoopback() async throws {
+@Test(.timeLimit(.minutes(1))) func handsOffOverLoopback() async throws {
     try await withServer { host, server in
-        let client = PairingClient(link: link(host, server))
+        let client = HandoffClient(link: link(host, server))
         var events = host.events.makeAsyncIterator()
 
         let hello = try await client.hello()
@@ -42,25 +42,25 @@ private func link(_ host: PairingHost, _ server: PairingHTTPServer) -> PairingLi
 
 @Test(.timeLimit(.minutes(1))) func secondClientIsRefused() async throws {
     try await withServer { host, server in
-        _ = try await PairingClient(link: link(host, server)).hello()
-        await #expect(throws: PairingClientError.alreadyPaired) { try await PairingClient(link: link(host, server)).hello() }
+        _ = try await HandoffClient(link: link(host, server)).hello()
+        await #expect(throws: HandoffClientError.alreadyClaimed) { try await HandoffClient(link: link(host, server)).hello() }
     }
 }
 
 @Test(.timeLimit(.minutes(1))) func commandCancelReachesWaitingApp() async throws {
     try await withServer { host, server in
-        let client = PairingClient(link: link(host, server))
+        let client = HandoffClient(link: link(host, server))
         _ = try await client.hello()
         let fetch = Task { try await client.awaitPayload() }
         await host.waitUntilKeyRequested()
         await host.cancel()
-        await #expect(throws: PairingClientError.cancelled) { try await fetch.value }
+        await #expect(throws: HandoffClientError.cancelled) { try await fetch.value }
     }
 }
 
 @Test(.timeLimit(.minutes(1))) func appCancelReachesCommand() async throws {
     try await withServer { host, server in
-        let client = PairingClient(link: link(host, server))
+        let client = HandoffClient(link: link(host, server))
         _ = try await client.hello()
         await client.cancel()
         #expect(await collect(host).last == .cancelledByApp)
@@ -96,11 +96,11 @@ private func externalIPv4() -> String? {
 @Test(.timeLimit(.minutes(1)), .enabled(if: externalIPv4() != nil, "no non-loopback IPv4 address"))
 func listenerBindsLoopbackOnly() async throws {
     try await withServer { host, server in
-        let external = PairingLink(host: externalIPv4()!, port: server.port, nonce: host.nonce)
+        let external = HandoffLink(host: externalIPv4()!, port: server.port, nonce: host.nonce)
         do {
-            _ = try await PairingClient(link: external).hello()
+            _ = try await HandoffClient(link: external).hello()
             Issue.record("connected to the listener through \(external.host)")
-        } catch PairingClientError.transport {
+        } catch HandoffClientError.transport {
         } catch {
             Issue.record("expected a transport error, got \(error)")
         }
@@ -108,7 +108,7 @@ func listenerBindsLoopbackOnly() async throws {
 }
 
 /// POSTs a raw body and returns the status code.
-private func post(_ link: PairingLink, _ path: String, _ body: Data) async throws -> Int? {
+private func post(_ link: HandoffLink, _ path: String, _ body: Data) async throws -> Int? {
     var request = URLRequest(url: link.baseURL.appending(path: path))
     request.httpMethod = "POST"
     request.httpBody = body
@@ -121,36 +121,36 @@ private func post(_ link: PairingLink, _ path: String, _ body: Data) async throw
     try await withServer(timer: timer) { host, server in
         await timer.fire()
         _ = await collect(host)
-        await #expect(throws: PairingClientError.timedOut) { try await PairingClient(link: link(host, server)).hello() }
+        await #expect(throws: HandoffClientError.timedOut) { try await HandoffClient(link: link(host, server)).hello() }
     }
 }
 
 @Test(.timeLimit(.minutes(1))) func wrongNonceReachesAppAsInvalidSession() async throws {
     try await withServer { host, server in
-        let stale = PairingLink(host: "127.0.0.1", port: server.port, nonce: .random())
-        await #expect(throws: PairingClientError.invalidSession) { try await PairingClient(link: stale).hello() }
+        let stale = HandoffLink(host: "127.0.0.1", port: server.port, nonce: .random())
+        await #expect(throws: HandoffClientError.invalidSession) { try await HandoffClient(link: stale).hello() }
     }
 }
 
 @Test(.timeLimit(.minutes(1))) func keyRequestFromAnotherAppIs403() async throws {
     try await withServer { host, server in
-        _ = try await PairingClient(link: link(host, server)).hello()
+        _ = try await HandoffClient(link: link(host, server)).hello()
         let other = AppSide(nonce: host.nonce).session
-        let status = try await post(link(host, server), "pair/key", JSONEncoder().encode(other))
+        let status = try await post(link(host, server), "handoff/key", JSONEncoder().encode(other))
         #expect(status == 403, "status \(String(describing: status))")
     }
 }
 
 @Test(.timeLimit(.minutes(1))) func garbageBodyIs400() async throws {
     try await withServer { host, server in
-        let status = try await post(link(host, server), "pair/hello", Data("not json".utf8))
+        let status = try await post(link(host, server), "handoff/hello", Data("not json".utf8))
         #expect(status == 400, "status \(String(describing: status))")
     }
 }
 
 @Test(.timeLimit(.minutes(1))) func oversizedBodyIs413() async throws {
     try await withServer { host, server in
-        let status = try await post(link(host, server), "pair/hello", Data(count: 1 << 20))
+        let status = try await post(link(host, server), "handoff/hello", Data(count: 1 << 20))
         #expect(status == 413, "status \(String(describing: status))")
     }
 }

@@ -4,10 +4,10 @@ import NIOHTTP1
 import NIOPosix
 import ProvisionerKit
 
-/// Serves one `PairingHost` over HTTP/1.1:
-/// `POST /pair/hello`, `/pair/reveal`, `/pair/key` (held open until the key is released or the
-/// session ends), `/pair/result`, `/pair/cancel`, each with a JSON body.
-public final class PairingHTTPServer: Sendable {
+/// Serves one `HandoffHost` over HTTP/1.1:
+/// `POST /handoff/hello`, `/handoff/reveal`, `/handoff/key` (held open until the key is released or the
+/// session ends), `/handoff/result`, `/handoff/cancel`, each with a JSON body.
+public final class HandoffHTTPServer: Sendable {
     private let channel: any Channel
     private let group: MultiThreadedEventLoopGroup
 
@@ -19,18 +19,18 @@ public final class PairingHTTPServer: Sendable {
     }
 
     /// Binds a random port on `bindHost`.
-    public static func start(host: PairingHost, bindHost: String = "127.0.0.1") async throws -> PairingHTTPServer {
+    public static func start(host: HandoffHost, bindHost: String = "127.0.0.1") async throws -> HandoffHTTPServer {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let bootstrap = ServerBootstrap(group: group)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.pipeline.configureHTTPServerPipeline().flatMap {
-                    channel.pipeline.addHandler(PairingHTTPHandler(host: host))
+                    channel.pipeline.addHandler(HandoffHTTPHandler(host: host))
                 }
             }
         do {
             let channel = try await bootstrap.bind(host: bindHost, port: 0).get()
-            return PairingHTTPServer(channel: channel, group: group)
+            return HandoffHTTPServer(channel: channel, group: group)
         } catch {
             try? await group.shutdownGracefully()
             throw error
@@ -43,18 +43,18 @@ public final class PairingHTTPServer: Sendable {
     }
 }
 
-private final class PairingHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
+private final class HandoffHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
 
-    private let host: PairingHost
+    private let host: HandoffHost
     private var head: HTTPRequestHead?
     private var body = ByteBuffer()
     private var tooLarge = false
-    /// Pairing messages are a few hundred bytes.
+    /// Handoff messages are a few hundred bytes.
     static let maxBodyBytes = 64 * 1024
 
-    init(host: PairingHost) { self.host = host }
+    init(host: HandoffHost) { self.host = host }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         switch unwrapInboundIn(data) {
@@ -102,34 +102,34 @@ private final class PairingHTTPHandler: ChannelInboundHandler, @unchecked Sendab
         if !keepAlive { done.whenComplete { _ in channel.close(promise: nil) } }
     }
 
-    static func route(host: PairingHost, method: HTTPMethod, path: String, body: Data) async -> (HTTPResponseStatus, Data) {
+    static func route(host: HandoffHost, method: HTTPMethod, path: String, body: Data) async -> (HTTPResponseStatus, Data) {
         guard method == .POST else { return (.notFound, Data()) }
         do {
             switch path {
-            case "/pair/hello":
-                return (.ok, try encode(await host.hello(decode(PairingHello.self, body))))
-            case "/pair/reveal":
-                try await host.reveal(decode(PairingReveal.self, body))
+            case "/handoff/hello":
+                return (.ok, try encode(await host.hello(decode(HandoffHello.self, body))))
+            case "/handoff/reveal":
+                try await host.reveal(decode(HandoffReveal.self, body))
                 return (.noContent, Data())
-            case "/pair/key":
-                return (.ok, try encode(await host.awaitKey(decode(PairingSessionRequest.self, body))))
-            case "/pair/result":
-                try await host.report(decode(PairingResult.self, body))
+            case "/handoff/key":
+                return (.ok, try encode(await host.awaitKey(decode(HandoffSessionRequest.self, body))))
+            case "/handoff/result":
+                try await host.report(decode(HandoffResult.self, body))
                 return (.noContent, Data())
-            case "/pair/cancel":
-                try await host.appCancel(decode(PairingSessionRequest.self, body))
+            case "/handoff/cancel":
+                try await host.appCancel(decode(HandoffSessionRequest.self, body))
                 return (.noContent, Data())
             default:
                 return (.notFound, Data())
             }
-        } catch let error as PairingHostError {
+        } catch let error as HandoffHostError {
             return (status(for: error), Data())
         } catch {
             return (.badRequest, Data())
         }
     }
 
-    static func status(for error: PairingHostError) -> HTTPResponseStatus {
+    static func status(for error: HandoffHostError) -> HTTPResponseStatus {
         switch error {
         case .wrongNonce: .notFound
         case .alreadyConnected: .conflict

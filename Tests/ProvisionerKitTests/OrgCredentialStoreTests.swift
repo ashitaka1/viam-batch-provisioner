@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 private func cred(_ orgID: String, name: String = "Acme", key: String = "k") -> OrgCredential {
-    OrgCredential(PairingPayload(orgID: orgID, orgName: name, keyID: "id-\(orgID)", key: key, keyName: "provisioner-app studio 2026-10-31"),
+    OrgCredential(HandoffPayload(orgID: orgID, orgName: name, keyID: "id-\(orgID)", key: key, keyName: "provisioner-app studio 2026-10-31"),
                   addedAt: Date(timeIntervalSince1970: 1_793_000_000))
 }
 

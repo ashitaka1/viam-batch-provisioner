@@ -1,7 +1,7 @@
 import Foundation
 
 /// The credential the command hands the app, sealed with the session key.
-public struct PairingPayload: Codable, Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
+public struct HandoffPayload: Codable, Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
     public var orgID: String
     public var orgName: String
     public var keyID: String
@@ -16,15 +16,15 @@ public struct PairingPayload: Codable, Sendable, Equatable, CustomStringConverti
         self.keyName = keyName
     }
 
-    public var description: String { "PairingPayload(org: \(orgName) \(orgID), key: \(keyName) \(keyID))" }
+    public var description: String { "HandoffPayload(org: \(orgName) \(orgID), key: \(keyName) \(keyID))" }
     public var debugDescription: String { description }
 }
 
 // Wire messages. Public keys and sealed bytes are standard base64.
 
 /// App → command: the first request of a session. Carries only the app's
-/// commitment; its key and nonce follow in `PairingReveal`.
-public struct PairingHello: Codable, Sendable, Equatable {
+/// commitment; its key and nonce follow in `HandoffReveal`.
+public struct HandoffHello: Codable, Sendable, Equatable {
     public var nonce: String
     public var commitment: String
 
@@ -35,7 +35,7 @@ public struct PairingHello: Codable, Sendable, Equatable {
 }
 
 /// App → command, after the hello reply: what the commitment bound.
-public struct PairingReveal: Codable, Sendable, Equatable {
+public struct HandoffReveal: Codable, Sendable, Equatable {
     public var nonce: String
     public var appPublicKey: String
     /// base64url
@@ -48,8 +48,8 @@ public struct PairingReveal: Codable, Sendable, Equatable {
     }
 }
 
-/// Command → app: its public key and the org being paired.
-public struct PairingHelloReply: Codable, Sendable, Equatable {
+/// Command → app: its public key and the org the key is for.
+public struct HandoffHelloReply: Codable, Sendable, Equatable {
     public var commandPublicKey: String
     public var orgID: String
     public var orgName: String
@@ -62,7 +62,7 @@ public struct PairingHelloReply: Codable, Sendable, Equatable {
 }
 
 /// App → command: identifies the session on every request after hello.
-public struct PairingSessionRequest: Codable, Sendable, Equatable {
+public struct HandoffSessionRequest: Codable, Sendable, Equatable {
     public var nonce: String
     public var appPublicKey: String
 
@@ -73,14 +73,14 @@ public struct PairingSessionRequest: Codable, Sendable, Equatable {
 }
 
 /// Command → app: the payload, once the operator confirms the code.
-public struct PairingSealed: Codable, Sendable, Equatable {
+public struct HandoffSealed: Codable, Sendable, Equatable {
     public var sealed: String
 
     public init(sealed: String) { self.sealed = sealed }
 }
 
 /// App → command: whether the app kept the key.
-public struct PairingResult: Codable, Sendable, Equatable {
+public struct HandoffResult: Codable, Sendable, Equatable {
     public enum Outcome: String, Codable, Sendable {
         case stored
         case rejected

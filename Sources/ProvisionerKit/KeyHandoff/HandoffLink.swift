@@ -1,15 +1,15 @@
 public import Foundation
 
-/// Where the pairing command listens. Opened as a URL on the same Mac, scanned
+/// Where the handoff command listens. Opened as a URL on the same Mac, scanned
 /// as a QR code from another device. Carries nothing secret.
-public struct PairingLink: Sendable, Equatable {
+public struct HandoffLink: Sendable, Equatable {
     public static let scheme = "viam-provisioner"
 
     public var host: String
     public var port: Int
-    public var nonce: PairingNonce
+    public var nonce: HandoffNonce
 
-    public init(host: String, port: Int, nonce: PairingNonce) {
+    public init(host: String, port: Int, nonce: HandoffNonce) {
         self.host = host
         self.port = port
         self.nonce = nonce
@@ -18,7 +18,7 @@ public struct PairingLink: Sendable, Equatable {
     public var url: URL {
         var components = URLComponents()
         components.scheme = Self.scheme
-        components.host = "pair"
+        components.host = "handoff"
         components.queryItems = [
             URLQueryItem(name: "host", value: host),
             URLQueryItem(name: "port", value: String(port)),
@@ -29,11 +29,11 @@ public struct PairingLink: Sendable, Equatable {
 
     public init(url: URL) throws {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme == Self.scheme, components.host == "pair" else { throw PairingError.invalidLink }
+              components.scheme == Self.scheme, components.host == "handoff" else { throw HandoffError.invalidLink }
         let items = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
         guard let host = items["host"], !host.isEmpty,
               let port = items["port"].flatMap(Int.init), (1...65_535).contains(port),
-              let nonce = items["nonce"].flatMap(PairingNonce.init(base64URL:)) else { throw PairingError.invalidLink }
+              let nonce = items["nonce"].flatMap(HandoffNonce.init(base64URL:)) else { throw HandoffError.invalidLink }
         self.init(host: host, port: port, nonce: nonce)
     }
 
@@ -41,7 +41,7 @@ public struct PairingLink: Sendable, Equatable {
     public var qrPayload: String { url.absoluteString }
 
     public init(qrPayload: String) throws {
-        guard let url = URL(string: qrPayload) else { throw PairingError.invalidLink }
+        guard let url = URL(string: qrPayload) else { throw HandoffError.invalidLink }
         try self.init(url: url)
     }
 

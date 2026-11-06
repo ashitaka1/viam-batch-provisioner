@@ -1,14 +1,14 @@
 import CryptoKit
 public import Foundation
 
-public enum PairingError: Error, Equatable, Sendable {
+public enum HandoffError: Error, Equatable, Sendable {
     case invalidPeerKey
     case decryptionFailed
     case invalidLink
 }
 
-/// 16 random bytes that name one pairing session and salt its key derivation.
-public struct PairingNonce: Sendable, Hashable, Codable {
+/// 16 random bytes that name one handoff session and salt its key derivation.
+public struct HandoffNonce: Sendable, Hashable, Codable {
     public let bytes: Data
 
     public static func random() -> Self {
@@ -32,7 +32,7 @@ public struct PairingNonce: Sendable, Hashable, Codable {
 }
 
 /// An ephemeral X25519 key pair, one per side per session.
-public struct PairingKeyPair: Sendable {
+public struct HandoffKeyPair: Sendable {
     let privateKey: Curve25519.KeyAgreement.PrivateKey
 
     public init() { privateKey = .init() }
@@ -47,12 +47,12 @@ public struct PairingKeyPair: Sendable {
 /// the app must pick its key without knowing the app's, so it can't search for
 /// a key that makes the codes match (Bluetooth Secure Simple Pairing's numeric
 /// comparison uses the same commit-then-reveal step).
-public enum PairingCommitment {
-    public static func make(appPublicKey: Data, appNonce: PairingNonce) -> Data {
-        Data(SHA256.hash(data: PairingSecrets.label + Data("commit".utf8) + appPublicKey + appNonce.bytes))
+public enum HandoffCommitment {
+    public static func make(appPublicKey: Data, appNonce: HandoffNonce) -> Data {
+        Data(SHA256.hash(data: HandoffSecrets.label + Data("commit".utf8) + appPublicKey + appNonce.bytes))
     }
 
-    public static func verify(_ commitment: Data, appPublicKey: Data, appNonce: PairingNonce) -> Bool {
+    public static func verify(_ commitment: Data, appPublicKey: Data, appNonce: HandoffNonce) -> Bool {
         make(appPublicKey: appPublicKey, appNonce: appNonce) == commitment
     }
 }
@@ -61,21 +61,21 @@ public enum PairingCommitment {
 /// revealed nonce: the code the operator compares and the key that seals the
 /// payload. A party in the middle holds different keys with each side, and the
 /// commitment stops it choosing keys that make the two codes agree.
-public struct PairingSecrets: Sendable {
-    static let label = Data("viam-provisioner-pair-v1".utf8)
+public struct HandoffSecrets: Sendable {
+    static let label = Data("viam-provisioner-handoff-v1".utf8)
 
     public let code: String
     private let key: SymmetricKey
 
-    public init(own: PairingKeyPair, peerPublicKey: Data, nonce: PairingNonce,
-                commandPublicKey: Data, appPublicKey: Data, appNonce: PairingNonce) throws {
+    public init(own: HandoffKeyPair, peerPublicKey: Data, nonce: HandoffNonce,
+                commandPublicKey: Data, appPublicKey: Data, appNonce: HandoffNonce) throws {
         let peer: Curve25519.KeyAgreement.PublicKey
         let shared: SharedSecret
         do {
             peer = try .init(rawRepresentation: peerPublicKey)
             shared = try own.privateKey.sharedSecretFromKeyAgreement(with: peer)
         } catch {
-            throw PairingError.invalidPeerKey
+            throw HandoffError.invalidPeerKey
         }
         let transcript = Self.label + nonce.bytes + commandPublicKey + appPublicKey + appNonce.bytes
         code = Self.code(digestPrefix: Array(SHA256.hash(data: transcript).prefix(4)))
@@ -88,16 +88,16 @@ public struct PairingSecrets: Sendable {
         return String(format: "%04u", value)
     }
 
-    public func seal(_ payload: PairingPayload) throws -> Data {
+    public func seal(_ payload: HandoffPayload) throws -> Data {
         try ChaChaPoly.seal(JSONEncoder().encode(payload), using: key).combined
     }
 
-    public func open(_ sealed: Data) throws -> PairingPayload {
+    public func open(_ sealed: Data) throws -> HandoffPayload {
         do {
             let plaintext = try ChaChaPoly.open(ChaChaPoly.SealedBox(combined: sealed), using: key)
-            return try JSONDecoder().decode(PairingPayload.self, from: plaintext)
+            return try JSONDecoder().decode(HandoffPayload.self, from: plaintext)
         } catch {
-            throw PairingError.decryptionFailed
+            throw HandoffError.decryptionFailed
         }
     }
 }

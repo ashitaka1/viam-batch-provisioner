@@ -51,7 +51,7 @@ private final class Harness {
         #expect(h.model.environments.map(\.name) == ["New Environment", "New Environment 2"])
     }
 
-    @Test func createLeavesOrgEmptyWhenSeveralArePaired() throws {
+    @Test func createLeavesOrgEmptyWhenSeveralAreListed() throws {
         let h = Harness()
         h.orgs = .known([ViamOrganization(id: "org-1", name: "Acme"), ViamOrganization(id: "org-2", name: "Beta")])
         #expect(try h.model.create().orgID == nil)
