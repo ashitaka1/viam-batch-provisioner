@@ -53,6 +53,7 @@ struct EnvironmentEditor: View {
                     if draft.provisionMode == .full { viamSection }
                     accountSection
                     networkSection
+                    robotNetworkSection
                     softwareSection
                 }
                 .formStyle(.grouped)
@@ -250,6 +251,31 @@ struct EnvironmentEditor: View {
             .id(EnvironmentField.wifiCountry)
         } header: {
             SectionHeader(title: "Network", serverIgnores: true)
+        }
+    }
+
+    private var robotNetworkSection: some View {
+        Section {
+            Toggle("Robot network", isOn: binding(\.robotNetEnabled))
+            field(.robotNetAddress) {
+                TextField("Address", text: $draft.robotNetAddress, prompt: Text(RobotNetwork.defaultAddress))
+                    .focused($focused, equals: .robotNetAddress)
+                    .onSubmit(commit)
+            }
+            .disabled(!draft.robotNetEnabled)
+            field(.robotNetPort) {
+                TextField("Port", text: optional(\.robotNetPort), prompt: Text("Any other enp* port"))
+                    .focused($focused, equals: .robotNetPort)
+                    .onSubmit(commit)
+            }
+            .disabled(!draft.robotNetEnabled)
+        } header: {
+            SectionHeader(title: "Robot Network", serverIgnores: true)
+        } footer: {
+            Text(draft.robotNetEnabled
+                 ? "The port gets this static address, and every other wired port DHCP. With no port, the first enp* port other than the one cabled at install gets it."
+                 : "Machines get no robot network.")
+                .foregroundStyle(.secondary)
         }
     }
 

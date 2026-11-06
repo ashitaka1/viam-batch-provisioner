@@ -127,7 +127,13 @@ struct QueueTable: View {
             TableColumn("Updated") { entry in
                 if let date = entry.lastChange { Text(date, format: .dateTime.month().day().hour().minute()) }
             }
-            TableColumn("Failure") { Text($0.failureReason ?? "").foregroundStyle(.red).help($0.failureReason ?? "") }
+            TableColumn("Problem") { entry in
+                if let reason = entry.failureReason {
+                    Text(reason).foregroundStyle(.red).help(reason)
+                } else if let warning = entry.warning {
+                    Text(warning).foregroundStyle(.orange).help(warning)
+                }
+            }
         }
         .contextMenu(forSelectionType: String.self) { names in
             if let name = names.first {
@@ -163,6 +169,13 @@ struct MachineDetail: View {
             if let reason = entry.failureReason {
                 Section("Failure") {
                     Text(reason).textSelection(.enabled)
+                }
+            }
+            if let warning = entry.warning {
+                Section("Warning") {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
                 }
             }
             Section("Events") {
