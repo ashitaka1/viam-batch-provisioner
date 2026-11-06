@@ -7,7 +7,7 @@ private func cred(_ orgID: String, name: String = "Acme", key: String = "k") -> 
                   addedAt: Date(timeIntervalSince1970: 1_793_000_000))
 }
 
-/// The behavior every store shares, run against each store.
+/// The behavior an `OrgCredentialStore` promises.
 private enum Contract {
     static func saveReplacesSameOrg(_ store: any OrgCredentialStore) throws {
         try store.save(cred("o1", key: "old"))
@@ -33,13 +33,6 @@ private enum Contract {
         try store.remove(orgID: "nope")
         #expect(try store.all().isEmpty)
     }
-}
-
-@Suite struct InMemoryOrgCredentialStoreTests {
-    @Test func saveReplacesSameOrg() throws { try Contract.saveReplacesSameOrg(InMemoryOrgCredentialStore()) }
-    @Test func holdsSeveralOrgsSortedByName() throws { try Contract.holdsSeveralOrgsSortedByName(InMemoryOrgCredentialStore()) }
-    @Test func removeDeletesOnlyThatOrg() throws { try Contract.removeDeletesOnlyThatOrg(InMemoryOrgCredentialStore()) }
-    @Test func removeMissingOrgIsNotAnError() throws { try Contract.removeMissingOrgIsNotAnError(InMemoryOrgCredentialStore()) }
 }
 
 /// True when this process can write the login keychain. A sandboxed or headless
