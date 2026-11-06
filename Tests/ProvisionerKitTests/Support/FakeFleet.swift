@@ -29,7 +29,7 @@ actor FakeFleet: ViamFleet {
     private let listingFailure: FleetError?
     private let listingFailureAfterCreate: FleetError?
     private let holdAfterCreating: String?
-    private let online: Set<String>
+    private var online: Set<String>
     private var held: CheckedContinuation<Void, Never>?
     private var holdWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -54,6 +54,8 @@ actor FakeFleet: ViamFleet {
     }
 
     var machinesCalls: Int { calls.filter { $0 == .machines }.count }
+
+    func setOnline(_ names: Set<String>) { online = names }
 
     var names: [String] { machines.map(\.name) }
 

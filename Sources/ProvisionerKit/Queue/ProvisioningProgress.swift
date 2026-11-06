@@ -25,13 +25,13 @@ public struct ProvisioningProgress: Equatable, Sendable {
     /// The reached steps of each earlier attempt, oldest first.
     public let earlierAttempts: [[Row]]
 
-    /// The row in progress or failed; Online once it is done.
+    /// The row in progress or failed, else the last one done.
     public var current: Row {
-        if let online = rows.last, online.kind == .online, online.state == .done { return online }
-        return rows.first { $0.state == .current || $0.state == .failed } ?? rows[0]
+        rows.first { $0.state == .current || $0.state == .failed } ?? rows.last { $0.state == .done } ?? rows[0]
     }
 
     /// Nil for an entry with no steps and no queued time, such as one from the Python server.
+    /// `onlineAt` counts only once the entry has reached Installed.
     public init?(entry: QueueEntry, onlineAt: Date? = nil) {
         guard !entry.steps.isEmpty || entry.queuedAt != nil else { return nil }
         let attempts = Array(Set(entry.steps.map(\.attempt))).sorted()
@@ -76,12 +76,15 @@ public struct ProvisioningProgress: Equatable, Sendable {
         }
 
         rows += pending.map { Row(kind: kind($0), title: title($0), at: nil, state: .pending) }
+        let installed = reachedSteps.contains(.installed)
         if entry.provisionMode == .full {
-            let done = onlineAt != nil
-            rows.append(Row(kind: .online, title: "Online", at: onlineAt, state: done ? .done : .pending))
-            if done {
+            let online = installed ? onlineAt : nil
+            rows.append(Row(kind: .online, title: "Online", at: online, state: online == nil ? .pending : .done))
+            if online != nil {
                 for index in rows.indices where rows[index].state == .current { rows[index].state = .done }
             }
+        } else if installed, !failed, let index = rows.firstIndex(where: { $0.kind == .installed }) {
+            rows[index].state = .done
         }
 
         for index in rows.indices {
@@ -89,7 +92,7 @@ public struct ProvisioningProgress: Equatable, Sendable {
             case .downloading where rows[index].state == .current:
                 rows[index].fraction = Self.fraction(bytes: entry.downloadBytes, total: entry.downloadTotal)
             case .configuring:
-                rows[index].subSteps = Self.subSteps(entry, row: rows[index], installed: reachedSteps.contains(.installed))
+                rows[index].subSteps = Self.subSteps(entry, row: rows[index])
             default: break
             }
         }
@@ -106,7 +109,9 @@ public struct ProvisioningProgress: Equatable, Sendable {
         return min(max(Double(bytes) / Double(total), 0), 1)
     }
 
-    private static func subSteps(_ entry: QueueEntry, row: Row, installed: Bool) -> [SubStep] {
+    /// None once Configuring is done: the record keeps no history of the installer's stages.
+    private static func subSteps(_ entry: QueueEntry, row: Row) -> [SubStep] {
+        guard row.state != .done else { return [] }
         var titles = ["Setting name and credentials"]
         if entry.provisionMode == .full || entry.provisionMode == .agent { titles.append("Installing Viam") }
         if entry.joinsTailscale == true { titles.append("Joining Tailscale") }
@@ -119,9 +124,7 @@ public struct ProvisioningProgress: Equatable, Sendable {
         let currentIndex = currentTitle.flatMap { titles.firstIndex(of: $0) }
         return titles.enumerated().map { index, title in
             let state: State
-            if installed {
-                state = .done
-            } else if row.state == .pending {
+            if row.state == .pending {
                 state = .pending
             } else if let currentIndex {
                 state = index < currentIndex ? .done : index == currentIndex ? (row.state == .failed ? .failed : .current) : .pending

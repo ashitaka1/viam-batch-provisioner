@@ -28,8 +28,11 @@ public final class OnlineMonitor {
         self.sleep = sleep
     }
 
-    /// Asks Viam about the installed full-mode machines not yet seen online, one listing per location.
+    /// Forgets the machines that are no longer installed, then asks Viam about the installed
+    /// full-mode machines not yet seen online, one listing per location.
     public func check(_ entries: [QueueEntry]) async {
+        let installed = Set(entries.filter { $0.status == .installed }.map(\.name))
+        onlineAt = onlineAt.filter { installed.contains($0.key) }
         let waiting = Set(entries.filter { $0.status == .installed && $0.provisionMode == .full && onlineAt[$0.name] == nil }.map(\.name))
         guard !waiting.isEmpty else { return }
 

@@ -60,11 +60,47 @@ struct ProvisioningProgressTests {
         #expect(osOnly.subSteps.map(\.state) == [.done, .current])
     }
 
-    @Test func installedMarksEverySubStepDone() {
+    @Test func doneConfiguringShowsNoSubSteps() {
         let steps: [(ProvisioningStep, Int)] = [(.configuring, 1), (.installed, 1)]
-        let rows = progress(entry(status: .installed, mode: .agent, steps: steps)).rows
+        let rows = progress(entry(status: .installed, mode: .agent, steps: steps, stage: "done")).rows
         let configuring = rows.first { $0.kind == .configuring }
-        #expect(configuring?.subSteps.map(\.state) == [.done, .done])
+        #expect(configuring?.state == .done)
+        #expect(configuring?.subSteps == [])
+    }
+
+    @Test(arguments: [ProvisionMode.agent, .osOnly, nil])
+    func installedIsDoneWithoutOnline(mode: ProvisionMode?) {
+        let steps: [(ProvisioningStep, Int)] = [(.configuring, 1), (.installed, 1)]
+        let p = progress(entry(status: .installed, mode: mode, steps: steps, stage: "done"))
+        #expect(p.rows.map(\.state) == [.done, .done, .done])
+        #expect(p.current.kind == .installed)
+        #expect(p.current.state == .done)
+    }
+
+    @Test func installedWaitsForOnlineInFullMode() {
+        let steps: [(ProvisioningStep, Int)] = [(.configuring, 1), (.installed, 1)]
+        let p = progress(entry(status: .installed, steps: steps, stage: "done"))
+        #expect(p.current.kind == .installed)
+        #expect(p.current.state == .current)
+    }
+
+    @Test func onlineBeforeInstalledIsIgnored() {
+        let steps: [(ProvisioningStep, Int)] = [(.installing, 1), (.configuring, 1)]
+        let p = progress(entry(status: .installing, steps: steps, stage: "tooling"), onlineAt: t0.addingTimeInterval(99))
+        #expect(p.current.kind == .configuring)
+        #expect(p.rows.last?.kind == .online)
+        #expect(p.rows.last?.state == .pending)
+        #expect(p.rows.last?.at == nil)
+    }
+
+    @Test func osOnlyWithoutTailscaleAndNoModeRows() {
+        let steps: [(ProvisioningStep, Int)] = [(.installing, 1), (.configuring, 1)]
+        let titles = ["Queued", "Installing Ubuntu 24.04.4", "Configuring", "Installed"]
+        for mode in [ProvisionMode.osOnly, nil] {
+            let p = progress(entry(status: .installing, mode: mode, steps: steps, stage: "identity", tailscale: false))
+            #expect(p.rows.map(\.title) == titles)
+            #expect(p.current.subSteps.map(\.title) == ["Setting name and credentials"])
+        }
     }
 
     @Test func failureMarksItsStep() {
@@ -145,6 +181,7 @@ struct ProvisioningProgressTests {
 
     @Test func fractionClampsAndNeedsATotal() {
         #expect(ProvisioningProgress.fraction(bytes: 150, total: 100) == 1)
+        #expect(ProvisioningProgress.fraction(bytes: -5, total: 100) == 0)
         #expect(ProvisioningProgress.fraction(bytes: 5, total: 0) == nil)
         #expect(ProvisioningProgress.fraction(bytes: nil, total: 10) == nil)
     }
