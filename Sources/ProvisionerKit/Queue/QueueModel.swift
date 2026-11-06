@@ -71,7 +71,8 @@ public final class QueueModel {
         entries.first { $0.name == name }
     }
 
-    /// Events seen for the machine this session, oldest first.
+    /// Events seen for the machine this session, oldest first, leaving out download
+    /// progress, which the machine's steps show.
     public func timeline(for name: String) -> [MachineEvent] {
         timelines[name] ?? []
     }
@@ -139,7 +140,7 @@ public final class QueueModel {
             entries = snapshot.sortedByName()
         case .event(let event, let inSnapshot):
             var timeline = timelines[event.name] ?? []
-            if !timeline.contains(where: { $0.id == event.id }) {
+            if !event.isDownloadProgress, !timeline.contains(where: { $0.id == event.id }) {
                 timeline.append(event)
                 timeline.sort { $0.id < $1.id }
                 timelines[event.name] = timeline
@@ -168,6 +169,12 @@ extension QueueModel.Connection {
         case .live: self = .live
         case .waiting(let retry, let error): self = .waiting(retryIn: retry, message: error.queueMessage)
         }
+    }
+}
+
+private extension MachineEvent {
+    var isDownloadProgress: Bool {
+        if case .downloadProgress = kind { true } else { false }
     }
 }
 

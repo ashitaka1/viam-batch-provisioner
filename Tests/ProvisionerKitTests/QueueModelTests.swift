@@ -158,6 +158,19 @@ struct QueueModelTests {
         #expect(h.model.timeline(for: "m1").map(\.id) == [9])
     }
 
+    @Test func downloadProgressRefreshesTheEntryButStaysOutOfTheTimeline() async {
+        let h = Harness()
+        await h.send(.snapshot([entry("m1", .assigned)]))
+        h.source.set(entry("m1", .assigned, stage: "late-commands"))
+
+        await h.send(.event(event(11, "m1", .stepReached(step: .downloading, attempt: 1)), inSnapshot: false))
+        await h.send(.event(event(12, "m1", .downloadProgress(bytes: 50, total: 100)), inSnapshot: false))
+
+        #expect(h.source.lookups == ["m1", "m1"])
+        #expect(h.model.entry(named: "m1")?.stage == "late-commands")
+        #expect(h.model.timeline(for: "m1").map(\.id) == [11])
+    }
+
     @Test func replayedEventIsKeptOnceInTheTimeline() async {
         let h = Harness()
         h.source.set(entry("m1", .assigned))
