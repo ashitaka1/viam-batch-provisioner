@@ -18,7 +18,9 @@ struct TFTPNegotiation: Equatable, Sendable {
             switch option.name {
             case "blksize":
                 // RFC 2348 lets the server answer only an equal or smaller size, so a size below the minimum is ignored.
-                guard let size = Int(option.value), size >= Self.blockSizeRange.lowerBound else { continue }
+                guard let size = Int(option.value), size >= Self.blockSizeRange.lowerBound,
+                      maxBlockSize >= Self.blockSizeRange.lowerBound
+                else { continue }
                 blockSize = min(size, Self.blockSizeRange.upperBound, maxBlockSize)
                 acknowledged.append(TFTPOption(name: "blksize", value: String(blockSize)))
             case "timeout":

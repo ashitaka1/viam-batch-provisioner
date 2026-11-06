@@ -40,6 +40,13 @@ import Testing
         ])
     }
 
+    @Test func blksizeIgnoredWhenTheServerLimitIsBelowMinimum() {
+        let result = TFTPNegotiation(requested: [TFTPOption(name: "blksize", value: "1468")], fileSize: 1, maxBlockSize: 4)
+        #expect(result.blockSize == 512)
+        #expect(result.acknowledged.isEmpty)
+    }
+
+    /// RFC 2347 doesn't say; the last occurrence decides, even when it's invalid.
     @Test func repeatedOptionWithInvalidLastValueIsIgnored() {
         let result = negotiate([("blksize", "1468"), ("blksize", "x")])
         #expect(result.blockSize == 512)
