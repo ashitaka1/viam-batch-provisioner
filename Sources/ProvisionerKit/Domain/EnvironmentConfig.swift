@@ -27,10 +27,14 @@ public struct EnvironmentConfig: Sendable, Equatable {
     public var packages: [String]
     public var wifi: Wifi?
     public var tailscaleAuthKey: String?
+    /// An address with prefix, or `none`; nil means the server's default.
+    public var robotNetAddress: String?
+    public var robotNetPort: String?
 
     public init(
         provisionMode: ProvisionMode, username: String, passwordHash: String, sshPublicKey: String,
-        timezone: String, packages: [String] = [], wifi: Wifi? = nil, tailscaleAuthKey: String? = nil
+        timezone: String, packages: [String] = [], wifi: Wifi? = nil, tailscaleAuthKey: String? = nil,
+        robotNetAddress: String? = nil, robotNetPort: String? = nil
     ) {
         self.provisionMode = provisionMode
         self.username = username
@@ -40,6 +44,8 @@ public struct EnvironmentConfig: Sendable, Equatable {
         self.packages = packages
         self.wifi = wifi
         self.tailscaleAuthKey = tailscaleAuthKey
+        self.robotNetAddress = robotNetAddress
+        self.robotNetPort = robotNetPort
     }
 
     func wire() -> Components.Schemas.Environment {
@@ -51,7 +57,9 @@ public struct EnvironmentConfig: Sendable, Equatable {
             timezone: timezone,
             packages: packages.isEmpty ? nil : packages,
             wifi: wifi.map { .init(ssid: $0.ssid, password: $0.password, country: $0.country) },
-            tailscaleAuthKey: tailscaleAuthKey
+            tailscaleAuthKey: tailscaleAuthKey,
+            robotNetAddress: robotNetAddress,
+            robotNetPort: robotNetPort
         )
     }
 }
