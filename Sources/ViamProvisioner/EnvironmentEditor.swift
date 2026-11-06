@@ -126,6 +126,9 @@ struct EnvironmentEditor: View {
                         Text(isSignedIn ? "Your Viam account has no organizations." : "Sign in to Viam to choose one.")
                             .foregroundStyle(.secondary)
                     }
+                } else if let only = onlyChoice(organizations.rows, selected: draft.orgID) {
+                    LabeledContent("Organization", value: only.name)
+                        .onAppear { if draft.orgID == nil { orgBinding.wrappedValue = only.id } }
                 } else {
                     Picker("Organization", selection: orgBinding) {
                         if draft.orgID == nil { Text("Choose…").tag(String?.none) }
@@ -133,7 +136,8 @@ struct EnvironmentEditor: View {
                             Text(org.name).tag(Optional(org.id))
                         }
                         if let orgID = draft.orgID, !environments.orgIsAvailable(draft) {
-                            Text("\(draft.orgName ?? orgID) (unavailable)").tag(Optional(orgID))
+                            Text("\(draft.orgName ?? orgID) (\(isKeyLogin ? EnvironmentsModel.notReachable.lowercased() : "unavailable"))")
+                                .tag(Optional(orgID))
                         }
                     }
                     .focused($focused, equals: .org)
@@ -156,12 +160,19 @@ struct EnvironmentEditor: View {
                 Text("Loading locations…").foregroundStyle(.secondary)
             }
         case (let orgID?, .loaded(let locations)):
-            Picker("Location", selection: locationBinding(locations)) {
-                if draft.locationID == nil { Text("Choose…").tag(String?.none) }
-                if let locationID = draft.locationID, !locations.contains(where: { $0.id == locationID }) {
-                    Text("\(draft.locationName ?? locationID) (missing)").tag(Optional(locationID))
+            Group {
+                if let only = onlyChoice(locations, selected: draft.locationID) {
+                    LabeledContent("Location", value: only.name)
+                } else {
+                    Picker("Location", selection: locationBinding(locations)) {
+                        if draft.locationID == nil { Text("Choose…").tag(String?.none) }
+                        if let locationID = draft.locationID, !locations.contains(where: { $0.id == locationID }) {
+                            Text("\(draft.locationName ?? locationID) (\(isKeyLogin ? EnvironmentsModel.notReachable.lowercased() : "missing"))")
+                                .tag(Optional(locationID))
+                        }
+                        ForEach(locations) { Text($0.name).tag(Optional($0.id)) }
+                    }
                 }
-                ForEach(locations) { Text($0.name).tag(Optional($0.id)) }
             }
             .onAppear {
                 if draft.locationID == nil, locations.count == 1 {
@@ -286,7 +297,7 @@ struct EnvironmentEditor: View {
                     SignInButton(session: session)
                 }
             } else if organizations.state == .loaded, !environments.orgIsAvailable(environment) {
-                Banner(message: "Your Viam account can't see \(orgName).") {
+                Banner(message: isKeyLogin ? "\(orgName) is \(EnvironmentsModel.notReachable.lowercased())." : "Your Viam account can't see \(orgName).") {
                     Button("Choose Another Organization") {
                         visited.insert(.org)
                         focused = .org
@@ -409,6 +420,17 @@ struct EnvironmentEditor: View {
         .filter { $0.count == 2 && $0.allSatisfy(\.isLetter) }
         .map { (code: $0, name: Locale.current.localizedString(forRegionCode: $0) ?? $0) }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+    private var isKeyLogin: Bool {
+        if case .signedIn(.apiKey) = session.state { true } else { false }
+    }
+
+    /// The one choice there is, shown as a label in place of a picker, unless a
+    /// stored value outside it is selected.
+    private func onlyChoice<Choice: Identifiable>(_ choices: [Choice], selected: Choice.ID?) -> Choice? {
+        guard choices.count == 1, selected == nil || selected == choices[0].id else { return nil }
+        return choices[0]
+    }
 
     private var isSignedIn: Bool {
         if case .signedIn = session.state { true } else { false }

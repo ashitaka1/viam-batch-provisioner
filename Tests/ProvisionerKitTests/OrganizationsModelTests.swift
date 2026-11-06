@@ -4,7 +4,12 @@ import Testing
 
 private struct FakeLister: OrganizationLister {
     let result: Result<[ViamOrganization], FleetError>
+    /// What `GetOrganization` answers, by ID; IDs absent are refused.
+    var granted: [String: Result<ViamOrganization, FleetError>] = [:]
     func organizations() async throws(FleetError) -> [ViamOrganization] { try result.get() }
+    func organization(id: String) async throws(FleetError) -> ViamOrganization {
+        try (granted[id] ?? .failure(.rejected("permission denied"))).get()
+    }
 }
 
 /// A lister whose answer the test delivers once the model is waiting for it.
@@ -67,5 +72,39 @@ private actor HeldLister: OrganizationLister {
         model.clear()
         #expect(model.rows.isEmpty)
         #expect(model.state == .idle)
+    }
+
+    @Test func listedOrgsAreMarkedListed() async {
+        let model = OrganizationsModel(lister: FakeLister(result: .success([ViamOrganization(id: "o1", name: "Acme")])))
+        await model.load()
+        #expect(model.listed)
+    }
+
+    /// A key Viam won't list organizations for: the orgs it's granted are read one by one.
+    @Test func refusedListFallsBackToTheGrantedCandidates() async {
+        let acme = ViamOrganization(id: "o1", name: "Acme")
+        let lister = FakeLister(result: .failure(.rejected("permission denied")), granted: ["o1": .success(acme)])
+        let model = OrganizationsModel(lister: lister, candidates: { ["o1", "o2", "o1"] })
+        await model.load()
+        #expect(model.rows == [acme])
+        #expect(model.state == .loaded)
+        #expect(!model.listed)
+    }
+
+    @Test func refusedListWithNoGrantedCandidateFails() async {
+        let lister = FakeLister(result: .failure(.rejected("permission denied")))
+        let model = OrganizationsModel(lister: lister, candidates: { ["o2"] })
+        await model.load()
+        #expect(model.rows.isEmpty)
+        #expect(model.state == .failed("Couldn't list your Viam organizations: permission denied"))
+    }
+
+    /// A candidate Viam couldn't answer for may be granted, so nothing is concluded.
+    @Test func unreachableCandidateFailsTheLoad() async {
+        let lister = FakeLister(result: .failure(.rejected("permission denied")),
+                                granted: ["o1": .success(ViamOrganization(id: "o1", name: "Acme")), "o2": .failure(.unreachable("offline"))])
+        let model = OrganizationsModel(lister: lister, candidates: { ["o1", "o2"] })
+        await model.load()
+        #expect(model.state == .failed("Couldn't list your Viam organizations: offline"))
     }
 }

@@ -153,7 +153,11 @@ func probeAuth() async -> ProbeAuth {
         fail("install the viam CLI (https://docs.viam.com/cli/), or set VIAM_API_KEY_ID and VIAM_API_KEY")
     }
     let cli = ViamCLI(run: ViamCLI.processRunner(executable: executable))
-    let tokens = CLITokenSource(cli: { cli })
+    let baseURL = CLIConfig.baseURL() ?? ViamAppClient.defaultBaseURL
+    let tokens = CLILoginTokens(
+        login: { CLIConfig.login() }, user: CLITokenSource(cli: { cli }),
+        apiKey: APIKeyTokenSource(readKey: { CLIConfig.apiKey() },
+                                  authenticate: { try await ViamAppClient.authenticate(keyID: $0, key: $1, baseURL: baseURL) }))
     do {
         _ = try await tokens.token(refresh: false)
     } catch ViamCLIError.notLoggedIn {
@@ -161,7 +165,7 @@ func probeAuth() async -> ProbeAuth {
     } catch {
         fail("the viam CLI couldn't give its login: \(error)")
     }
-    return .login(tokens, baseURL: CLIConfig.baseURL() ?? ViamAppClient.defaultBaseURL)
+    return .login(tokens, baseURL: baseURL)
 }
 
 /// Deletes an org API key; the viam CLI can create keys but not delete them.

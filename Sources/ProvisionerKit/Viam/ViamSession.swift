@@ -1,7 +1,8 @@
 public import Foundation
 public import Observation
 
-/// Whether the app is signed in to Viam, through the `viam` CLI's login.
+/// Whether the app is signed in to Viam, through the `viam` CLI's login: a user's,
+/// or an API key's (decision 44).
 @MainActor @Observable
 public final class ViamSession {
     public enum State: Equatable, Sendable {
@@ -11,9 +12,14 @@ public final class ViamSession {
         /// `code` is the device code to match on Viam's device-login page, once
         /// the CLI has printed it.
         case signingIn(code: String?)
-        /// `account` is nil when the CLI couldn't say who is signed in.
-        case signedIn(account: String?)
+        case signedIn(Account)
         case failed(String)
+    }
+
+    public enum Account: Equatable, Sendable {
+        /// The user's email; nil when the CLI couldn't say who is signed in.
+        case user(String?)
+        case apiKey(id: String)
     }
 
     public nonisolated static let defaultBaseURL = URL(string: "https://app.viam.com")!
@@ -23,19 +29,27 @@ public final class ViamSession {
     public nonisolated let tokens: any BearerTokenProvider
 
     private let resolver: CLIResolver
-    private let tokenSource: CLITokenSource
+    private let tokenSource: CLILoginTokens
+    private let configPath: String
     private var loginTask: Task<Void, any Error>?
 
     public init(locate: @escaping @Sendable () async -> URL? = { await ViamCLI.locate() },
                 makeCLI: @escaping @Sendable (URL) -> ViamCLI = { ViamCLI(run: ViamCLI.processRunner(executable: $0)) },
+                configPath: String = CLIConfig.defaultPath,
                 baseURL: URL = CLIConfig.baseURL() ?? ViamSession.defaultBaseURL,
+                authenticate: @escaping APIKeyTokenSource.Authenticate,
                 now: @escaping @Sendable () -> Date = Date.init) {
         let resolver = CLIResolver(locate: locate, makeCLI: makeCLI)
         self.resolver = resolver
         self.baseURL = baseURL
+        self.configPath = configPath
         let box = WeakSession()
-        let source = CLITokenSource(cli: { try await resolver.cli() }, now: now,
-                                    onSignedOut: { await box.session?.signedOutElsewhere() })
+        let signedOut: @Sendable () async -> Void = { await box.session?.signedOutElsewhere() }
+        let source = CLILoginTokens(
+            login: { CLIConfig.login(path: configPath) },
+            user: CLITokenSource(cli: { try await resolver.cli() }, now: now, onSignedOut: signedOut),
+            apiKey: APIKeyTokenSource(readKey: { CLIConfig.apiKey(path: configPath) }, authenticate: authenticate,
+                                      now: now, onSignedOut: signedOut))
         tokenSource = source
         tokens = source
         box.session = self
@@ -45,10 +59,14 @@ public final class ViamSession {
     public func load() async {
         do {
             let cli = try await resolver.cli()
+            if case .apiKey(let id) = CLIConfig.login(path: configPath) {
+                _ = try await tokenSource.token(refresh: true)
+                state = .signedIn(.apiKey(id: id))
+                return
+            }
             _ = try await tokenSource.token(refresh: true)
             // The token was read, so a whoami failure says nothing about the login.
-            let account = try? await cli.whoami()
-            state = .signedIn(account: account.map { $0.contains("@") ? $0 : "API key" })
+            state = .signedIn(.user(try? await cli.whoami()))
         } catch {
             state = await state(for: error)
         }
@@ -110,7 +128,11 @@ public final class ViamSession {
         case .notLoggedIn: .signedOut
         case .failed(let stderr): .failed(stderr.isEmpty ? "The viam CLI failed." : stderr)
         case .tokenUnavailable: .failed("The viam CLI couldn't give the app its login.")
-        default: error is CancellationError ? .signedOut : .failed("The viam CLI failed: \(error)")
+        default:
+            if error is CancellationError { .signedOut }
+            // Authenticating an API key failed without refusing it; the error may quote the request.
+            else if case .apiKey = CLIConfig.login(path: configPath) { .failed("Viam couldn't be reached to check the API key.") }
+            else { .failed("The viam CLI failed: \(error)") }
         }
     }
 }

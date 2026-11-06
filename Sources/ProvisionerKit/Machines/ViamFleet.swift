@@ -45,9 +45,17 @@ public enum FleetError: Error, Sendable, Equatable {
 /// The Viam calls machine creation needs, bound to one org's credential.
 public protocol ViamFleet: Sendable {
     func locations() async throws(FleetError) -> [ViamLocation]
+    /// One location, for a credential Viam won't list the org's locations for.
+    func location(id: String) async throws(FleetError) -> ViamLocation
     func machines(location: String) async throws(FleetError) -> [ViamMachine]
     /// Returns the new machine's ID.
     func createMachine(name: String, location: String) async throws(FleetError) -> String
     func mainPart(machine: String) async throws(FleetError) -> MachinePart
     func deleteMachine(id: String) async throws(FleetError)
+}
+
+extension ViamFleet {
+    public func location(id: String) async throws(FleetError) -> ViamLocation {
+        throw .rejected("Location \(id) can't be read.")
+    }
 }

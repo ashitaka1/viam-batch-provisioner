@@ -53,6 +53,13 @@ public final class ViamAppClient: Sendable {
         return response.locations.map { ($0.id, $0.name) }
     }
 
+    public func location(id: String) async throws -> (id: String, name: String, organizationIDs: [String]) {
+        var request = Viam_App_V1_GetLocationRequest()
+        request.locationID = id
+        let response: Viam_App_V1_GetLocationResponse = try await appService("GetLocation", request)
+        return (response.location.id, response.location.name, response.location.organizations.map(\.organizationID))
+    }
+
     public func robots(locationID: String) async throws -> [(id: String, name: String)] {
         var request = Viam_App_V1_ListRobotsRequest()
         request.locationID = locationID
@@ -116,12 +123,28 @@ public final class ViamAppClient: Sendable {
 
     private func apiKeyToken(id: String, key: String, cache: TokenCache) async throws -> String {
         if let cached = await cache.value { return cached }
+        let token = try await Self.authenticate(keyID: id, key: key, grpc: grpc)
+        await cache.set(token)
+        return token
+    }
+
+    /// Exchanges an API key for an access token through `AuthService/Authenticate`.
+    /// Throws `APIKeyRefused` when Viam refuses the key.
+    public static func authenticate(keyID: String, key: String, baseURL: URL = ViamAppClient.defaultBaseURL,
+                                    session: URLSession = .shared) async throws -> String {
+        do {
+            return try await authenticate(keyID: keyID, key: key, grpc: GRPCWeb(baseURL: baseURL, session: session))
+        } catch ViamError.unauthenticated, ViamError.permissionDenied {
+            throw APIKeyRefused()
+        }
+    }
+
+    private static func authenticate(keyID: String, key: String, grpc: GRPCWeb) async throws -> String {
         var request = Proto_Rpc_V1_AuthenticateRequest()
-        request.entity = id
+        request.entity = keyID
         request.credentials.type = "api-key"
         request.credentials.payload = key
         let response: Proto_Rpc_V1_AuthenticateResponse = try await grpc.unary("proto.rpc.v1.AuthService/Authenticate", request)
-        await cache.set(response.accessToken)
         return response.accessToken
     }
 }

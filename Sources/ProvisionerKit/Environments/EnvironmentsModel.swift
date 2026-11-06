@@ -20,6 +20,8 @@ public final class EnvironmentsModel {
     /// Why the stored environments couldn't be read, when they couldn't.
     public private(set) var loadError: String?
     private var locationStates: [String: LocationsState] = [:]
+    /// Orgs whose loaded locations were read one by one after Viam refused the list.
+    private var grantedOnly: Set<String> = []
     /// Environments whose stored WiFi password isn't a WPA passphrase, found when
     /// it was set or loaded, so problems never read the Keychain.
     private var badWifiPasswords: Set<UUID> = []
@@ -29,16 +31,25 @@ public final class EnvironmentsModel {
     private let fleet: @Sendable (_ orgID: String) -> any ViamFleet
     private let readFile: @MainActor (String) -> String?
     private let home: String
+    private let keyLogin: @MainActor () -> Bool
+    private let defaultLocation: @MainActor () -> String?
 
+    /// `keyLogin` says whether the session is an API key's, whose reach is its
+    /// grant (decision 44). `defaultLocation` is the CLI's, a location worth
+    /// reading when Viam refuses to list an org's locations.
     public init(store: any EnvironmentStore, orgs: @escaping @MainActor () -> AccountOrgs,
                 fleet: @escaping @Sendable (_ orgID: String) -> any ViamFleet,
                 readFile: @escaping @MainActor (String) -> String? = { try? String(contentsOfFile: $0, encoding: .utf8) },
-                home: String = NSHomeDirectory()) {
+                home: String = NSHomeDirectory(),
+                keyLogin: @escaping @MainActor () -> Bool = { false },
+                defaultLocation: @escaping @MainActor () -> String? = { nil }) {
         self.store = store
         self.orgs = orgs
         self.fleet = fleet
         self.readFile = readFile
         self.home = home
+        self.keyLogin = keyLogin
+        self.defaultLocation = defaultLocation
     }
 
     public func load() {
@@ -202,15 +213,43 @@ public final class EnvironmentsModel {
             orgs = known
         }
         guard orgs.contains(where: { $0.id == orgID }) else {
-            problems.append(EnvironmentProblem(field: .org, message: "Your Viam account can't see \(orgName)."))
+            let message = keyLogin() ? Self.notReachable : "Your Viam account can't see \(orgName)."
+            problems.append(EnvironmentProblem(field: .org, message: message))
             return problems
         }
         if let locationID = environment.locationID, !locationID.isEmpty,
            case .loaded(let locations) = locationStates[orgID], !locations.contains(where: { $0.id == locationID }) {
             let locationName = environment.locationName ?? locationID
-            problems.append(EnvironmentProblem(field: .location, message: "\"\(locationName)\" no longer exists in \(orgName)."))
+            let message = keyLogin() ? Self.notReachable : "\"\(locationName)\" no longer exists in \(orgName)."
+            problems.append(EnvironmentProblem(field: .location, message: message))
         }
         return problems
+    }
+
+    public static let notReachable = "Not reachable with this key"
+
+    /// Signed in with an API key whose grant leaves out the environment's org or
+    /// location. Its stored org and location are kept.
+    public func isUnreachableWithKey(_ environment: Environment) -> Bool {
+        guard keyLogin() else { return false }
+        return problems(for: environment).contains { $0.message == Self.notReachable }
+    }
+
+    /// Whether the org's loaded locations are those the credential is granted,
+    /// read one by one, rather than Viam's list.
+    public func locationsAreGrantsOnly(org orgID: String) -> Bool {
+        grantedOnly.contains(orgID)
+    }
+
+    /// The orgs full-mode environments use, in order of first use.
+    public var orgIDsInUse: [String] {
+        var seen = Set<String>()
+        return environments.compactMap { $0.provisionMode == .full ? $0.orgID : nil }.filter { seen.insert($0).inserted }
+    }
+
+    /// Loads the locations of every org an environment uses, so each one's reach shows.
+    public func loadLocationsInUse() async {
+        for orgID in orgIDsInUse { await loadLocations(org: orgID) }
     }
 
     public func orgIsAvailable(_ environment: Environment) -> Bool {
@@ -244,14 +283,46 @@ public final class EnvironmentsModel {
     private func fetchLocations(org orgID: String) async {
         guard isAvailable(orgID) else { return }
         locationStates[orgID] = .loading
+        grantedOnly.remove(orgID)
+        let fleet = fleet(orgID)
         do {
-            locationStates[orgID] = .loaded(try await fleet(orgID).locations())
+            locationStates[orgID] = .loaded(try await fleet.locations())
+        } catch .rejected(let message) {
+            await readGrantedLocations(org: orgID, fleet: fleet, refusal: message)
         } catch {
             switch error {
             case .rejected(let message): locationStates[orgID] = .rejected(message)
             case .failed(let message), .unreachable(let message): locationStates[orgID] = .unreachable(message)
             }
         }
+    }
+
+    /// Viam refused the org's list: reads the environments' locations in the org
+    /// and the CLI's default one by one. Those Viam answers for are the grant; one
+    /// it couldn't answer for leaves the grant unknown.
+    private func readGrantedLocations(org orgID: String, fleet: any ViamFleet, refusal: String) async {
+        var seen = Set<String>()
+        let candidates = (environments.filter { $0.orgID == orgID }.compactMap(\.locationID) + [defaultLocation()].compactMap { $0 })
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+        guard !candidates.isEmpty else {
+            locationStates[orgID] = .rejected(refusal)
+            return
+        }
+        var granted: [ViamLocation] = []
+        for id in candidates {
+            do {
+                granted.append(try await fleet.location(id: id))
+            } catch {
+                switch error {
+                case .rejected: continue
+                case .failed(let message), .unreachable(let message):
+                    locationStates[orgID] = .unreachable(message)
+                    return
+                }
+            }
+        }
+        locationStates[orgID] = .loaded(granted.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
+        grantedOnly.insert(orgID)
     }
 
     // MARK: Helpers

@@ -28,7 +28,7 @@ enum ImportEnvironmentCommand {
         }
     }
 
-    /// The org's name as the viam CLI's login sees it; nil when signed out or not visible.
+    /// The org's name as the viam CLI's login, a user's or an API key's, sees it; nil when signed out or not visible.
     private static func orgName(_ orgID: String) -> String? {
         let result = Locked<String?>(nil)
         let done = DispatchSemaphore(value: 0)
@@ -36,9 +36,14 @@ enum ImportEnvironmentCommand {
             defer { done.signal() }
             guard let executable = await ViamCLI.locate() else { return }
             let cli = ViamCLI(run: ViamCLI.processRunner(executable: executable))
-            let lister = ViamOrganizationLister(
-                tokens: CLITokenSource(cli: { cli }), baseURL: CLIConfig.baseURL() ?? ViamAppClient.defaultBaseURL)
-            let name = (try? await lister.organizations())?.first { $0.id == orgID }?.name
+            let baseURL = CLIConfig.baseURL() ?? ViamAppClient.defaultBaseURL
+            let tokens = CLILoginTokens(
+                login: { CLIConfig.login() }, user: CLITokenSource(cli: { cli }),
+                apiKey: APIKeyTokenSource(readKey: { CLIConfig.apiKey() },
+                                          authenticate: { try await ViamAppClient.authenticate(keyID: $0, key: $1, baseURL: baseURL) }))
+            let lister = ViamOrganizationLister(tokens: tokens, baseURL: baseURL)
+            var name = (try? await lister.organizations())?.first { $0.id == orgID }?.name
+            if name == nil { name = (try? await lister.organization(id: orgID))?.name }
             result.set(name)
         }
         done.wait()

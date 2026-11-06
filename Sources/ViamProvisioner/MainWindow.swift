@@ -56,12 +56,15 @@ struct MainWindow: View {
         .toolbar {
             if let environment = selected {
                 ToolbarItem(placement: .primaryAction) {
+                    let unreachable = environments.isUnreachableWithKey(environment)
                     Button { provisioning = environment } label: { Label("Provision…", systemImage: "play.fill") }
-                        .help("Provision a batch of machines from \(environment.name)")
+                        .disabled(unreachable)
+                        .help(unreachable ? "\(environment.name) is \(EnvironmentsModel.notReachable.lowercased())."
+                                          : "Provision a batch of machines from \(environment.name)")
                 }
             }
             ToolbarItem(placement: .primaryAction) { ServerPicker(servers: servers, queue: queue) }
-            ToolbarItem(placement: .primaryAction) { AccountStatus(session: session) }
+            ToolbarItem(placement: .primaryAction) { AccountStatus(session: session, organizations: organizations, environments: environments) }
         }
         .task {
             // Browsing fails until Local Network access is granted; keep trying.

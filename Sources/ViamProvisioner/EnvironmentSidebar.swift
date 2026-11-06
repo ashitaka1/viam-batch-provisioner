@@ -54,6 +54,7 @@ struct EnvironmentSidebar: View {
                 ForEach(environments.environments) { environment in
                     EnvironmentRow(
                         environment: environment, problems: environments.problems(for: environment),
+                        unreachable: environments.isUnreachableWithKey(environment),
                         renaming: Binding(get: { renamingID == environment.id }, set: { if !$0 { renamingID = nil } }),
                         rename: { try environments.rename(id: environment.id, to: $0) })
                         .tag(SidebarItem.environment(environment.id))
@@ -88,6 +89,8 @@ struct EnvironmentSidebar: View {
 struct EnvironmentRow: View {
     let environment: ProvisionerKit.Environment
     let problems: [EnvironmentProblem]
+    /// Out of the signed-in API key's reach.
+    var unreachable = false
     @Binding var renaming: Bool
     let rename: (String) throws -> Void
 
@@ -113,6 +116,8 @@ struct EnvironmentRow: View {
                 }
                 if let note {
                     Text(note).font(.caption).foregroundStyle(.orange)
+                } else if unreachable {
+                    Text(EnvironmentsModel.notReachable).font(.caption).foregroundStyle(.orange)
                 } else {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }

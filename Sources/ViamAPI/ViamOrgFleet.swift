@@ -23,6 +23,12 @@ public struct ViamOrgFleet: ViamFleet {
         try await fleetCall { try await client.locations(organizationID: orgID).map { ViamLocation(id: $0.id, name: $0.name) } }
     }
 
+    public func location(id: String) async throws(FleetError) -> ViamLocation {
+        let location = try await fleetCall { try await client.location(id: id) }
+        guard location.organizationIDs.contains(orgID) else { throw .rejected("Location \(id) isn't in organization \(orgID).") }
+        return ViamLocation(id: location.id, name: location.name)
+    }
+
     public func machines(location: String) async throws(FleetError) -> [ViamMachine] {
         try await fleetCall { try await client.robots(locationID: location).map { ViamMachine(id: $0.id, name: $0.name) } }
     }
@@ -42,7 +48,7 @@ public struct ViamOrgFleet: ViamFleet {
     }
 }
 
-/// The organizations the signed-in user can see.
+/// The organizations the signed-in user or API key can see.
 public struct ViamOrganizationLister: OrganizationLister {
     private let client: ViamAppClient
 
@@ -52,6 +58,11 @@ public struct ViamOrganizationLister: OrganizationLister {
 
     public func organizations() async throws(FleetError) -> [ViamOrganization] {
         try await fleetCall { try await client.organizations() }
+    }
+
+    public func organization(id: String) async throws(FleetError) -> ViamOrganization {
+        let org = try await fleetCall { try await client.organization(id: id) }
+        return ViamOrganization(id: org.id, name: org.name)
     }
 }
 

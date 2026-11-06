@@ -90,9 +90,56 @@ private final class Locator: @unchecked Sendable {
 }
 
 @MainActor
-private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: true)) -> ViamSession {
-    ViamSession(locate: { locator.locate() }, makeCLI: { _ in cli.cli },
-                baseURL: URL(string: "https://app.viam.com")!, now: { now })
+private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: true),
+                     config: CLIConfigFile = CLIConfigFile(), viam: ScriptedAuth = ScriptedAuth()) -> ViamSession {
+    ViamSession(locate: { locator.locate() }, makeCLI: { _ in cli.cli }, configPath: config.path,
+                baseURL: URL(string: "https://app.viam.com")!, authenticate: viam.authenticate, now: { now })
+}
+
+/// A `cached_cli_config.json` in a temporary directory; it starts absent.
+private final class CLIConfigFile: Sendable {
+    let path = FileManager.default.temporaryDirectory
+        .appending(path: "cli-config-\(UUID().uuidString).json").path
+
+    func holdAPIKey(id: String = "key-id-1", key: String = "key-secret-1") {
+        write(#"{"base_url":"https://app.viam.com:443","auth":{"key_id":"\#(id)","key_crypto":"\#(key)"}}"#)
+    }
+
+    func holdUserLogin() {
+        write(#"{"base_url":"https://app.viam.com:443","auth":{"access_token":"t","refresh_token":"r"}}"#)
+    }
+
+    private func write(_ text: String) {
+        FileManager.default.createFile(atPath: path, contents: Data(text.utf8))
+    }
+
+    deinit { try? FileManager.default.removeItem(atPath: path) }
+}
+
+/// Viam's `AuthService/Authenticate`, scripted.
+private final class ScriptedAuth: @unchecked Sendable {
+    enum Outcome { case token(String), refused, unreachable }
+
+    private let lock = NSLock()
+    private var outcome = Outcome.token(jwt(expiresIn: 3600))
+    private var _calls: [(id: String, key: String)] = []
+
+    var calls: [(id: String, key: String)] { lock.withLock { _calls } }
+    func answer(_ outcome: Outcome) { lock.withLock { self.outcome = outcome } }
+
+    var authenticate: APIKeyTokenSource.Authenticate {
+        { id, key in
+            let outcome = self.lock.withLock {
+                self._calls.append((id, key))
+                return self.outcome
+            }
+            switch outcome {
+            case .token(let token): return token
+            case .refused: throw APIKeyRefused()
+            case .unreachable: throw URLError(.notConnectedToInternet)
+            }
+        }
+    }
 }
 
 // MARK: - Loading
@@ -109,7 +156,7 @@ private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: t
     await model.load()
     locator.installed = true
     await model.load()
-    #expect(model.state == .signedIn(account: "avery@example.com"))
+    #expect(model.state == .signedIn(.user("avery@example.com")))
 }
 
 @MainActor @Test func cliRemovedMidSessionIsCLIMissingAndLookedForAgain() async {
@@ -122,7 +169,7 @@ private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: t
     #expect(model.state == .cliMissing)
     cli.update { $0.missing = false }
     await model.load()
-    #expect(model.state == .signedIn(account: "avery@example.com"))
+    #expect(model.state == .signedIn(.user("avery@example.com")))
     #expect(locator.calls == 2, "the CLI was located \(locator.calls) times; a vanished CLI must be located again")
 }
 
@@ -135,16 +182,7 @@ private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: t
 @MainActor @Test func loggedInCLIShowsAccount() async {
     let model = session(ScriptedCLI())
     await model.load()
-    #expect(model.state == .signedIn(account: "avery@example.com"))
-}
-
-@MainActor @Test func accountWithoutAnEmailIsAnAPIKey() async {
-    // The CLI's whoami wording for a key login is unverified; any answer without an email counts.
-    let cli = ScriptedCLI()
-    cli.update { $0.account = "key-id-1234" }
-    let model = session(cli)
-    await model.load()
-    #expect(model.state == .signedIn(account: "API key"))
+    #expect(model.state == .signedIn(.user("avery@example.com")))
 }
 
 @MainActor @Test func whoamiFailureShowsNoAccount() async {
@@ -152,7 +190,7 @@ private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: t
     cli.update { $0.whoamiFails = true }
     let model = session(cli)
     await model.load()
-    #expect(model.state == .signedIn(account: nil))
+    #expect(model.state == .signedIn(.user(nil)))
 }
 
 // MARK: - Signing in and out
@@ -162,7 +200,7 @@ private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: t
     let model = session(cli)
     await model.load()
     await model.signIn()
-    #expect(model.state == .signedIn(account: "avery@example.com"))
+    #expect(model.state == .signedIn(.user("avery@example.com")))
     #expect(cli.logins == 1, "ran \(cli.calls)")
 }
 
@@ -181,7 +219,7 @@ private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: t
 
     cli.update { $0.holdLogin = false }
     await model.signIn()
-    #expect(model.state == .signedIn(account: "avery@example.com"))
+    #expect(model.state == .signedIn(.user("avery@example.com")))
 }
 
 @MainActor @Test func signInNeverRunsOverAnExistingLogin() async {
@@ -219,7 +257,7 @@ private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: t
     let model = session(cli)
     await model.load()
     await model.signOut()
-    #expect(model.state == .signedIn(account: "avery@example.com"))
+    #expect(model.state == .signedIn(.user("avery@example.com")))
 }
 
 // MARK: - The token
@@ -292,6 +330,100 @@ private func session(_ cli: ScriptedCLI, locator: Locator = Locator(installed: t
     await model.tokens.rejected()
     await model.signIn()
     #expect(cli.logins == 1)
+}
+
+// MARK: - API-key login
+
+@MainActor @Test func apiKeyLoginSignsInAsTheKeyWithTheKeyFromTheConfig() async {
+    let cli = ScriptedCLI(loggedIn: false)
+    let config = CLIConfigFile()
+    config.holdAPIKey(id: "key-id-1", key: "key-secret-1")
+    let viam = ScriptedAuth()
+    let model = session(cli, config: config, viam: viam)
+    await model.load()
+    #expect(model.state == .signedIn(.apiKey(id: "key-id-1")))
+    #expect(viam.calls.map(\.id) == ["key-id-1"])
+    #expect(viam.calls.map(\.key) == ["key-secret-1"])
+    #expect(cli.tokenReads == 0, "an API-key login has no CLI token to print")
+}
+
+@MainActor @Test func apiKeyTokenIsReusedUntilItNearsExpiry() async throws {
+    let config = CLIConfigFile()
+    config.holdAPIKey()
+    let viam = ScriptedAuth()
+    viam.answer(.token(jwt(expiresIn: 61)))
+    let model = session(ScriptedCLI(), config: config, viam: viam)
+    _ = try await model.tokens.token(refresh: false)
+    _ = try await model.tokens.token(refresh: false)
+    #expect(viam.calls.count == 1, "a token 61 s from expiry was exchanged \(viam.calls.count) times")
+
+    viam.answer(.token(jwt(expiresIn: 59)))
+    _ = try await model.tokens.token(refresh: true)
+    _ = try await model.tokens.token(refresh: false)
+    #expect(viam.calls.count == 3, "a token 59 s from expiry was reused")
+}
+
+@MainActor @Test func refusedKeySignsTheSessionOut() async {
+    let config = CLIConfigFile()
+    config.holdAPIKey()
+    let viam = ScriptedAuth()
+    let model = session(ScriptedCLI(), config: config, viam: viam)
+    await model.load()
+    viam.answer(.refused)
+    await #expect(throws: ViamCLIError.notLoggedIn) { try await model.tokens.token(refresh: true) }
+    #expect(model.state == .signedOut)
+}
+
+@MainActor @Test func rejectedKeyTokenSignsTheSessionOutButNotTheCLI() async {
+    let cli = ScriptedCLI()
+    let config = CLIConfigFile()
+    config.holdAPIKey()
+    let model = session(cli, config: config)
+    await model.load()
+    await model.tokens.rejected()
+    #expect(model.state == .signedOut)
+    #expect(!cli.calls.contains(["logout"]))
+}
+
+@MainActor @Test func unreachableViamFailsWithoutTheKey() async {
+    let config = CLIConfigFile()
+    config.holdAPIKey(key: "key-secret-1")
+    let viam = ScriptedAuth()
+    viam.answer(.unreachable)
+    let model = session(ScriptedCLI(), config: config, viam: viam)
+    await model.load()
+    guard case .failed(let message) = model.state else {
+        Issue.record("state \(model.state)")
+        return
+    }
+    #expect(!message.contains("key-secret-1"))
+}
+
+@MainActor @Test func signingOutAKeyLoginRunsLogout() async {
+    let cli = ScriptedCLI()
+    let config = CLIConfigFile()
+    config.holdAPIKey()
+    let model = session(cli, config: config)
+    await model.load()
+    await model.signOut()
+    #expect(model.state == .signedOut)
+    #expect(cli.calls.contains(["logout"]))
+}
+
+/// `viam login api-key` in Terminal replaces the user login while the app runs.
+@MainActor @Test func tokensFollowTheLoginTheCLIHoldsNow() async throws {
+    let cli = ScriptedCLI()
+    let config = CLIConfigFile()
+    config.holdUserLogin()
+    let viam = ScriptedAuth()
+    let model = session(cli, config: config, viam: viam)
+    _ = try await model.tokens.token(refresh: false)
+    #expect(cli.tokenReads == 1)
+    config.holdAPIKey()
+    let token = jwt(expiresIn: 1800)
+    viam.answer(.token(token))
+    #expect(try await model.tokens.token(refresh: false) == token)
+    #expect(viam.calls.count == 1)
 }
 
 /// The code reaches the session through a hop to the main actor.

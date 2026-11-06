@@ -11,6 +11,14 @@ public struct ViamOrganization: Sendable, Equatable, Identifiable {
 
 public protocol OrganizationLister: Sendable {
     func organizations() async throws(FleetError) -> [ViamOrganization]
+    /// One organization, for a credential Viam won't list organizations for.
+    func organization(id: String) async throws(FleetError) -> ViamOrganization
+}
+
+extension OrganizationLister {
+    public func organization(id: String) async throws(FleetError) -> ViamOrganization {
+        throw .rejected("Organization \(id) can't be read.")
+    }
 }
 
 /// What the app knows of the signed-in account's organizations.

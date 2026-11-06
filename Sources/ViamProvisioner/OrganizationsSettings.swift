@@ -9,7 +9,7 @@ struct OrganizationsSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            AccountStatus(session: session)
+            AccountStatus(session: session, organizations: model, environments: environments)
             switch model.state {
             case .failed(let message):
                 Text(message).foregroundStyle(.secondary)
