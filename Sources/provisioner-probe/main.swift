@@ -203,7 +203,7 @@ func viamBatch(_ arguments: ArraySlice<String>) async {
     } catch {
         switch error {
         case .naming(let naming): fail("viam-batch: \(naming.localizedDescription)")
-        case .fleet(let fleet): fail("viam-batch: \(fleet)")
+        case .fleet(let fleetError): fail("viam-batch: \(fleetError)")
         }
     }
 
