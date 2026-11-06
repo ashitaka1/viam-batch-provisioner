@@ -17,20 +17,6 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-func cliMessage(_ error: any Error) -> String {
-    switch error as? ViamCLIError {
-    case .notInstalled: "Install the viam CLI: https://docs.viam.com/cli/"
-    case .notLoggedIn: "Run 'viam login' first."
-    case .failed(let stderr): "The viam CLI failed: \(stderr)"
-    case .unparsableOrganizations: "Couldn't read the viam CLI's organization list. Update it with 'viam update'."
-    case .unparsableKey, .tokenUnavailable, nil: "The viam CLI failed: \(error)"
-    }
-}
-
-func deleteHint(_ keyName: String) -> String {
-    "Delete it in Viam: Organization → API keys → \"\(keyName)\"."
-}
-
 // MARK: Arguments
 
 var arguments = CommandLine.arguments.dropFirst()
@@ -46,10 +32,10 @@ while let argument = arguments.popFirst() {
 
 // MARK: Pick the org
 
-guard let executable = await ViamCLI.locate() else { fail(cliMessage(ViamCLIError.notInstalled)) }
+guard let executable = await ViamCLI.locate() else { fail(pairingCLIMessage(ViamCLIError.notInstalled)) }
 let cli = ViamCLI(run: ViamCLI.processRunner(executable: executable))
 let orgs: [(id: String, name: String)]
-do { orgs = try await cli.organizations() } catch { fail(cliMessage(error)) }
+do { orgs = try await cli.organizations() } catch { fail(pairingCLIMessage(error)) }
 
 let org: (id: String, name: String)
 if let requestedOrgID {
@@ -139,37 +125,16 @@ func converse() async -> Never {
         return "provisioner-app \(shortHost) \(formatter.string(from: Date()))"
     }()
 
-    let key: (id: String, key: String)
-    do {
-        key = try await cli.createKey(orgID: org.id, name: keyName)
-    } catch ViamCLIError.unparsableKey {
-        await host.cancel()
-        await finish("The viam CLI created a key but its output couldn't be read. \(deleteHint(keyName))", status: 1)
-    } catch {
-        await host.cancel()
-        await finish(cliMessage(error), status: 1)
-    }
-
-    do {
-        try await host.release(PairingPayload(orgID: org.id, orgName: org.name, keyID: key.id, key: key.key, keyName: keyName))
-    } catch {
-        await finish("The pairing ended before the key was sent. \(deleteHint(keyName))", status: 1)
-    }
-
-    while true {
-        switch await pending.next() {
-        case .event(.result(.stored, _)): await finish("Signed in to \(org.name).", status: 0)
-        case .event(.result(.rejected, let message)):
-            await finish("The app couldn't use key \"\(keyName)\": \(message ?? "rejected"). \(deleteHint(keyName))", status: 1)
-        case .event(.cancelledByApp): await finish("Cancelled in the app after the key was created. \(deleteHint(keyName))", status: 1)
-        case .event(.timedOut), nil:
-            await finish("""
-                Timed out waiting for the app after creating key "\(keyName)". If the app's Settings → Organizations \
-                doesn't list \(org.name), \(deleteHint(keyName).prefix(1).lowercased() + deleteHint(keyName).dropFirst())
-                """, status: 1)
-        case .event, .line: continue
+    let end = await KeyHandoff(host: host, cli: cli, orgID: org.id, orgName: org.name, keyName: keyName).run {
+        while true {
+            switch await pending.next() {
+            case .event(let event): return event
+            case .line: continue
+            case nil: return nil
+            }
         }
     }
+    await finish(end.message, status: end.succeeded ? 0 : 1)
 }
 
 await converse()
