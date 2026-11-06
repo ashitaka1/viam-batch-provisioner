@@ -152,6 +152,7 @@ dhcp:
 
 # Start HTTP server only (Docker)
 up:
+    mkdir -p logs http-server/machines http-server/config
     API_PORT="$(./scripts/api-service.sh port)" docker compose up -d
 
 # Stop HTTP server only
