@@ -33,5 +33,6 @@ func buildApplication(_ configuration: ServerConfiguration, provisioner: Provisi
 func localHostName() -> String {
     var buffer = [CChar](repeating: 0, count: 256)
     guard gethostname(&buffer, buffer.count) == 0 else { return "localhost" }
-    return String(cString: buffer)
+    let name = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+    return String(decoding: name, as: UTF8.self)
 }

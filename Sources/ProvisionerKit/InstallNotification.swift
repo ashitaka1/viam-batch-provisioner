@@ -1,4 +1,4 @@
-public import Foundation
+import Foundation
 
 /// What to tell the operator when an install ends.
 public struct InstallNotification: Sendable, Equatable {

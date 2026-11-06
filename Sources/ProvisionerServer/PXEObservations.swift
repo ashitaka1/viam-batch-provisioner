@@ -26,7 +26,8 @@ extension Provisioner {
     }
 
     private func observeOffer(_ mac: String) async {
-        guard var (queued, store, record) = await boundMachine(mac), record.completedAt == nil else { return }
+        guard let (queued, store, found) = await boundMachine(mac), found.completedAt == nil else { return }
+        var record = found
         let current = record.steps.filter { $0.attempt == record.attempt }.map(\.step)
         if record.failedAt == nil, current == [Components.Schemas.ProvisioningStep.found.rawValue] { return }
         if record.attempt == 0 {
@@ -41,8 +42,9 @@ extension Provisioner {
     private func observeFile(_ filename: String, _ mac: String?) async {
         let file = filename.split(separator: "/").last.map(String.init) ?? filename
         guard bootFiles.contains(file), let mac else { return }
-        guard var (queued, store, record) = await boundMachine(mac), record.completedAt == nil, record.attempt > 0,
-              !record.bootFilesSent.contains(file) else { return }
+        guard let (queued, store, found) = await boundMachine(mac), found.completedAt == nil, found.attempt > 0,
+              !found.bootFilesSent.contains(file) else { return }
+        var record = found
         record.bootFilesSent.append(file)
         persist(&record, reaching: bootFiles.isSubset(of: record.bootFilesSent) ? .booting : nil, queued, store, mac)
     }

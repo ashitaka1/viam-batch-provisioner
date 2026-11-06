@@ -105,7 +105,10 @@ private func descriptorsOpen(on url: URL) -> Int {
     defer { free(target) }
     let targetPath = String(cString: target)
     var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
-    return (0..<getdtablesize()).filter { fcntl($0, F_GETPATH, &path) == 0 && String(cString: path) == targetPath }.count
+    return (0..<getdtablesize()).filter { descriptor in
+        guard fcntl(descriptor, F_GETPATH, &path) == 0 else { return false }
+        return String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self) == targetPath
+    }.count
 }
 
 private func readRequest(_ filename: String, options: [TFTPOption] = []) -> ByteBuffer {
