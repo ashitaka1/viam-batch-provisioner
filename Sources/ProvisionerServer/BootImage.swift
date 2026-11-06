@@ -5,17 +5,14 @@ struct BootImage: Sendable {
     let url: URL
     let fileName: String
     let osName: String
-    let size: Int
 
     init(files: URL, path: String) throws {
         url = files.appending(path: path)
         fileName = url.lastPathComponent
         osName = ProvisionerServer.osName(forImageNamed: fileName)
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        guard let size = (attributes[.size] as? NSNumber)?.intValue else {
-            throw ConfigurationError(description: "boot image \(path) has no size")
+        guard FileManager.default.isReadableFile(atPath: url.path) else {
+            throw ConfigurationError(description: "boot image \(path) is not readable")
         }
-        self.size = size
     }
 }
 

@@ -155,6 +155,7 @@ let package = Package(
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "_NIOFileSystem", package: "swift-nio"),
                 .target(name: "ProvisionerHelperXPC", condition: .when(platforms: [.macOS])),
             ],
             plugins: [
