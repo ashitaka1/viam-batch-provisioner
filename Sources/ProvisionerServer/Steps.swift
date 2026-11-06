@@ -2,23 +2,22 @@ import Foundation
 import ProvisionerAPI
 
 extension Provisioner {
-    /// Appends `step` for the current attempt and returns whether it was added; a
-    /// step the attempt already has is left alone. The caller saves the record,
-    /// then calls `announce`, so no event is journaled for an unsaved record.
-    @discardableResult
-    func reach(_ step: Components.Schemas.ProvisioningStep, _ record: inout MachineRecord, name: String, mac: String?) -> Bool {
-        guard !record.steps.contains(where: { $0.step == step.rawValue && $0.attempt == record.attempt }) else { return false }
-        record.steps.append(StepRecord(step: step.rawValue, at: now(), attempt: record.attempt))
-        return true
+    /// Appends `step` for the current attempt and returns the added record, or nil
+    /// when the attempt already has the step. The caller saves the record, then
+    /// calls `announce`, so no event is journaled for an unsaved record.
+    func reach(_ step: Components.Schemas.ProvisioningStep, _ record: inout MachineRecord) -> StepRecord? {
+        guard !record.steps.contains(where: { $0.step == step.rawValue && $0.attempt == record.attempt }) else { return nil }
+        let added = StepRecord(step: step.rawValue, at: now(), attempt: record.attempt)
+        record.steps.append(added)
+        return added
     }
 
     /// Emits `step-reached` for a step `reach` added and the caller saved.
-    func announce(_ step: Components.Schemas.ProvisioningStep, _ record: MachineRecord, name: String, mac: String?) {
-        let time = record.steps.last { $0.step == step.rawValue }?.at ?? now()
-        let attempt = record.attempt
+    func announce(_ added: StepRecord, name: String, mac: String?) {
+        guard let step = Components.Schemas.ProvisioningStep(rawValue: added.step) else { return }
         emit {
-            .stepReached(.init(id: $0, _type: .stepReached, timestamp: time, name: name,
-                               mac: mac.map { .init(value1: $0) }, step: step, attempt: attempt))
+            .stepReached(.init(id: $0, _type: .stepReached, timestamp: added.at, name: name,
+                               mac: mac.map { .init(value1: $0) }, step: step, attempt: added.attempt))
         }
     }
 

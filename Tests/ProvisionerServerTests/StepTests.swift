@@ -63,7 +63,10 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
     let record = MachineRecord(attempt: 1, steps: [StepRecord(step: "found", at: t0, attempt: 1)])
     try MachineStore(dir).save(machine: record, key: "m-1")
 
-    #expect(derivedStatus(record) == .assigned)
+    let (reopened, _) = try makeProvisioner(dir.root)
+    let entry = try await reopened.entry("m-1")
+    #expect(entry.status == .assigned)
+    #expect(entry.steps?.map(\.step) == [.found])
     #expect(derivedStatus(MachineRecord(attempt: 2, steps: record.steps)) == .queued)
 }
 
@@ -84,11 +87,11 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
 @Test func reachRecordsOncePerAttempt() async throws {
     let (provisioner, _) = try await queued()
     var record = MachineRecord(attempt: 1)
-    #expect(await provisioner.reach(.found, &record, name: "m-1", mac: "aa:bb:cc:dd:ee:ff"))
-    #expect(await !provisioner.reach(.found, &record, name: "m-1", mac: nil))
+    #expect(await provisioner.reach(.found, &record)?.attempt == 1)
+    #expect(await provisioner.reach(.found, &record) == nil)
     #expect(record.steps.count == 1)
     await provisioner.beginAttempt(&record)
-    #expect(await provisioner.reach(.found, &record, name: "m-1", mac: nil))
+    #expect(await provisioner.reach(.found, &record)?.attempt == 2)
     #expect(record.steps.map(\.attempt) == [1, 2])
     #expect(await eventSummary(provisioner).isEmpty)
 }
@@ -96,8 +99,8 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
 @Test func announceEmitsStepReached() async throws {
     let (provisioner, _) = try await queued()
     var record = MachineRecord(attempt: 1)
-    await provisioner.reach(.found, &record, name: "m-1", mac: "aa:bb:cc:dd:ee:ff")
-    await provisioner.announce(.found, record, name: "m-1", mac: "aa:bb:cc:dd:ee:ff")
+    let added = try #require(await provisioner.reach(.found, &record))
+    await provisioner.announce(added, name: "m-1", mac: "aa:bb:cc:dd:ee:ff")
 
     #expect(await eventSummary(provisioner) == ["step-reached m-1 found"])
 }

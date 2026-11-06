@@ -27,7 +27,7 @@ import Testing
                 var ids: [String] = []
                 for try await frame in frames {
                     if let id = frame.id { ids.append(id) }
-                    if ids.count == 4 { break }
+                    if ids.count == 7 { break }
                 }
                 return ids
             }
@@ -39,6 +39,6 @@ import Testing
             group.cancelAll()
             return first
         }
-        #expect(ids == ["1", "2", "3", "4"])
+        #expect(ids == ["1", "2", "3", "4", "5", "6", "7"])
     }
 }
