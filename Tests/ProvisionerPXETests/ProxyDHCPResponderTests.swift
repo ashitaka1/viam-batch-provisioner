@@ -1,6 +1,12 @@
 import Testing
 @testable import ProvisionerPXE
 
+private func discover(option93: [UInt8]) -> DHCPPacket {
+    var packet = pxeDiscover()
+    packet.options = packet.options.map { $0.code == 93 ? DHCPOption(code: 93, data: option93) : $0 }
+    return packet
+}
+
 @Suite struct ProxyDHCPResponderTests {
     let server: UInt32 = 0xC0A8_0705  // 192.168.7.5
     var responder: ProxyDHCPResponder {
@@ -71,6 +77,13 @@ import Testing
         #expect(responder.reply(to: pxeDiscover(arch: 9), on: .dhcp) != nil)
     }
 
+    /// RFC 4578 section 2.1: option 93 is a list of 16-bit architecture types.
+    @Test(arguments: [([0, 0, 0, 7], 7), ([0, 11, 0, 9], 9), ([0, 9, 0, 7], 9)] as [([UInt8], UInt16)])
+    func answersArchitectureList(list: [UInt8], reported: UInt16) throws {
+        let (_, client) = try #require(responder.reply(to: discover(option93: list), on: .dhcp))
+        #expect(client?.architecture == reported)
+    }
+
     @Test(arguments: [
         ("no option 60", pxeDiscover(vendorClass: nil), DHCPListener.dhcp),
         ("Windows vendor class", pxeDiscover(vendorClass: "MSFT 5.0"), .dhcp),
@@ -82,6 +95,9 @@ import Testing
         ("server reply", { var p = pxeDiscover(); p.op = 2; return p }(), .dhcp),
         ("no option 93", { var p = pxeDiscover(); p.options.removeAll { $0.code == 93 }; return p }(), .dhcp),
         ("short option 93", { var p = pxeDiscover(); p.options = p.options.map { $0.code == 93 ? DHCPOption(code: 93, data: [7]) : $0 }; return p }(), .dhcp),
+        ("odd-length option 93", discover(option93: [0, 7, 0]), .dhcp),
+        ("empty option 93", discover(option93: []), .dhcp),
+        ("list without x86-64 UEFI", discover(option93: [0, 0, 0, 11]), .dhcp),
         ("not Ethernet", { var p = pxeDiscover(); p.htype = 6; return p }(), .dhcp),
         ("long hardware address", { var p = pxeDiscover(); p.hlen = 8; return p }(), .dhcp),
     ])

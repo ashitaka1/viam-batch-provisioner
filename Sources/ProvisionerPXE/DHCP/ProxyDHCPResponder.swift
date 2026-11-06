@@ -35,10 +35,11 @@ struct ProxyDHCPResponder: Sendable {
               let mac = request.clientMAC,
               let vendorClass = request.option(60),
               vendorClass.starts(with: Array("PXEClient".utf8)),
-              let arch = request.option(93), arch.count == 2
+              let arch = request.option(93), !arch.isEmpty, arch.count.isMultiple(of: 2)
         else { return nil }
-        let architecture = UInt16(arch[0]) << 8 | UInt16(arch[1])
-        guard x86_64EFIArchitectures.contains(architecture) else { return nil }
+        // RFC 4578 section 2.1: a list of 16-bit architecture types.
+        let architectures = stride(from: 0, to: arch.count, by: 2).map { UInt16(arch[$0]) << 8 | UInt16(arch[$0 + 1]) }
+        guard let architecture = architectures.first(where: x86_64EFIArchitectures.contains) else { return nil }
         return (mac, architecture)
     }
 
