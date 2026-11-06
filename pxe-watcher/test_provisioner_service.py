@@ -369,7 +369,7 @@ class ValidateReportTest(unittest.TestCase):
     def test_a_warning_is_cleaned_and_kept_only_on_done(self):
         cases = {
             "done keeps it, cleaned": (self.report(stage="done", warning="port\x00 enp3s0\n moved"), "port enp3s0 moved"),
-            "done cuts it to the limit": (self.report(stage="done", warning="x" * (svc.MAX_REASON + 1)), "x" * svc.MAX_REASON),
+            "done cuts it to 500 characters": (self.report(stage="done", warning="x" * 501), "x" * 500),
             "blank is no warning": (self.report(stage="done", warning=" \n"), None),
             "another stage drops it": (self.report(stage="tooling", warning=WARNING), None),
             "a failure drops it": (self.report(kind="failed", stage="tooling", warning=WARNING), None),
@@ -490,6 +490,13 @@ class ReportInstallTest(ServiceLayoutTest):
         self.assertEqual([(e["type"], e.get("warning")) for e in self.events()],
                          [("install-progress", WARNING), ("install-complete", WARNING)])
         self.assertEqual(result, {"result": "recorded"})
+
+    def test_a_machine_just_unguard_armed_is_not_completed_and_keeps_no_warning(self):
+        self.seed([{"name": "m", "assigned": True, "mac": MAC}])
+        self.write_info(MAC, name="m", attempt=1, stage="tailscale", armed=True)
+        self.service().report_install({"kind": "progress", "stage": "done", "mac": MAC, "warning": WARNING})
+        self.assertNotIn("completed_at", self.info())
+        self.assertNotIn("warning", self.info())
 
     def test_a_done_report_without_a_warning_adds_none(self):
         self.seed([{"name": "m", "assigned": True, "mac": MAC}])

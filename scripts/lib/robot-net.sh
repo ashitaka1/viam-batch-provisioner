@@ -15,7 +15,8 @@ valid_robot_net_address() {
     (( a == 10 )) || (( a == 172 && b >= 16 && b <= 31 )) || (( a == 192 && b == 168 ))
 }
 
-# ROBOT_NET_PORT: blank, or a Linux interface name.
+# ROBOT_NET_PORT: blank, or a Linux interface name starting with a letter or
+# digit, so `.` and `..` can't pass the installer's /sys/class/net check.
 valid_robot_net_port() {
-    [[ -z "$1" || "$1" =~ ^[A-Za-z0-9_.-]{1,15}$ ]]
+    [[ -z "$1" || "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$ ]]
 }

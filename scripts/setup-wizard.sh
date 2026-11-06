@@ -169,7 +169,7 @@ if [[ "$ROBOT_NET_ADDRESS" != none ]]; then
     while :; do
         read -p "  Robot network port (e.g. enp3s0; blank for the first enp* port other than the cabled one): " ROBOT_NET_PORT
         valid_robot_net_port "$ROBOT_NET_PORT" && break
-        echo "  Invalid. An interface name: up to 15 letters, digits, '.', '_' and '-'."
+        echo "  Invalid. An interface name: up to 15 letters, digits, '.', '_' and '-', starting with a letter or digit."
     done
 fi
 echo ""
