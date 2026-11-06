@@ -21,6 +21,7 @@ import queue_store  # noqa: E402
 
 MAC = "aa:bb:cc:dd:ee:ff"
 T0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+WARNING = "Cabled on the robot-network port enp3s0: move the cable to another port."
 CREDS = {"cloud": {"app_address": "https://app.viam.com:443", "id": "part-1", "secret": "s3cr3t"}}
 
 
@@ -336,6 +337,7 @@ class ValidateReportTest(unittest.TestCase):
             "done with a failure": self.report(kind="failed", stage="done"),
             "installer with progress": self.report(stage="installer"),
             "non-string reason": self.report(kind="failed", stage="tooling", reason=5),
+            "non-string warning": self.report(stage="done", warning=["x"]),
             "name with a slash": {"kind": "progress", "stage": "identity", "name": "a/b"},
         }
         for label, body in bad.items():
@@ -358,6 +360,18 @@ class ValidateReportTest(unittest.TestCase):
             with self.subTest(label):
                 got = svc.validate_report(self.report(kind="failed", stage="tooling", reason=raw))["reason"]
                 self.assertTrue(got.strip(), "an empty reason must be replaced with readable text")
+
+    def test_a_warning_is_cleaned_and_kept_only_on_done(self):
+        cases = {
+            "done keeps it, cleaned": (self.report(stage="done", warning="port\x00 enp3s0\n moved"), "port enp3s0 moved"),
+            "done cuts it to the limit": (self.report(stage="done", warning="x" * (svc.MAX_REASON + 1)), "x" * svc.MAX_REASON),
+            "blank is no warning": (self.report(stage="done", warning=" \n"), None),
+            "another stage drops it": (self.report(stage="tooling", warning=WARNING), None),
+            "a failure drops it": (self.report(kind="failed", stage="tooling", warning=WARNING), None),
+        }
+        for label, (body, expected) in cases.items():
+            with self.subTest(label):
+                self.assertEqual(svc.validate_report(body)["warning"], expected)
 
 
 class FailedStatusTest(ServiceLayoutTest):
@@ -450,6 +464,44 @@ class ReportInstallTest(ServiceLayoutTest):
                 with self.assertRaises(svc.NotFound):
                     self.service().report_install(body)
                 self.assertEqual(self.events(), [])
+
+    def test_a_done_report_with_a_warning_completes_the_machine_and_shows_the_warning(self):
+        self.seed([{"name": "m", "assigned": True, "mac": MAC}])
+        self.write_info(MAC, name="m", attempt=1, stage="tailscale")
+        self.write_guard(MAC)
+
+        result = self.service().report_install({"kind": "progress", "stage": "done", "mac": MAC, "warning": WARNING})
+
+        entry = self.service().get_entry("m")
+        self.assertEqual((entry["status"], entry["warning"]), ("installed", WARNING))
+        self.assertEqual([(e["type"], e.get("warning")) for e in self.events()],
+                         [("install-progress", WARNING), ("install-complete", WARNING)])
+        self.assertEqual(result, {"result": "recorded"})
+
+    def test_a_done_report_without_a_warning_adds_none(self):
+        self.seed([{"name": "m", "assigned": True, "mac": MAC}])
+        self.write_info(MAC, name="m", attempt=1, stage="tailscale")
+        self.write_guard(MAC)
+        self.service().report_install({"kind": "progress", "stage": "done", "mac": MAC})
+        self.assertNotIn("warning", self.service().get_entry("m"))
+        self.assertEqual([e for e in self.events() if "warning" in e], [])
+
+    def test_a_usb_machine_keeps_the_warning_of_its_latest_done_until_reset(self):
+        self.seed([{"name": "u", "assigned": True, "flashed_via": "usb"}])
+        service = self.service()
+
+        service.report_install({"kind": "progress", "stage": "done", "name": "u", "warning": WARNING})
+        self.assertEqual(service.get_entry("u")["warning"], WARNING)
+        self.assertEqual(self.events()[-1]["warning"], WARNING)
+
+        with self.subTest("a stick booted again whose done has none clears it"):
+            service.report_install({"kind": "progress", "stage": "done", "name": "u"})
+            self.assertNotIn("warning", service.get_entry("u"))
+
+        with self.subTest("just reset clears it"):
+            service.report_install({"kind": "progress", "stage": "done", "name": "u", "warning": WARNING})
+            queue_store.reset(self.queue_dir)
+            self.assertNotIn("warning", self.queue()[0])
 
     def test_a_usb_machine_leaves_failed_when_its_stick_boots_again(self):
         # A USB install has no re-arm and no timeout, so a progress report

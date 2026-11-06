@@ -871,6 +871,19 @@ class RetryTest(RepoLayoutTest):
                 self.assertEqual(self.types(), ["machine-assigned"])
                 self.assertEqual(result, "rearmed")
 
+    def test_a_new_attempt_clears_the_last_attempts_warning(self):
+        self.installing()
+        self.advance(300)
+        watcher.apply_progress(self.queue_dir, name="t-1", mac=MAC, stage="done", warning="moved",
+                               now=self.clock, emit=None, log=lambda *_: None)
+        self.assertEqual(self.info()["warning"], "moved")
+        watcher.arm_retry(self.queue_dir, MAC)
+        self.advance(900)
+
+        self.tracker.on_pxe(MAC)
+
+        self.assertNotIn("warning", self.info())
+
     def test_one_reboot_starts_only_one_new_attempt(self):
         self.break_install("failed")
         results = []

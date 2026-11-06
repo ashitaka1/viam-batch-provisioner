@@ -163,19 +163,22 @@ def validate_provision(body) -> list:
     return items
 
 
+def _clean_text(text: str) -> str:
+    """Control characters become spaces, whitespace collapses, and the length is capped."""
+    return " ".join("".join(c if c.isprintable() else " " for c in text).split())[:MAX_REASON]
+
+
 def sanitize_reason(text) -> str:
-    """A failure reason that is safe to journal: control characters become
-    spaces, whitespace collapses, the length is capped, and an empty reason
-    is replaced with readable text."""
+    """A failure reason that is safe to journal, with readable text in place of an empty one."""
     if text is None:
         return DEFAULT_REASON
-    cleaned = " ".join("".join(c if c.isprintable() else " " for c in text).split())
-    return cleaned[:MAX_REASON] or DEFAULT_REASON
+    return _clean_text(text) or DEFAULT_REASON
 
 
 def validate_report(body) -> dict:
-    """A normalized {kind, stage, name, mac, reason} install report, or
-    ValidationError with per-field details. The target is untrusted input."""
+    """A normalized {kind, stage, name, mac, reason, warning} install report, or
+    ValidationError with per-field details. The target is untrusted input.
+    Only a `done` report keeps its warning."""
     if not isinstance(body, dict):
         raise ValidationError("request body must be a JSON object", [{"message": "body must be an object"}])
 
@@ -199,12 +202,16 @@ def validate_report(body) -> dict:
     reason = body.get("reason")
     if kind == "failed" and reason is not None and not isinstance(reason, str):
         details.append({"field": "reason", "message": "must be a string"})
+    warning = body.get("warning")
+    if warning is not None and not isinstance(warning, str):
+        details.append({"field": "warning", "message": "must be a string"})
 
     if details:
         raise ValidationError("invalid install report", details)
     return {
         "kind": kind, "stage": body["stage"], "name": name, "mac": mac,
         "reason": sanitize_reason(reason) if kind == "failed" else None,
+        "warning": (_clean_text(warning) or None) if kind == "progress" and body["stage"] == "done" and warning else None,
     }
 
 
@@ -227,6 +234,9 @@ def derive_entry(queue_dir: Path, raw: dict, guard_dir: Optional[Path] = None) -
     slot_id = raw.get("slot_id")
     has_credentials = bool(slot_id) and (queue_dir / slot_id / "viam.json").exists()
     mac = raw.get("mac")
+    # Where the install's outcome is kept: the queue entry for a USB machine,
+    # machine-info.json for a PXE one.
+    record = raw
 
     if not raw.get("assigned"):
         status = "queued"
@@ -244,6 +254,7 @@ def derive_entry(queue_dir: Path, raw: dict, guard_dir: Optional[Path] = None) -
         out["mac"] = mac
         has_credentials = has_credentials or (queue_dir / mac / "viam.json").exists()
         info = watcher.read_info(queue_dir, mac)
+        record = info or {}
         if info is None or "assigned_at" not in info:
             status = "assigned"
         else:
@@ -263,6 +274,8 @@ def derive_entry(queue_dir: Path, raw: dict, guard_dir: Optional[Path] = None) -
                 if info.get("stage"):
                     out["stage"] = info["stage"]
 
+    if record.get("warning"):
+        out["warning"] = record["warning"]
     out["status"] = status
     out["has_credentials"] = has_credentials
     return out
@@ -386,7 +399,7 @@ class ProvisionService:
                     source="installer", now=self.now(), emit=self.emit, log=_log)
             else:
                 result = watcher.apply_progress(
-                    self.queue_dir, name=name, mac=mac, stage=report["stage"],
+                    self.queue_dir, name=name, mac=mac, stage=report["stage"], warning=report["warning"],
                     now=self.now(), emit=self.emit, log=_log)
         except TimeoutError as e:
             raise QueueLocked(str(e))

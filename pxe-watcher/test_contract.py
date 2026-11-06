@@ -168,16 +168,20 @@ class SchemaValidationTest(unittest.TestCase):
         live.guard_dir.mkdir(parents=True, exist_ok=True)
         (live.guard_dir / f"{MAC}.cfg").write_text("exit\n")
 
-        status, _, body = live.request("POST", "/api/v1/install-reports", body={"kind": "progress", "stage": "done", "mac": MAC})
+        warning = "Cabled on the robot-network port enp3s0: move the cable to another port."
+        report = {"kind": "progress", "stage": "done", "mac": MAC, "warning": warning}
+        self.validate(report, "InstallReport")
+        status, _, body = live.request("POST", "/api/v1/install-reports", body=report)
         self.assertEqual((status, body), (200, {"result": "recorded"}))
 
         status, _, body = live.request("GET", "/api/v1/queue/c-1")
         self.assertEqual(status, 200)
         self.validate(body, "QueueEntry")
-        self.assertEqual(body["status"], "installed")
+        self.assertEqual((body["status"], body["warning"]), ("installed", warning))
 
         records = event_journal.read_all(live.journal_path)
-        self.assertEqual([r["type"] for r in records], ["install-progress", "install-complete"])
+        self.assertEqual([(r["type"], r["data"]["warning"]) for r in records],
+                         [("install-progress", warning), ("install-complete", warning)])
         for record in records:
             with self.subTest(event=record["type"]):
                 self.validate(record["data"], "MachineEvent")

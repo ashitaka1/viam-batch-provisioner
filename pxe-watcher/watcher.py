@@ -59,7 +59,7 @@ INFO_LOCK = "info.lock"
 INFO_FAILURE_KEYS = ("failed_at", "failure_reason", "failure_source")
 
 # Everything a new attempt clears: the last attempt's outcome and progress.
-RETRY_KEYS = ("completed_at",) + INFO_FAILURE_KEYS + ("stage", "progress_at", "armed")
+RETRY_KEYS = ("completed_at",) + INFO_FAILURE_KEYS + ("stage", "progress_at", "armed", "warning")
 
 # The hostname fetch writes the GRUB guard, and it happens in the `identity`
 # section of the installer. A machine reporting one of these stages is past it.
@@ -235,7 +235,8 @@ def apply_failure(queue_dir: Path, *, name: str, mac: Optional[str], stage: str,
 
 
 def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str, now: datetime,
-                   emit: Optional[Callable[[str, dict], None]] = None, log: Callable[..., None] = print) -> str:
+                   warning: Optional[str] = None, emit: Optional[Callable[[str, dict], None]] = None,
+                   log: Callable[..., None] = print) -> str:
     """Record that the installer entered a stage. Returns "recorded", "duplicate", "ignored" or "unknown".
 
     Every report moves a PXE machine's progress time, so an install that
@@ -248,6 +249,7 @@ def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str
     `done` completes a PXE machine: it stamps completed_at, writes the guard
     if the hostname fetch went unseen, and emits install-complete. A machine
     `just unguard` armed is not completed, so its next PXE boot reinstalls.
+    `done` also replaces the machine's warning with its own, or removes it.
     """
     when = now.isoformat(timespec="seconds")
     outcome = {"result": "recorded", "cleared": False, "completed": False}
@@ -274,6 +276,7 @@ def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str
                 # leaves the retried report able to complete.
                 write_guard(queue_dir, mac)
                 info["completed_at"] = when
+                _set_warning(info, warning)
                 outcome["completed"] = True
                 outcome["assigned_at"] = info.get("assigned_at")
             return True
@@ -282,27 +285,38 @@ def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str
             return "unknown"
     else:
         def mutate_entry(entry: dict) -> bool:
-            if not entry.get("failed_at"):
-                return False
-            for key in queue_store.FAILURE_KEYS:
-                entry.pop(key, None)
-            outcome["cleared"] = True
-            return True
+            changed = False
+            if entry.get("failed_at"):
+                for key in queue_store.FAILURE_KEYS:
+                    entry.pop(key, None)
+                outcome["cleared"] = changed = True
+            if stage == "done" and entry.get("warning") != warning:
+                _set_warning(entry, warning)
+                changed = True
+            return changed
 
         if queue_store.update_entry(queue_dir, name, mutate_entry) is None:
             return "unknown"
 
     if outcome["cleared"] and mac is not None and stage in GUARD_STAGES:
         write_guard(queue_dir, mac)
+    noted = {"warning": warning} if stage == "done" and warning else {}
     if outcome["result"] == "recorded":
-        _emit_event(emit, log, "install-progress", _event(name, mac, now, stage=stage))
+        _emit_event(emit, log, "install-progress", _event(name, mac, now, stage=stage, **noted))
     if not outcome["completed"]:
         return outcome["result"]
     assigned = parse_time(outcome["assigned_at"])
     duration = max(0.0, (now - assigned).total_seconds()) if assigned else 0.0
     log(f"Install complete: {name} ({mac}) reported done after {int(duration)}s")
-    _emit_event(emit, log, "install-complete", _event(name, mac, now, duration_seconds=duration))
+    _emit_event(emit, log, "install-complete", _event(name, mac, now, duration_seconds=duration, **noted))
     return "recorded"
+
+
+def _set_warning(record: dict, warning: Optional[str]) -> None:
+    if warning:
+        record["warning"] = warning
+    else:
+        record.pop("warning", None)
 
 
 def arm_retry(queue_dir: Path, mac: str) -> bool:
