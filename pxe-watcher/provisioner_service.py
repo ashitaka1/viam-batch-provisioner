@@ -358,7 +358,7 @@ class ProvisionService:
         if not safe_lookup_name(name):
             raise InvalidName(f"invalid machine name {name!r}")
         for raw in self._read():
-            if raw["name"] == name:
+            if queue_store.same_name(raw["name"], name):
                 return derive_entry(self.queue_dir, raw, self.guard_dir)
         raise NotFound(f"{name} is not in the queue")
 

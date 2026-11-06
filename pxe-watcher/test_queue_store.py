@@ -320,6 +320,12 @@ class RemoveTest(QueueDirTest):
         self.assertEqual(queue_store.remove(self.queue_dir, "z"), "not-found")
         self.assertEqual(self.snapshot(), before)
 
+    def test_remove_ignores_case(self):
+        # Viam treats names differing only in case as one machine (decision 41).
+        self.seed([_entry("Lab-1")])
+        self.assertEqual(queue_store.remove(self.queue_dir, "lab-1"), "removed")
+        self.assertEqual(self.on_disk(), [])
+
 
 class UpdateEntryTest(QueueDirTest):
     def test_writes_only_when_the_callback_reports_a_change(self):
@@ -383,6 +389,7 @@ class CliTest(QueueDirTest):
         self.seed([_entry("p-1")])
         self.assertEqual(self.run_cli("has-name", "--name", "p-1").returncode, 0)
         self.assertEqual(self.run_cli("has-name", "--name", "p-2").returncode, 1)
+        self.assertEqual(self.run_cli("has-name", "--name", "P-1").returncode, 0, "has-name must ignore case")
 
     def test_next_index_prints_integer(self):
         self.seed([_entry("p-4")])

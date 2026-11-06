@@ -293,6 +293,10 @@ class RemoveTest(ServiceLayoutTest):
 
 
 class QueueReadTest(ServiceLayoutTest):
+    def test_get_entry_ignores_case(self):
+        self.seed([{"name": "lab-1", "assigned": False}])
+        self.assertEqual(self.service().get_entry("LAB-1")["name"], "lab-1")
+
     def test_read_errors_map_to_service_errors(self):
         self.assertEqual(self.service().list_queue()["entries"], [])
         (self.queue_dir / "queue.json").write_text("{not json")

@@ -163,6 +163,11 @@ def append(queue_dir: Path, new_entries: list[dict], stage: Optional[Callable[[d
     return added, skipped
 
 
+def same_name(a: str, b: str) -> bool:
+    """Viam treats names differing only in case as one machine (decision 41)."""
+    return a.lower() == b.lower()
+
+
 def remove(queue_dir: Path, name: str, on_removed: Optional[Callable[[dict], None]] = None) -> str:
     """Drop an unassigned entry. Returns "removed", "assigned" or "not-found".
 
@@ -172,7 +177,7 @@ def remove(queue_dir: Path, name: str, on_removed: Optional[Callable[[dict], Non
     with locked(queue_dir):
         entries = read(queue_dir)
         for i, e in enumerate(entries):
-            if e["name"] == name:
+            if same_name(e["name"], name):
                 if e.get("assigned"):
                     return "assigned"
                 del entries[i]
@@ -314,7 +319,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(next_index(queue_dir, args.prefix))
         return 0
     if args.cmd == "has-name":
-        return 0 if any(e["name"] == args.name for e in read(queue_dir)) else 1
+        return 0 if any(same_name(e["name"], args.name) for e in read(queue_dir)) else 1
     if args.cmd == "mark-assigned":
         extra = {"flashed_via": args.via} if args.via else {}
         if mark_assigned(queue_dir, args.name, **extra):
