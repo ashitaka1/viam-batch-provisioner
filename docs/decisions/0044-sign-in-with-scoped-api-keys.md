@@ -4,7 +4,7 @@ Date: 2026-11-04
 
 ## Status
 
-Accepted. The design is open in #123.
+Accepted. #123 holds the design.
 
 ## Context
 
@@ -26,7 +26,11 @@ So an API-key CLI login looks signed in to the app (#103 is about how it is labe
 
 The Mac app signs in with a Viam API key, alongside the CLI's user login, and acts with that key's permissions alone.
 
-How the app takes the key, where it keeps it, how it authenticates Viam calls with it, and what it shows when the key can't list organizations or reach a location are left to the design.
+The key comes from the `viam` CLI's API-key login. `viam login api-key` stores `{"key_id", "key_crypto"}` under `auth` in `~/.viam/cached_cli_config.json` (rdk `cli/auth.go`, `apiKey`); the app reads it there for each exchange through `AuthService/Authenticate` and holds only the token, in memory, re-authenticating when its `exp` is within a minute or once on UNAUTHENTICATED. Decision 43's rule holds: whichever login the CLI holds is the app's, decided on each call.
+
+The app shows what the key reaches. Organization and location pickers list what Viam returns for the key; where Viam refuses a list, the app reads the organizations and locations its environments name, and the CLI's defaults, with `GetOrganization` and `GetLocation`, and those Viam answers for are the grant. The sign-in status names the key's ID and scope; an org-level list of locations is read as an organization grant, a set read one by one as a location grant.
+
+What Viam returns to an organization key and to a location key for `ListOrganizations`, `ListLocations`, `GetOrganization` and `GetLocation` is still to be checked against Viam and recorded here; the scope label depends on it.
 
 ## Consequences
 

@@ -57,7 +57,7 @@ Serving continues after `serve` exits. Its log: `log stream --predicate 'subsyst
 
 The app's GUI and the Keychain tests run in a disposable guest through `qa-vm` (ashitaka1/macos-qa-vm); the `dev-tools:macos-app-qa` skill drives the GUI. What a guest needs lives on the host:
 
-- `~/.config/qa-vm/secrets/viam/.viam`: a `viam` CLI login for the app, made once with `HOME=~/.config/qa-vm/secrets/viam viam login`. Its refresh token works once, so every run hands the refreshed login back, and only one guest uses it at a time.
+- `~/.config/qa-vm/secrets/viam/.viam`: an API-key `viam` CLI login for the app, made once with `HOME=~/.config/qa-vm/secrets/viam viam login api-key --key-id <id> --key <key>` from a key granted on the QA organization or one of its locations. A key has no refresh token, so any number of guests share it and nothing comes back from a run.
 - `~/.config/qa-vm/secrets/viam-batch-provisioner/environments/`: copies of `config/environments/`, which `sync --ref` leaves out because they're gitignored. Copy them again when an environment changes.
 - The public key each environment's `SSH_PUBLIC_KEY_FILE` names, such as `~/.ssh/id_tcos_hosts.pub`.
 
@@ -70,14 +70,13 @@ qa-vm inject $vm ~/.config/qa-vm/secrets/viam/.viam .viam
 qa-vm inject $vm ~/.config/qa-vm/secrets/viam-batch-provisioner/environments src/viam-batch-provisioner/config/environments
 qa-vm inject $vm ~/.ssh/id_tcos_hosts.pub .ssh/id_tcos_hosts.pub
 # … build, import, drive the app …
-qa-vm collect $vm .viam ~/.config/qa-vm/secrets/viam/.viam
 qa-vm down $vm
 ```
 
 The guest has no `just`: run a recipe's commands from the `justfile`, such as `./scripts/bundle-app.sh` then the app binary with `--import-environment config/environments/<env>.env`. Commands that use the Keychain unlock it first in the same `ssh` command: `security unlock-keychain -p admin ~/Library/Keychains/login.keychain-db && …`. Headless tests run in one command:
 
 ```bash
-qa-vm run --ref <branch> --unlock-keychain --persist ~/.config/qa-vm/secrets/viam/.viam:.viam ~/eng/viam-batch-provisioner -- 'swift test'
+qa-vm run --ref <branch> --unlock-keychain --inject ~/.config/qa-vm/secrets/viam/.viam:.viam ~/eng/viam-batch-provisioner -- 'swift test'
 ```
 
 ## Run pieces alone
