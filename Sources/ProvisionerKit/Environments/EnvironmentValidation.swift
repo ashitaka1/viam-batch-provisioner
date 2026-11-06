@@ -26,7 +26,7 @@ extension Environment {
         if namePrefix.isEmpty {
             add(.namePrefix, "Enter a name prefix.")
         } else {
-            for problem in MachineName.problems("\(namePrefix)-1") { add(.namePrefix, problem) }
+            for problem in MachineName.prefixProblems(namePrefix) { add(.namePrefix, problem) }
         }
 
         if username == "root" {

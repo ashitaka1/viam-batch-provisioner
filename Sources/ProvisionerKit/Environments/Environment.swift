@@ -35,7 +35,7 @@ public struct Environment: Codable, Sendable, Equatable, Identifiable {
     public static func new(name: String, id: UUID = UUID()) -> Environment {
         Environment(
             id: id, name: name, orgID: nil, orgName: nil, locationID: nil, locationName: nil,
-            namePrefix: MachineName.problems("\(name)-1").isEmpty ? name : "",
+            namePrefix: MachineName.prefixProblems(name).isEmpty ? name : "",
             provisionMode: .full, username: "viam", sshPublicKey: "", timezone: TimeZone.current.identifier,
             packages: defaultPackages, wifiSSID: nil, wifiCountry: Locale.current.region?.identifier ?? "US",
             hasPassword: false, hasWifiPassword: false, hasTailscaleKey: false

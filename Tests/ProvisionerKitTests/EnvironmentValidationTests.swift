@@ -71,7 +71,7 @@ private func messages(_ env: Environment, _ field: EnvironmentField, secrets: En
     @Test func prefixUsesViamNameRule() {
         var env = validEnvironment()
         env.namePrefix = "bad_prefix"
-        #expect(messages(env, .namePrefix) == MachineName.problems("bad_prefix-1"))
+        #expect(messages(env, .namePrefix) == MachineName.prefixProblems("bad_prefix"))
         #expect(messages(env, .namePrefix).first?.contains("\"_\"") == true)
     }
 

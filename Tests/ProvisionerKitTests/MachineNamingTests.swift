@@ -61,10 +61,29 @@ private let charactersRule = "Viam machine names contain only letters, digits an
     #expect(MachineName.problems(longer).contains { $0.contains("is 61 characters") })
 }
 
+@Test func prefixProblemsQuoteThePrefix() {
+    #expect(MachineName.prefixProblems("lab_pi") == [#""lab_pi" contains "_"; "# + charactersRule])
+    #expect(MachineName.prefixProblems("-lab pi") == [
+        #""-lab pi" starts with "-"; Viam machine names start with a letter or digit."#,
+        #""-lab pi" contains " "; "# + charactersRule,
+    ])
+    #expect(MachineName.prefixProblems("") == ["Name prefix is empty."])
+    #expect(MachineName.prefixProblems("lab-") == [])
+    let longest = String(repeating: "a", count: 58)
+    #expect(MachineName.prefixProblems(longest) == [])
+    let long = longest + "é"
+    #expect(MachineName.prefixProblems(long) == [
+        "\"\(long)\" is 59 characters; a name prefix is at most 58, so its first machine name fits Viam's 60.",
+        #"""# + long + #"" contains "é"; "# + charactersRule,
+    ])
+}
+
 @Test func rejectsInvalidPrefix() throws {
-    #expect(throws: MachineNamingError.invalidName("lab_pi-1", problems: [#""lab_pi-1" contains "_"; "# + charactersRule])) {
+    let thrownPrefix = #expect(throws: MachineNamingError.self) {
         try MachineNaming.names(prefix: "lab_pi", count: 1, existing: [], queued: [])
     }
+    #expect(thrownPrefix == .invalidPrefix("lab_pi", problems: [#""lab_pi" contains "_"; "# + charactersRule]))
+    #expect(thrownPrefix?.errorDescription == #""lab_pi" contains "_"; "# + charactersRule)
 
     let prefix = String(repeating: "a", count: 58)
     #expect(try MachineNaming.names(prefix: prefix, count: 1, existing: [], queued: []) == ["\(prefix)-1"])
