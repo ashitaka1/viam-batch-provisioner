@@ -24,6 +24,9 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
 
     private struct Registry {
         var transfers: [SocketAddress: Transfer] = [:]
+        /// Every transfer not yet ended, including those still binding or replaced: each
+        /// future completes once the transfer's socket has closed or its bind has failed.
+        var live: [Int: EventLoopFuture<Void>] = [:]
         var nextID = 0
         var closed = false
     }
@@ -63,15 +66,19 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
         }
     }
 
-    /// Ends every transfer and refuses new ones. Returns once each transfer's socket has closed.
+    /// Ends every transfer and refuses new ones. Returns once each transfer's socket has
+    /// closed, including transfers still binding when this is called.
     func closeTransfers() async {
-        let channels = registry.withLockedValue { registry in
+        let (channels, live) = registry.withLockedValue { registry in
             registry.closed = true
             defer { registry.transfers = [:] }
-            return registry.transfers.values.compactMap(\.channel)
+            return (registry.transfers.values.compactMap(\.channel), Array(registry.live.values))
         }
         for channel in channels {
-            try? await channel.close()
+            channel.close(promise: nil)
+        }
+        for ended in live {
+            try? await ended.get()
         }
     }
 
@@ -80,7 +87,7 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
             reply(.error(code: TFTPErrorCode.fileNotFound.rawValue, message: "File not found"), to: client, context: context)
             return
         }
-        guard let id = reserve(for: client) else {
+        guard let (id, ended) = reserve(for: client, on: context.eventLoop) else {
             reply(.error(code: TFTPErrorCode.notDefined.rawValue, message: "Server busy"), to: client, context: context)
             return
         }
@@ -91,6 +98,7 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
         guard descriptor >= 0, fstat(descriptor, &status) == 0, status.st_mode & S_IFMT == S_IFREG else {
             if descriptor >= 0 { close(descriptor) }
             release(client, id: id)
+            ended.succeed(())
             reply(.error(code: TFTPErrorCode.accessViolation.rawValue, message: "Cannot read file"), to: client, context: context)
             return
         }
@@ -115,9 +123,11 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
                 switch result {
                 case let .success(channel):
                     register(channel, for: client, id: id)
+                    channel.closeFuture.whenComplete { _ in ended.succeed(()) }
                 case .failure:
                     close(descriptor)
                     release(client, id: id)
+                    ended.succeed(())
                 }
             }
     }
@@ -132,18 +142,28 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
         }
     }
 
-    /// Claims the client's slot, ending any transfer it already has. nil when the server is full or stopped.
-    private func reserve(for client: SocketAddress) -> Int? {
+    /// Claims the client's slot, ending any transfer it already has. nil when the server is full
+    /// or stopped. The caller completes the promise when the transfer ends.
+    private func reserve(for client: SocketAddress, on eventLoop: any EventLoop) -> (Int, EventLoopPromise<Void>)? {
+        let ended = eventLoop.makePromise(of: Void.self)
         let (id, replaced) = registry.withLockedValue { registry -> (Int?, (any Channel)?) in
             guard !registry.closed else { return (nil, nil) }
             let existing = registry.transfers[client]
             guard existing != nil || registry.transfers.count < maxTransfers else { return (nil, nil) }
             registry.nextID += 1
             registry.transfers[client] = Transfer(id: registry.nextID, channel: nil)
+            registry.live[registry.nextID] = ended.futureResult
             return (registry.nextID, existing?.channel)
         }
         replaced?.close(promise: nil)
-        return id
+        guard let id else {
+            ended.succeed(())
+            return nil
+        }
+        ended.futureResult.whenComplete { [registry] _ in
+            registry.withLockedValue { _ = $0.live.removeValue(forKey: id) }
+        }
+        return (id, ended)
     }
 
     /// Records the bound channel, or closes it when a newer request or `closeTransfers` took the slot.
