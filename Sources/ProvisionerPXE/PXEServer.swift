@@ -157,7 +157,7 @@ public final class PXEServer: Sendable {
         for channel in channels {
             try? await channel.close()
         }
-        listener.closeTransfers()
+        await listener.closeTransfers()
     }
 
     /// Binds 0.0.0.0 restricted to the interface: on macOS a socket bound to a unicast

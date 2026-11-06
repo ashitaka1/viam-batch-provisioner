@@ -59,15 +59,15 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
         }
     }
 
-    /// Ends every transfer and refuses new ones.
-    func closeTransfers() {
+    /// Ends every transfer and refuses new ones. Returns once each transfer's socket has closed.
+    func closeTransfers() async {
         let channels = registry.withLockedValue { registry in
             registry.closed = true
             defer { registry.transfers = [:] }
             return registry.transfers.values.compactMap(\.channel)
         }
         for channel in channels {
-            channel.close(promise: nil)
+            try? await channel.close()
         }
     }
 
