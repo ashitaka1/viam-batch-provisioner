@@ -127,7 +127,7 @@ public struct MachineBatch: Sendable {
             case .failed(let message):
                 return .failed(MachineFailure(name: name, message: message, machineID: nil, leftInViam: false), rejection: nil)
             case .unreachable(let message):
-                return .failed(await removeIfCreated(name, message: message), rejection: nil)
+                return .failed(await reportIfCreated(name, message: message), rejection: nil)
             }
         }
 
@@ -145,17 +145,17 @@ public struct MachineBatch: Sendable {
             name: name, machineID: machineID, partID: part.id, credentialsJSON: Self.credentialsJSON(part)))
     }
 
-    /// After a create whose outcome is unknown: delete the machine if Viam made it.
-    private func removeIfCreated(_ name: String, message: String) async -> MachineFailure {
+    /// After a create whose outcome is unknown: report a same-named machine as
+    /// possibly left in Viam. It is never deleted, because another operator may
+    /// have created it.
+    private func reportIfCreated(_ name: String, message: String) async -> MachineFailure {
         let match: ViamMachine?
         do {
             match = try await fleet.machines(location: location).first { $0.name.lowercased() == name.lowercased() }
         } catch {
             return MachineFailure(name: name, message: message, machineID: nil, leftInViam: true)
         }
-        guard let match else { return MachineFailure(name: name, message: message, machineID: nil, leftInViam: false) }
-        let deleted = await delete(match.id)
-        return MachineFailure(name: name, message: message, machineID: match.id, leftInViam: !deleted)
+        return MachineFailure(name: name, message: message, machineID: match?.id, leftInViam: match != nil)
     }
 
     private func delete(_ machineID: String) async -> Bool {

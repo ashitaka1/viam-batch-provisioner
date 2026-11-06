@@ -60,28 +60,23 @@ private func create(_ fleet: FakeFleet, count: Int, queued: Set<String> = []) as
     #expect(!(await fleet.calls).contains { if case .delete = $0 { true } else { false } })
 }
 
-@Test func unknownCreateOutcomeLooksUpAndDeletes() async throws {
+/// Viam can't say who made a same-named machine found after an unknown outcome,
+/// so it is reported, never deleted.
+@Test func unknownCreateOutcomeReportsTheMachineFound() async throws {
     let fleet = FakeFleet(createOutcomes: ["lab-pi-1": .createdThenUnreachable])
     let result = try await create(fleet, count: 1)
 
-    #expect(await fleet.calls == [.machines, .create("lab-pi-1"), .machines, .delete("m-lab-pi-1")])
-    #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "connection reset", machineID: "m-lab-pi-1", leftInViam: false)])
-    #expect(await fleet.names == [])
+    #expect(await fleet.calls == [.machines, .create("lab-pi-1"), .machines])
+    #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "connection reset", machineID: "m-lab-pi-1", leftInViam: true)])
+    #expect(await fleet.names == ["lab-pi-1"])
 }
 
-@Test func unknownCreateOutcomeFoundInOtherCaseIsDeleted() async throws {
+@Test func unknownCreateOutcomeFindsTheMachineInOtherCase() async throws {
     let fleet = FakeFleet(createOutcomes: ["lab-pi-1": .createdAsThenUnreachable("Lab-Pi-1")])
     let result = try await create(fleet, count: 1)
 
-    #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "connection reset", machineID: "m-lab-pi-1", leftInViam: false)])
-    #expect(await fleet.names == [])
-}
-
-@Test func unknownCreateOutcomeDeleteFailureIsLeftInViam() async throws {
-    let fleet = FakeFleet(createOutcomes: ["lab-pi-1": .createdThenUnreachable], deleteFailures: ["lab-pi-1": .unreachable("timeout")])
-    let result = try await create(fleet, count: 1)
-
     #expect(result.failures == [MachineFailure(name: "lab-pi-1", message: "connection reset", machineID: "m-lab-pi-1", leftInViam: true)])
+    #expect(await fleet.names == ["Lab-Pi-1"])
 }
 
 @Test func unknownCreateOutcomeNotFoundLeavesNothing() async throws {
