@@ -104,4 +104,44 @@ struct ProvisioningProgressTests {
         #expect(ProvisioningProgress(entry: entry(status: .installing, stage: "tooling")) == nil)
         #expect(ProvisioningProgress(entry: entry(status: .queued)) != nil)
     }
+
+    @Test func skippedStepsBeforeTheLatestAreOmitted() {
+        let agent = progress(entry(status: .installing, mode: .agent, steps: [(.configuring, 1), (.installed, 1)])).rows
+        #expect(agent.map(\.title) == ["Queued", "Configuring", "Installed"])
+    }
+
+    @Test func entryAtInstallingShowsLaterStepsPending() {
+        let p = progress(entry(status: .installing, steps: [(.installing, 1)]))
+        #expect(p.rows.map(\.title) == ["Queued", "Installing Ubuntu 24.04.4", "Configuring", "Installed", "Online"])
+        #expect(p.current.kind == .installing)
+    }
+
+    @Test func unreachedFailureStepSitsInCanonicalPosition() {
+        var e = entry(status: .failed, steps: [(.found, 1)])
+        e.failureStep = .installing
+        let rows = progress(e).rows
+        #expect(rows.map(\.title) == ["Queued", "Found", "Installing Ubuntu 24.04.4", "Configuring", "Installed", "Online"])
+        #expect(rows.map(\.state) == [.done, .done, .failed, .pending, .pending, .pending])
+    }
+
+    @Test func failureBeforeLastReachedStepKeepsLaterRowsDone() {
+        var e = entry(status: .failed, steps: [(.found, 1), (.booting, 1), (.downloading, 1)])
+        e.failureStep = .booting
+        let p = progress(e)
+        #expect(p.current.kind == .booting)
+        #expect(p.rows.first { $0.kind == .downloading }?.state == .done)
+    }
+
+    @Test func failureWithoutStepMarksLastReached() {
+        let p = progress(entry(status: .failed, steps: [(.found, 1), (.booting, 1)]))
+        #expect(p.current.kind == .booting)
+        #expect(p.current.state == .failed)
+        #expect(p.rows.first { $0.kind == .found }?.state == .done)
+    }
+
+    @Test func fractionClampsAndNeedsATotal() {
+        #expect(ProvisioningProgress.fraction(bytes: 150, total: 100) == 1)
+        #expect(ProvisioningProgress.fraction(bytes: 5, total: 0) == nil)
+        #expect(ProvisioningProgress.fraction(bytes: nil, total: 10) == nil)
+    }
 }

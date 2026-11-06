@@ -206,7 +206,7 @@ extension MachineEvent {
         case .installComplete(let duration): "Installed in \(Duration.seconds(duration).formatted(.units(allowed: [.hours, .minutes, .seconds])))"
         case .guardInstalled(let reason): "Boot guard set (\(reason.rawValue))"
         case .stepReached(let step, _): "Reached \(step.title())"
-        case .downloadProgress(let bytes, let total): "Downloaded \(total > 0 ? bytes * 100 / total : 0)%"
+        case .downloadProgress(let bytes, let total): "Downloaded \(Int(((ProvisioningProgress.fraction(bytes: bytes, total: total) ?? 0) * 100).rounded()))%"
         }
     }
 }

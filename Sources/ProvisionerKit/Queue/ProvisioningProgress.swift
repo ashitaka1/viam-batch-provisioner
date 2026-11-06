@@ -1,7 +1,7 @@
 public import Foundation
 
 /// The rows a machine's provisioning timeline shows: reached steps with their
-/// times, then the steps not yet reached as pending. Nothing is inferred.
+/// times, then the steps after the latest one as pending. Steps skipped before it are omitted: nothing is inferred.
 public struct ProvisioningProgress: Equatable, Sendable {
     public enum Kind: Sendable, Equatable { case queued, found, booting, downloading, installing, configuring, installed, online }
     public enum State: Sendable, Equatable { case done, current, failed, pending }
@@ -54,15 +54,21 @@ public struct ProvisioningProgress: Equatable, Sendable {
         var rows = [Row(kind: .queued, title: "Queued", at: entry.queuedAt, state: reached.isEmpty ? .current : .done)]
         rows += reached.map { Row(kind: kind($0.step), title: title($0.step), at: $0.at, state: .done) }
         let reachedSteps = Set(reached.map(\.step))
-        var pending = ProvisioningStep.allCases.filter { !reachedSteps.contains($0) }
+        let order = ProvisioningStep.allCases
+        let failureStep = failed ? entry.failureStep : nil
+        let anchor = (reachedSteps.union(failureStep.map { [$0] } ?? [])).compactMap { order.firstIndex(of: $0) }.max()
+        let pending = order.enumerated().filter { index, _ in anchor.map { index > $0 } ?? true }.map(\.element)
         if let last = rows.indices.last { rows[last].state = .current }
 
         if failed {
             if let step = entry.failureStep, let index = rows.firstIndex(where: { $0.kind == kind(step) }) {
                 rows[index].state = .failed
             } else if let step = entry.failureStep {
-                pending.removeAll { $0 == step }
-                rows.append(Row(kind: kind(step), title: title(step), at: entry.failedAt, state: .failed))
+                let row = Row(kind: kind(step), title: title(step), at: entry.failedAt, state: .failed)
+                let later = rows.firstIndex { r in
+                    ProvisioningStep.allCases.contains { kind($0) == r.kind && order.firstIndex(of: $0)! > order.firstIndex(of: step)! }
+                }
+                rows.insert(row, at: later ?? rows.endIndex)
             } else if let last = rows.indices.last {
                 rows[last].state = .failed
             }
@@ -81,9 +87,7 @@ public struct ProvisioningProgress: Equatable, Sendable {
         for index in rows.indices {
             switch rows[index].kind {
             case .downloading where rows[index].state == .current:
-                if let bytes = entry.downloadBytes, let total = entry.downloadTotal, total > 0 {
-                    rows[index].fraction = min(max(Double(bytes) / Double(total), 0), 1)
-                }
+                rows[index].fraction = Self.fraction(bytes: entry.downloadBytes, total: entry.downloadTotal)
             case .configuring:
                 rows[index].subSteps = Self.subSteps(entry, row: rows[index], installed: reachedSteps.contains(.installed))
             default: break
@@ -94,6 +98,12 @@ public struct ProvisioningProgress: Equatable, Sendable {
         self.earlierAttempts = attempts.dropLast().map { attempt in
             entry.steps.filter { $0.attempt == attempt }.map { Row(kind: kind($0.step), title: title($0.step), at: $0.at, state: .done) }
         }
+    }
+
+    /// Downloaded share clamped to 0...1; nil without a positive total.
+    public static func fraction(bytes: Int?, total: Int?) -> Double? {
+        guard let bytes, let total, total > 0 else { return nil }
+        return min(max(Double(bytes) / Double(total), 0), 1)
     }
 
     private static func subSteps(_ entry: QueueEntry, row: Row, installed: Bool) -> [SubStep] {
