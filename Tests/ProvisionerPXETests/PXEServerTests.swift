@@ -174,6 +174,24 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
         }
     }
 
+    @Test func reportsMACFromARequestSeenDuringTheTransfer() async throws {
+        try await withHarness { harness in
+            try await harness.client.send(readRequest("grubx64.efi", options: [TFTPOption(name: "blksize", value: "8192")]), to: harness.ports.tftp)
+            let optionAck = try #require(await harness.client.receive())
+
+            // The PXE port acknowledges after recording the lease, so the lease exists before the transfer ends.
+            try await harness.client.send(pxeDiscover(messageType: 3, ciaddr: 0x7F00_0001).encoded(), to: harness.ports.pxe)
+            _ = try #require(await harness.client.receive(), "no ack on the PXE port")
+
+            try await harness.client.send(TFTPPacket.ack(block: 0).encoded(), to: optionAck.remoteAddress)
+            _ = try #require(await harness.client.receive())
+            try await harness.client.send(TFTPPacket.ack(block: 1).encoded(), to: optionAck.remoteAddress)
+
+            let delivery = try #require(await harness.delivered.next(), "no fileSent event")
+            #expect(delivery.mac == MACAddress(bytes: fixtureMAC), "reported MAC \(String(describing: delivery.mac))")
+        }
+    }
+
     @Test func reportsATransferOnceWhenTheLastAckRepeats() async throws {
         try await withHarness { harness in
             try await harness.client.send(readRequest("grubx64.efi", options: [TFTPOption(name: "blksize", value: "8192")]), to: harness.ports.tftp)
