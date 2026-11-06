@@ -202,7 +202,9 @@ struct MachineDetail: View {
                         ForEach(Array(progress.earlierAttempts.enumerated()), id: \.offset) { index, rows in
                             DisclosureGroup("Attempt \(index + 1)") {
                                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                                    StepLine(title: row.title, state: row.state, at: row.at)
+                                    LabeledContent(row.title) {
+                                        if let at = row.at { Text(at, format: .dateTime.hour().minute().second()).monospacedDigit() }
+                                    }
                                 }
                             }
                         }

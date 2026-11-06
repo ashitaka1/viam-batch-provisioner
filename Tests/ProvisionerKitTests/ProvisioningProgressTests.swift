@@ -6,10 +6,10 @@ private let t0 = Date(timeIntervalSince1970: 1_000)
 
 private func entry(
     status: EntryStatus = .queued, mode: ProvisionMode? = .full, steps: [(ProvisioningStep, Int)] = [],
-    osName: String? = "Ubuntu 24.04.4", stage: String? = nil, tailscale: Bool? = nil
+    osName: String? = "Ubuntu 24.04.4", stage: String? = nil, tailscale: Bool? = nil, queuedAt: Date? = t0
 ) -> QueueEntry {
     QueueEntry(
-        name: "m1", status: status, stage: stage, hasCredentials: true, queuedAt: t0,
+        name: "m1", status: status, stage: stage, hasCredentials: true, queuedAt: queuedAt,
         steps: steps.enumerated().map { StepTime(step: $0.element.0, at: t0.addingTimeInterval(Double($0.offset + 1)), attempt: $0.element.1) },
         osName: osName, provisionMode: mode, joinsTailscale: tailscale)
 }
@@ -101,8 +101,12 @@ struct ProvisioningProgressTests {
     }
 
     @Test func pythonEntryHasNoProgress() {
-        #expect(ProvisioningProgress(entry: entry(status: .installing, stage: "tooling")) == nil)
-        #expect(ProvisioningProgress(entry: entry(status: .queued)) != nil)
+        #expect(ProvisioningProgress(entry: entry(status: .installing, stage: "tooling", queuedAt: nil)) == nil)
+        #expect(ProvisioningProgress(entry: entry(status: .queued, queuedAt: nil)) == nil)
+    }
+
+    @Test func queuedEntryWithQueuedTimeHasProgress() {
+        #expect(ProvisioningProgress(entry: entry(status: .queued))?.rows.first?.title == "Queued")
     }
 
     @Test func skippedStepsBeforeTheLatestAreOmitted() {

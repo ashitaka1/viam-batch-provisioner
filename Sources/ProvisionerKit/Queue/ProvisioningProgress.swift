@@ -31,9 +31,9 @@ public struct ProvisioningProgress: Equatable, Sendable {
         return rows.first { $0.state == .current || $0.state == .failed } ?? rows[0]
     }
 
-    /// Nil for an entry past queued that reports no steps, such as one from the Python server.
+    /// Nil for an entry with no steps and no queued time, such as one from the Python server.
     public init?(entry: QueueEntry, onlineAt: Date? = nil) {
-        guard !entry.steps.isEmpty || entry.status == .queued else { return nil }
+        guard !entry.steps.isEmpty || entry.queuedAt != nil else { return nil }
         let attempts = Array(Set(entry.steps.map(\.attempt))).sorted()
         let latest = attempts.last
         let reached = entry.steps.filter { $0.attempt == latest }
