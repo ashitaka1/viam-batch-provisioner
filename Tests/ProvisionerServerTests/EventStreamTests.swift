@@ -325,3 +325,47 @@ private func frameIDs(_ frames: [ArraySlice<UInt8>]) -> [String] {
         #expect(!text.contains(": keepalive"))
     }
 }
+
+/// `StreamOptions.buffer` reaches the stream: a stalled client of a 4-frame buffer is
+/// dropped after a few events, well short of the 256-frame default.
+@Test func streamEventsUsesTheConfiguredBuffer() async throws {
+    let (provisioner, _) = try makeProvisioner()
+    _ = try await provisioner.provision([request("m-1")])
+    let directory = try temporaryDirectory()
+    let handler = APIHandler(
+        provisioner: provisioner,
+        configuration: ServerConfiguration(port: 0, bind: "127.0.0.1", files: directory, dataDirectory: directory,
+                                           advertiseAddress: "127.0.0.1:8234"),
+        streamOptions: StreamOptions(keepalive: .seconds(60), limit: 1, buffer: 4), streams: StreamLimiter(limit: 1),
+        serverName: "test", logger: testLogger)
+
+    guard case .ok(let ok) = try await handler.streamEvents(.init(query: .init(), headers: .init())),
+          case .textEventStream(let body) = ok.body
+    else { Issue.record("no event stream"); return }
+    for stage in Array(repeating: [Schemas.InstallStage.lateCommands, .identity], count: 5).joined() {
+        _ = try await provisioner.report(report(.progress, stage, name: "m-1"))
+    }
+
+    let freed = TestFlag()
+    try await poll(within: .seconds(2)) {
+        if await handler.streams.acquire() { freed.set() }
+        return freed.isSet
+    }
+    #expect(freed.isSet, "the stalled stream still holds its slot, so it was never dropped")
+    withExtendedLifetime(body) {}
+}
+
+/// With no room past the `retry` frame, the first keepalive overflows and ends the stream.
+@Test func keepaliveIntoAFullBufferEndsTheStream() async throws {
+    let (live, _) = AsyncStream.makeStream(of: Schemas.MachineEvent.self)
+    let cancelled = TestFlag()
+    let released = TestFlag()
+    let subscription = EventSubscription(backlog: .events([]), live: live, cancel: { cancelled.set() })
+
+    let body = sseBody(subscription, keepalive: .milliseconds(50), buffer: 0) { released.set() }
+    try await poll(within: .seconds(2)) { released.isSet }
+
+    #expect(released.isSet, "a keepalive into a full buffer left the stream open")
+    #expect(cancelled.isSet)
+    withExtendedLifetime(body) {}
+}
