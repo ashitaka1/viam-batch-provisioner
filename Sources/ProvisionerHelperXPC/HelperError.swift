@@ -7,6 +7,8 @@ public enum HelperError: Error, Hashable, Sendable {
     case writeFailed(String)
     /// The XPC connection failed: the helper isn't registered or approved, or refused this process.
     case connection(String)
+    /// The client was invalidated; it makes no more calls.
+    case invalidated
 
     public static let domain = "com.bringingfire.viam-provisioner.helper"
     private static let detailKey = "detail"
@@ -17,6 +19,7 @@ public enum HelperError: Error, Hashable, Sendable {
         case let .serveFailed(detail): (2, detail)
         case let .writeFailed(detail): (3, detail)
         case let .connection(detail): (4, detail)
+        case .invalidated: (5, "invalidated")
         }
         return NSError(domain: Self.domain, code: code, userInfo: [Self.detailKey: detail, NSLocalizedDescriptionKey: "\(self)"])
     }
@@ -27,6 +30,7 @@ public enum HelperError: Error, Hashable, Sendable {
         case (Self.domain, 1): self = .invalidPath(detail)
         case (Self.domain, 2): self = .serveFailed(detail)
         case (Self.domain, 3): self = .writeFailed(detail)
+        case (Self.domain, 5): self = .invalidated
         default: self = .connection(detail)
         }
     }

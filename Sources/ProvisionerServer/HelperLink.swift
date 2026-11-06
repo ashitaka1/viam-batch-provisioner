@@ -11,22 +11,35 @@ extension PXEObservation {
     }
 }
 
-/// Registers with the helper, retrying every `retry` until it answers, then records
-/// every event it sends. Returns when `client.events` finishes.
+/// Records every event the helper sends while registering with it every `retry`,
+/// so a client whose connection was invalidated, by a helper that was replaced or
+/// registered again, connects afresh. Returns when `client.events` finishes, which
+/// `client.invalidate()` does, or when cancelled.
 func linkHelper(_ client: HelperClient, to provisioner: Provisioner, logger: Logger,
                 retry: Duration = .seconds(30)) async {
+    await withDiscardingTaskGroup { group in
+        group.addTask { await keepRegistered(client, logger: logger, every: retry) }
+        for await event in client.events {
+            if let observation = PXEObservation(event) { await provisioner.observe(observation) }
+        }
+        group.cancelAll()
+    }
+}
+
+private func keepRegistered(_ client: HelperClient, logger: Logger, every retry: Duration) async {
+    var failing = false
     while !Task.isCancelled {
         do {
             _ = try await client.servingInterface()
-            break
+            if failing { logger.info("registered with the helper") }
+            failing = false
+        } catch HelperError.invalidated {
+            return
         } catch {
-            if case HelperError.connection("invalidated") = error { return }
             logger.warning("registering with the helper failed, retrying in \(retry): \(error)")
-            do { try await Task.sleep(for: retry) } catch { return }
+            failing = true
         }
-    }
-    for await event in client.events {
-        if let observation = PXEObservation(event) { await provisioner.observe(observation) }
+        do { try await Task.sleep(for: retry) } catch { return }
     }
 }
 

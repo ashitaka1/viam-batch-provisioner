@@ -287,9 +287,7 @@ private func first<Element: Sendable & Equatable>(
             let client = rig.client()
             client.invalidate()
             #expect(await first(of: client.events) == .finished)
-            await #expect { _ = try await client.servingInterface() } throws: { error in
-                if case HelperError.connection = error { true } else { false }
-            }
+            await #expect(throws: HelperError.invalidated) { _ = try await client.servingInterface() }
         }
     }
 }

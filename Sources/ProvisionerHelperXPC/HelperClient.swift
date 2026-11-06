@@ -59,7 +59,7 @@ public final class HelperClient: Sendable {
         try await call { helper, reply in helper.removeFile(path, reply: reply) }
     }
 
-    /// Closes the connection and finishes `events`. Later calls fail.
+    /// Closes the connection and finishes `events`. Later calls throw `HelperError.invalidated`.
     public func invalidate() {
         let connection = state.withLockUnchecked { state in
             state.invalidated = true
@@ -79,7 +79,7 @@ public final class HelperClient: Sendable {
     private func request<T: Sendable>(
         _ body: (any ProvisionerHelperProtocol, @escaping @Sendable (Result<T, HelperError>) -> Void) -> Void
     ) async throws -> T {
-        guard let connection = connection() else { throw HelperError.connection("invalidated") }
+        guard let connection = connection() else { throw HelperError.invalidated }
         return try await withCheckedThrowingContinuation { (waiter: CheckedContinuation<T, any Error>) in
             let once = ResumeOnce(waiter)
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
