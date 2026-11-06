@@ -12,10 +12,12 @@ public struct ViamLocation: Sendable, Equatable, Identifiable {
 public struct ViamMachine: Sendable, Equatable {
     public let id: String
     public let name: String
+    public let online: Bool
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, online: Bool = false) {
         self.id = id
         self.name = name
+        self.online = online
     }
 }
 

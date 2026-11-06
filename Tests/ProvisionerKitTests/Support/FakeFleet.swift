@@ -29,6 +29,7 @@ actor FakeFleet: ViamFleet {
     private let listingFailure: FleetError?
     private let listingFailureAfterCreate: FleetError?
     private let holdAfterCreating: String?
+    private let online: Set<String>
     private var held: CheckedContinuation<Void, Never>?
     private var holdWaiters: [CheckedContinuation<Void, Never>] = []
 
@@ -39,7 +40,8 @@ actor FakeFleet: ViamFleet {
         deleteFailures: [String: FleetError] = [:],
         listingFailure: FleetError? = nil,
         listingFailureAfterCreate: FleetError? = nil,
-        holdAfterCreating: String? = nil
+        holdAfterCreating: String? = nil,
+        online: Set<String> = []
     ) {
         machines = existing.map { ViamMachine(id: "m-\($0)", name: $0) }
         self.createOutcomes = createOutcomes
@@ -48,7 +50,10 @@ actor FakeFleet: ViamFleet {
         self.listingFailure = listingFailure
         self.listingFailureAfterCreate = listingFailureAfterCreate
         self.holdAfterCreating = holdAfterCreating
+        self.online = online
     }
+
+    var machinesCalls: Int { calls.filter { $0 == .machines }.count }
 
     var names: [String] { machines.map(\.name) }
 
@@ -70,7 +75,7 @@ actor FakeFleet: ViamFleet {
         if let listingFailureAfterCreate, calls.contains(where: { if case .create = $0 { true } else { false } }) {
             throw listingFailureAfterCreate
         }
-        return machines
+        return machines.map { ViamMachine(id: $0.id, name: $0.name, online: online.contains($0.name)) }
     }
 
     func createMachine(name: String, location: String) async throws(FleetError) -> String {

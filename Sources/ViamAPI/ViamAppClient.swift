@@ -53,11 +53,11 @@ public final class ViamAppClient: Sendable {
         return response.locations.map { ($0.id, $0.name) }
     }
 
-    public func robots(locationID: String) async throws -> [(id: String, name: String)] {
+    public func robots(locationID: String) async throws -> [(id: String, name: String, online: Bool)] {
         var request = Viam_App_V1_ListRobotsRequest()
         request.locationID = locationID
         let response: Viam_App_V1_ListRobotsResponse = try await appService("ListRobots", request)
-        return response.robots.map { ($0.id, $0.name) }
+        return response.robots.map { ($0.id, $0.name, $0.onlineState == .online) }
     }
 
     /// Returns the new machine's ID.

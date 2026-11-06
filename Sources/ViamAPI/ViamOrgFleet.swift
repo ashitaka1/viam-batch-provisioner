@@ -24,7 +24,9 @@ public struct ViamOrgFleet: ViamFleet {
     }
 
     public func machines(location: String) async throws(FleetError) -> [ViamMachine] {
-        try await fleetCall { try await client.robots(locationID: location).map { ViamMachine(id: $0.id, name: $0.name) } }
+        try await fleetCall {
+            try await client.robots(locationID: location).map { ViamMachine(id: $0.id, name: $0.name, online: $0.online) }
+        }
     }
 
     public func createMachine(name: String, location: String) async throws(FleetError) -> String {

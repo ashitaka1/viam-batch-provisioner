@@ -135,17 +135,32 @@ struct BatchHistoryTests {
         #expect(history.loadError == nil)
     }
 
+    @Test func oldHistoryRecordDecodes() throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        try writeHistory(dates: ["1000"], to: file)
+
+        let history = BatchHistory(file: file)
+        history.load()
+
+        #expect(history.loadError == nil)
+        #expect(history.records.first?.orgID == nil && history.records.first?.locationID == nil)
+    }
+
     @Test(arguments: [(ProvisionMode.full, "Acme", "Bench"), (.agent, nil, nil), (.osOnly, nil, nil)] as [(ProvisionMode, String?, String?)])
     func recordKeepsTheOrgOnlyForFullMode(mode: ProvisionMode, org: String?, location: String?) {
         var environment = Environment.new(name: "Lab")
         environment.provisionMode = mode
         environment.orgName = "Acme"
         environment.locationName = "Bench"
+        environment.orgID = "o1"
+        environment.locationID = "l1"
 
         let batch = BatchRecord(environment: environment, outcome: BatchOutcome(),
                                 server: DiscoveredServer(name: "bench", baseURL: URL(string: "http://10.0.0.2:8235/")!), date: .now)
 
         #expect(batch.orgName == org && batch.locationName == location)
+        #expect(batch.orgID == (org == nil ? nil : "o1") && batch.locationID == (org == nil ? nil : "l1"))
     }
 
     @Test func recordOfARunListsQueuedNamesAndWhatWentWrong() {

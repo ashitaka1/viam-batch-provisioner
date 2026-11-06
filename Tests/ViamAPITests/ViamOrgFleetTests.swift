@@ -66,6 +66,22 @@ private func describe(_ error: FleetError?) -> String { error.map { "\($0)" } ??
     #expect(try unframe(Viam_App_V1_ListRobotsRequest.self, call.body).locationID == "l1")
 }
 
+@Test func machinesReportOnlineState() async throws {
+    let fleet = fleet { _ in
+        var response = Viam_App_V1_ListRobotsResponse()
+        response.robots = [("m1", "up", Viam_App_V1_OnlineState.online), ("m2", "down", .offline)].map { id, name, state in
+            var robot = Viam_App_V1_Robot()
+            robot.id = id
+            robot.name = name
+            robot.onlineState = state
+            return robot
+        }
+        return ok(response)
+    }
+    let machines = try await fleet.machines(location: "l1")
+    #expect(machines.map(\.online) == [true, false])
+}
+
 @Test func createsMachineInLocation() async throws {
     let seen = Seen([])
     let fleet = fleet(seen: seen) { _ in

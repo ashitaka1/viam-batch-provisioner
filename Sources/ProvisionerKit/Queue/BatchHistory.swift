@@ -15,9 +15,14 @@ public struct BatchRecord: Codable, Sendable, Equatable, Identifiable {
     public var machines: [String]
     /// One sentence per machine that wasn't queued.
     public var problems: [String]
+    public var orgID: String?
+    public var locationID: String?
 
     public init(id: UUID, date: Date, environmentName: String, mode: ProvisionMode, orgName: String?, locationName: String?,
-                serverName: String, serverURL: URL, machines: [String], problems: [String]) {
+                serverName: String, serverURL: URL, machines: [String], problems: [String],
+                orgID: String? = nil, locationID: String? = nil) {
+        self.orgID = orgID
+        self.locationID = locationID
         self.id = id
         self.date = date
         self.environmentName = environmentName
@@ -34,7 +39,9 @@ public struct BatchRecord: Codable, Sendable, Equatable, Identifiable {
         self.init(id: id, date: date, environmentName: environment.name, mode: environment.provisionMode,
                   orgName: environment.provisionMode == .full ? environment.orgName : nil,
                   locationName: environment.provisionMode == .full ? environment.locationName : nil,
-                  serverName: server.name, serverURL: server.baseURL, machines: outcome.queued, problems: outcome.problems)
+                  serverName: server.name, serverURL: server.baseURL, machines: outcome.queued, problems: outcome.problems,
+                  orgID: environment.provisionMode == .full ? environment.orgID : nil,
+                  locationID: environment.provisionMode == .full ? environment.locationID : nil)
     }
 }
 
