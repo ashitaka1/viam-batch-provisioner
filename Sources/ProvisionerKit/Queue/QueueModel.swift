@@ -125,8 +125,11 @@ public final class QueueModel {
     }
 
     /// Removes the entry on the server, then here.
+    /// A 404 counts as removed: the server no longer has the entry (decision 39).
     public func remove(named name: String) async throws(ProvisionerError) {
-        try await source.remove(named: name)
+        do {
+            try await source.remove(named: name)
+        } catch .server(status: 404, _, _, _) {}
         entries.removeAll { $0.name == name }
     }
 

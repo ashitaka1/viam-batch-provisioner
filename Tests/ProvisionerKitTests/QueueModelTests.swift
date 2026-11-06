@@ -227,6 +227,17 @@ struct QueueModelTests {
         #expect(h.source.removals == ["m1", "m2"])
     }
 
+    /// A 404 means the server no longer has the entry, which is what removing asked for (decision 39).
+    @Test func removeDropsAnEntryTheServerNoLongerHas() async throws {
+        let h = Harness()
+        await h.send(.snapshot([entry("m1", .queued), entry("m2", .queued)]))
+        h.source.failRemovals(with: notFound("m1"))
+
+        try await h.model.remove(named: "m1")
+
+        #expect(h.names() == ["m2"])
+    }
+
     @Test func countsGroupStatusesTheWayTheQueueViewShowsThem() async {
         let h = Harness()
         await h.send(.snapshot([
