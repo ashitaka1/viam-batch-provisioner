@@ -7,12 +7,13 @@ public import Foundation
 public enum MachineName {
     public static let maxLength = 60
 
-    /// One sentence per rule `name` breaks; empty when Viam accepts it.
+    /// One sentence per rule `name` breaks; empty when Viam accepts it. Rules
+    /// apply per code point, as in the Python API.
     public static func problems(_ name: String) -> [String] {
-        guard let first = name.first else { return ["Machine name is empty."] }
+        guard let first = name.unicodeScalars.first else { return ["Machine name is empty."] }
         var problems: [String] = []
         if let problem = startProblem(name, first: first) { problems.append(problem) }
-        if name.count > 1 && name.hasSuffix("-") {
+        if name.unicodeScalars.count > 1 && name.unicodeScalars.last == "-" {
             problems.append("\"\(name)\" ends with \"-\"; a machine name becomes its hostname, which can't end with a hyphen.")
         }
         let length = name.unicodeScalars.count
@@ -29,7 +30,7 @@ public enum MachineName {
     /// One sentence per rule a batch name prefix breaks, quoting the prefix;
     /// empty when its first name, `<prefix>-1`, is valid.
     public static func prefixProblems(_ prefix: String) -> [String] {
-        guard let first = prefix.first else { return ["Name prefix is empty."] }
+        guard let first = prefix.unicodeScalars.first else { return ["Name prefix is empty."] }
         var problems: [String] = []
         if let problem = startProblem(prefix, first: first) { problems.append(problem) }
         let length = prefix.unicodeScalars.count
@@ -40,22 +41,22 @@ public enum MachineName {
         return problems
     }
 
-    private static func startProblem(_ text: String, first: Character) -> String? {
+    private static func startProblem(_ text: String, first: Unicode.Scalar) -> String? {
         isAlphanumeric(first) ? nil : "\"\(text)\" starts with \"\(first)\"; Viam machine names start with a letter or digit."
     }
 
     private static func charactersProblem(_ text: String) -> String? {
-        var disallowed: [Character] = []
-        for character in text where !isAlphanumeric(character) && character != "-" && !disallowed.contains(character) {
-            disallowed.append(character)
+        var disallowed: [Unicode.Scalar] = []
+        for scalar in text.unicodeScalars where !isAlphanumeric(scalar) && scalar != "-" && !disallowed.contains(scalar) {
+            disallowed.append(scalar)
         }
         guard !disallowed.isEmpty else { return nil }
         let listed = disallowed.map { "\"\($0)\"" }.joined(separator: ", ")
         return "\"\(text)\" contains \(listed); Viam machine names contain only letters, digits and hyphens."
     }
 
-    private static func isAlphanumeric(_ character: Character) -> Bool {
-        character.isASCII && (character.isLetter || character.isNumber)
+    private static func isAlphanumeric(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.isASCII && (scalar.properties.isAlphabetic || ("0"..."9").contains(scalar))
     }
 }
 

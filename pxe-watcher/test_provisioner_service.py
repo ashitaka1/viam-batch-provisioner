@@ -115,6 +115,7 @@ class ValidateProvisionTest(ServiceLayoutTest):
             ("a__b", ['"a__b" contains "_"; ' + chars]),
             ("é-lab", ['"é-lab" starts with "é"; Viam machine names start with a letter or digit.',
                        '"é-lab" contains "é"; ' + chars]),
+            ("é-lab", ['"é-lab" contains "́"; ' + chars]),
             ("Lab-Pi-1", []),
             ("lab-", ['"lab-" ends with "-"; a machine name becomes its hostname, which can\'t end with a hyphen.']),
             ("-a-", ['"-a-" starts with "-"; Viam machine names start with a letter or digit.',

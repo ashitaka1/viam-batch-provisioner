@@ -57,6 +57,9 @@ private let charactersRule = "Viam machine names contain only letters, digits an
         #""é-lab" starts with "é"; Viam machine names start with a letter or digit."#,
         #""é-lab" contains "é"; "# + charactersRule,
     ])
+    // Decomposed: "e" then U+0301 COMBINING ACUTE ACCENT. Rules apply per code point.
+    let decomposed = "e\u{301}-lab"
+    #expect(MachineName.problems(decomposed) == ["\"\(decomposed)\" contains \"\u{301}\"; " + charactersRule])
 }
 
 @Test func lengthCountsCodePoints() {
