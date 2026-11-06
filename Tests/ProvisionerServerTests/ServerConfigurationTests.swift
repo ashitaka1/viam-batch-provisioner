@@ -22,6 +22,16 @@ import Testing
     #expect(configuration.advertiseAddress == nil)
 }
 
+@Test func helperFlagTakesNoValue() throws {
+    #if canImport(ProvisionerHelperXPC)
+    #expect(try ServerConfiguration.parse(["--files", "/x", "--helper"]).linksHelper)
+    #expect(try ServerConfiguration.parse(["--helper", "--files", "/x"]).linksHelper)
+    #expect(try !ServerConfiguration.parse(["--files", "/x"]).linksHelper)
+    #else
+    #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(["--files", "/x", "--helper"]) }
+    #endif
+}
+
 @Test(arguments: [[String](), ["--files"], ["--files", "/x", "--bogus"], ["--files", "/x", "--port", "http"]])
 func badFlagsThrow(arguments: [String]) {
     #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(arguments) }
