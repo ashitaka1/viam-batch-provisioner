@@ -24,7 +24,7 @@ public struct InstallNotification: Sendable, Equatable {
                       body: "Installed in \(Self.format(duration)).")
         case .installFailed(let stage, let reason, _):
             self.init(identifier: identifier, title: "\(event.name) failed", subtitle: "Stage: \(stage)", body: reason)
-        case .assigned, .installStarted, .installProgress, .guardInstalled:
+        case .assigned, .installStarted, .installProgress, .guardInstalled, .stepReached, .downloadProgress:
             return nil
         }
     }

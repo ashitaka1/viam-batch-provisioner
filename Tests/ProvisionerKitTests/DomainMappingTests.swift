@@ -36,6 +36,10 @@ private let stamp = "2026-10-04T04:08:29+00:00"
          .guardInstalled(reason: .repeatPXE)),
         (#"{"id":1,"type":"guard-installed","timestamp":"\#(stamp)","name":"m1","mac":"\#(mac)","reason":"hostname-fetch"}"#,
          .guardInstalled(reason: .hostnameFetch)),
+        (#"{"id":1,"type":"step-reached","timestamp":"\#(stamp)","name":"m1","mac":"\#(mac)","step":"downloading","attempt":2}"#,
+         .stepReached(step: .downloading, attempt: 2)),
+        (#"{"id":1,"type":"download-progress","timestamp":"\#(stamp)","name":"m1","mac":"\#(mac)","bytes":1024,"total":4096}"#,
+         .downloadProgress(bytes: 1024, total: 4096)),
     ]
     for (json, kind) in cases {
         let expected = MachineEvent(id: 1, timestamp: utc(2026, 10, 4, 4, 8, 29), name: "m1", mac: mac, kind: kind)

@@ -164,6 +164,8 @@ extension Components.Schemas.MachineEvent {
         case .installFailed: "install-failed"
         case .installComplete: "install-complete"
         case .guardInstalled: "guard-installed"
+        case .stepReached: "step-reached"
+        case .downloadProgress: "download-progress"
         case .resync: "resync"
         }
     }

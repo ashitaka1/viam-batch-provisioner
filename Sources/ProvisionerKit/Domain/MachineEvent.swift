@@ -18,6 +18,8 @@ public struct MachineEvent: Sendable, Equatable {
         case installFailed(stage: String, reason: String, source: FailureSource)
         case installComplete(duration: TimeInterval)
         case guardInstalled(reason: GuardReason)
+        case stepReached(step: ProvisioningStep, attempt: Int)
+        case downloadProgress(bytes: Int, total: Int)
     }
 
     public var id: Int
@@ -60,6 +62,12 @@ package enum WireEvent: Sendable, Equatable {
         case .guardInstalled(let e):
             self = .machine(.init(id: e.id, timestamp: e.timestamp, name: e.name, mac: e.mac,
                                   kind: .guardInstalled(reason: MachineEvent.GuardReason(rawValue: e.reason.rawValue)!)))
+        case .stepReached(let e):
+            self = .machine(.init(id: e.id, timestamp: e.timestamp, name: e.name, mac: e.mac?.value1,
+                                  kind: .stepReached(step: ProvisioningStep(rawValue: e.step.rawValue)!, attempt: e.attempt)))
+        case .downloadProgress(let e):
+            self = .machine(.init(id: e.id, timestamp: e.timestamp, name: e.name, mac: e.mac?.value1,
+                                  kind: .downloadProgress(bytes: e.bytes, total: e.total)))
         case .resync(let e):
             self = .resync(latestID: e.latestId)
         }

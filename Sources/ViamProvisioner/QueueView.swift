@@ -205,6 +205,8 @@ extension MachineEvent {
             "Failed at \(stage) (\(source.rawValue)): \(reason)"
         case .installComplete(let duration): "Installed in \(Duration.seconds(duration).formatted(.units(allowed: [.hours, .minutes, .seconds])))"
         case .guardInstalled(let reason): "Boot guard set (\(reason.rawValue))"
+        case .stepReached(let step, _): "Reached \(step.rawValue)"
+        case .downloadProgress(let bytes, let total): "Downloaded \(bytes) of \(total) bytes"
         }
     }
 }

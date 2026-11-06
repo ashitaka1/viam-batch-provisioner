@@ -78,6 +78,8 @@ extension Components.Schemas.MachineEvent {
         case .installFailed(let e): e.id
         case .installComplete(let e): e.id
         case .guardInstalled(let e): e.id
+        case .stepReached(let e): e.id
+        case .downloadProgress(let e): e.id
         case .resync: nil
         }
     }
