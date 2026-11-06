@@ -12,7 +12,7 @@ The macOS app needs a bundle: an Info.plist that registers the `viam-provisioner
 
 ## Decision
 
-The app is the `ViamProvisioner` executable target in the package. `scripts/bundle-app.sh` (`just app`) builds it, assembles `build/Viam Provisioner.app` from `App/Info.plist`, signs it with `CODESIGN_IDENTITY`, else the team's Developer ID identity (HGCN675G7C) when the keychain holds it, else ad hoc, and registers it with Launch Services.
+The app is the `ViamProvisioner` executable target in the package. `scripts/bundle-app.sh` (`just app`) builds it, assembles `build/Viam Provisioner.app` from `App/Info.plist`, signs it with `CODESIGN_IDENTITY` from the environment, else from the Mac's `config/signing.env` (which `just setup-wizard` asks for), else ad hoc with a warning, and registers it with Launch Services.
 
 ## Consequences
 

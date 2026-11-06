@@ -1,3 +1,4 @@
 config/site.env
+config/signing.env
 config/environments/
 http-server/config/tailscale.key

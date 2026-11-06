@@ -73,11 +73,11 @@ import Testing
         #expect(PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 501, executableOwnerUID: 501))
         #expect(!PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 502, executableOwnerUID: 501))
         #expect(!PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 501, executableOwnerUID: nil))
-        #expect(PeerRequirement.acceptsPeer(teamIdentifier: "HGCN675G7C", peerUID: 502, executableOwnerUID: 501))
+        #expect(PeerRequirement.acceptsPeer(teamIdentifier: "ABCDE12345", peerUID: 502, executableOwnerUID: 501))
     }
 
     @Test func requirementsCompile() {
-        for team in ["HGCN675G7C", nil] {
+        for team in ["ABCDE12345", nil] {
             var requirement: SecRequirement?
             let status = SecRequirementCreateWithString(PeerRequirement.requirement(teamIdentifier: team) as CFString, [], &requirement)
             #expect(status == errSecSuccess, "team \(team ?? "nil"): \(status)")
