@@ -19,7 +19,8 @@ public struct MachineFailure: Sendable, Equatable {
     public let message: String
     /// Known once Viam returned the machine's ID or the lookup found it.
     public let machineID: String?
-    /// A machine may remain in Viam: its delete or the lookup for it failed.
+    /// A machine may remain in Viam: its delete or the lookup for it failed, or,
+    /// after an unknown outcome, the lookup found one under the name.
     public let leftInViam: Bool
 
     public init(name: String, message: String, machineID: String?, leftInViam: Bool) {
