@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_DIR="${REPO_ROOT}/config/environments"
 SITE_CONFIG="${REPO_ROOT}/config/site.env"
+source "${REPO_ROOT}/scripts/lib/robot-net.sh"
 
 mkdir -p "$ENV_DIR"
 
@@ -157,6 +158,20 @@ if [[ -n "$WIFI_SSID" ]]; then
 fi
 read -p "  Timezone [America/New_York]: " TIMEZONE
 TIMEZONE="${TIMEZONE:-America/New_York}"
+while :; do
+    read -p "  Robot network address, or none [${ROBOT_NET_DEFAULT_ADDRESS}]: " ROBOT_NET_ADDRESS
+    ROBOT_NET_ADDRESS="${ROBOT_NET_ADDRESS:-$ROBOT_NET_DEFAULT_ADDRESS}"
+    valid_robot_net_address "$ROBOT_NET_ADDRESS" && break
+    echo "  Invalid. A private address with a prefix (10.x, 172.16-31.x or 192.168.x), like ${ROBOT_NET_DEFAULT_ADDRESS}, or none."
+done
+ROBOT_NET_PORT=""
+if [[ "$ROBOT_NET_ADDRESS" != none ]]; then
+    while :; do
+        read -p "  Robot network port (e.g. enp3s0; blank for the first enp* port other than the cabled one): " ROBOT_NET_PORT
+        valid_robot_net_port "$ROBOT_NET_PORT" && break
+        echo "  Invalid. An interface name: up to 15 letters, digits, '.', '_' and '-'."
+    done
+fi
 echo ""
 
 # --- SSH ---
@@ -268,6 +283,8 @@ WIFI_SSID=${WIFI_SSID}
 WIFI_PASSWORD=${WIFI_PASSWORD}
 WIFI_COUNTRY=${WIFI_COUNTRY}
 TIMEZONE=${TIMEZONE}
+ROBOT_NET_ADDRESS=${ROBOT_NET_ADDRESS}
+ROBOT_NET_PORT=${ROBOT_NET_PORT}
 
 # SSH
 SSH_PUBLIC_KEY_FILE=${SSH_PUBLIC_KEY_FILE}

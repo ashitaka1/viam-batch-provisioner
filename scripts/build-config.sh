@@ -9,6 +9,8 @@ PACKAGES_EXAMPLE="${REPO_ROOT}/config/packages.txt.example"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+source "${REPO_ROOT}/scripts/lib/robot-net.sh"
+
 # Strip comments and blank lines from a packages.txt-style file.
 read_packages() {
     awk '/^[[:space:]]*#/ || /^[[:space:]]*$/ {next} {print $1}' "$1"
@@ -34,6 +36,13 @@ SSH_PUBLIC_KEY=$(cat "${SSH_PUBLIC_KEY_FILE/#\~/$HOME}" 2>/dev/null) \
 
 PASSWORD_HASH=$(printf '%s' "$PASSWORD" | "${REPO_ROOT}/scripts/hash-password.sh") \
     || die "password hashing failed (see message above)"
+
+ROBOT_NET_ADDRESS="${ROBOT_NET_ADDRESS:-$ROBOT_NET_DEFAULT_ADDRESS}"
+ROBOT_NET_PORT="${ROBOT_NET_PORT:-}"
+valid_robot_net_address "$ROBOT_NET_ADDRESS" \
+    || die "ROBOT_NET_ADDRESS '${ROBOT_NET_ADDRESS}' must be none or a private address with a prefix (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), like ${ROBOT_NET_DEFAULT_ADDRESS}"
+valid_robot_net_port "$ROBOT_NET_PORT" \
+    || die "ROBOT_NET_PORT '${ROBOT_NET_PORT}' is not an interface name (up to 15 letters, digits, '.', '_' and '-')"
 
 # --- PXE server address ---
 
@@ -70,9 +79,10 @@ export WIFI_SSID="${WIFI_SSID:-}"
 export WIFI_PASSWORD="${WIFI_PASSWORD:-}"
 export PROVISION_MODE="${PROVISION_MODE:-os-only}"
 export TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
+export ROBOT_NET_ADDRESS ROBOT_NET_PORT
 export PACKAGES
 
-envsubst '${SSH_PUBLIC_KEY} ${PASSWORD_HASH} ${PXE_SERVER} ${USERNAME} ${TIMEZONE} ${WIFI_SSID} ${WIFI_PASSWORD} ${PROVISION_MODE} ${TAILSCALE_AUTH_KEY} ${PACKAGES}' \
+envsubst '${SSH_PUBLIC_KEY} ${PASSWORD_HASH} ${PXE_SERVER} ${USERNAME} ${TIMEZONE} ${WIFI_SSID} ${WIFI_PASSWORD} ${PROVISION_MODE} ${TAILSCALE_AUTH_KEY} ${ROBOT_NET_ADDRESS} ${ROBOT_NET_PORT} ${PACKAGES}' \
     < "${TEMPLATE}" > "${OUTPUT}"
 
 # --- Stage Tailscale key for HTTP serving (if provided) ---
@@ -87,3 +97,4 @@ echo "Generated ${OUTPUT}"
 echo "  PXE server: ${PXE_SERVER}"
 echo "  SSH key: ${SSH_PUBLIC_KEY:0:40}..."
 echo "  Mode: ${PROVISION_MODE}"
+echo "  Robot network: ${ROBOT_NET_ADDRESS}${ROBOT_NET_PORT:+ on ${ROBOT_NET_PORT}}"

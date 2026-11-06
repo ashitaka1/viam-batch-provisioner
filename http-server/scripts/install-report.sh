@@ -12,6 +12,9 @@
 # there has been none. The reason is cut down to a safe character set and 400
 # characters here, and the server cleans it again.
 #
+# A `done` report carries the warning the late-commands left in
+# $STATE_DIR/viam-install-warning, cleaned the same way as a reason.
+#
 # The machine is identified by the viam_hostname= kernel argument (USB), or
 # else by each ethernet NIC's MAC address in turn until the server accepts one
 # (PXE). Only the NIC the server assigned answers 200.
@@ -33,6 +36,7 @@ CMDLINE="${REPORT_CMDLINE:-/proc/cmdline}"
 SYS_NET="${REPORT_SYS_NET:-/sys/class/net}"
 RETRY_DELAY="${REPORT_RETRY_DELAY:-2}"
 MARKER="$STATE_DIR/viam-install-stage"
+WARNING_FILE="$STATE_DIR/viam-install-warning"
 
 [ -n "$SERVER" ] || exit 0
 case "$KIND" in
@@ -57,7 +61,12 @@ fi
 
 command -v curl >/dev/null 2>&1 || exit 0
 
-REASON=$(printf '%s' "$REASON" | tr -c 'A-Za-z0-9 ._:/=,()-' ' ' | cut -c1-400)
+safe() { printf '%s' "$1" | tr -c 'A-Za-z0-9 ._:/=,()-' ' ' | cut -c1-400; }
+REASON=$(safe "$REASON")
+WARNING=""
+if [ "$KIND" = progress ] && [ "$STAGE" = done ] && [ -r "$WARNING_FILE" ]; then
+    WARNING=$(safe "$(cat "$WARNING_FILE")")
+fi
 
 ATTEMPTS=1
 if [ "$KIND" = failed ] || [ "$STAGE" = done ]; then
@@ -69,6 +78,9 @@ post() {
     body="{\"kind\":\"$KIND\",\"stage\":\"$STAGE\",\"$1\":\"$2\""
     if [ "$KIND" = failed ] && [ -n "$REASON" ]; then
         body="$body,\"reason\":\"$REASON\""
+    fi
+    if [ -n "$WARNING" ]; then
+        body="$body,\"warning\":\"$WARNING\""
     fi
     body="$body}"
     tries=0
