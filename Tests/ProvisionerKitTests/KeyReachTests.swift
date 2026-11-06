@@ -121,12 +121,32 @@ private final class KeyHarness {
         #expect(h.model.problems(for: lab).contains(EnvironmentProblem(field: .location, message: "\"loc-lab\" no longer exists in Acme.")))
     }
 
-    @Test func loadLocationsInUseLoadsEachOrgOnce() async throws {
+    @Test func orgsInUseAreFullModeOnesWithoutRepeats() throws {
         let h = KeyHarness()
         _ = try h.environment("Shop", location: "loc-shop")
         _ = try h.environment("Lab", location: "loc-lab")
+        var agent = try h.environment("Agent", location: "loc-x", org: "org-2")
+        agent.provisionMode = .agent
+        try h.model.update(agent)
         #expect(h.model.orgIDsInUse == ["org-1"])
-        await h.model.loadLocationsInUse()
+    }
+
+    @Test func grantedLocationsAreSortedByName() async throws {
+        let yard = ViamLocation(id: "loc-yard", name: "Annex")
+        let h = KeyHarness(fleet: GrantFleet(granted: ["loc-shop": shopFloor, "loc-yard": yard]))
+        _ = try h.environment("Shop", location: "loc-shop")
+        _ = try h.environment("Yard", location: "loc-yard")
+        await h.model.loadLocations(org: "org-1")
+        #expect(h.model.locations(org: "org-1") == .loaded([yard, shopFloor]))
+    }
+
+    /// Another org's environments name locations of that org, not candidates for this one.
+    @Test func otherOrgsLocationsAreNotCandidates() async throws {
+        let h = KeyHarness(fleet: GrantFleet(granted: ["loc-shop": shopFloor, "loc-other": ViamLocation(id: "loc-other", name: "Other")]))
+        h.orgs = .known([acme, ViamOrganization(id: "org-2", name: "Beta")])
+        _ = try h.environment("Shop", location: "loc-shop")
+        _ = try h.environment("Other", location: "loc-other", org: "org-2")
+        await h.model.loadLocations(org: "org-1")
         #expect(h.model.locations(org: "org-1") == .loaded([shopFloor]))
     }
 }
@@ -152,6 +172,10 @@ private final class KeyHarness {
     @Test func oneGrantedLocationIsTheLocation() {
         let scope = KeyScope(organizations: [acme], locations: [shopFloor], grantsOnly: true)
         #expect(scope?.description == "location Shop floor")
+    }
+
+    @Test func noGrantedLocationsMeansTheOrganization() {
+        #expect(KeyScope(organizations: [acme], locations: [], grantsOnly: true) == .organization("Acme"))
     }
 
     @Test func severalGrantedLocationsAreCounted() {

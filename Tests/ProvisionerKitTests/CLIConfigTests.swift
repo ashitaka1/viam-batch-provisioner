@@ -34,3 +34,23 @@ private func fixture(_ name: String) throws -> String {
     #expect(user.org == nil)
     #expect(user.location == nil)
 }
+
+private func config(_ json: String) -> String {
+    let path = FileManager.default.temporaryDirectory.appending(path: "cli-config-\(UUID().uuidString).json").path
+    FileManager.default.createFile(atPath: path, contents: Data(json.utf8))
+    return path
+}
+
+@Test func emptyKeyIDIsNoLogin() {
+    let path = config(#"{"auth":{"key_id":"","key_crypto":"secret"}}"#)
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    #expect(CLIConfig.login(path: path) == .none)
+    #expect(CLIConfig.apiKey(path: path) == nil)
+}
+
+@Test func keyWithoutItsSecretIsAKeyLoginWithNoKey() {
+    let path = config(#"{"auth":{"key_id":"kid"}}"#)
+    defer { try? FileManager.default.removeItem(atPath: path) }
+    #expect(CLIConfig.login(path: path) == .apiKey(id: "kid"))
+    #expect(CLIConfig.apiKey(path: path) == nil)
+}

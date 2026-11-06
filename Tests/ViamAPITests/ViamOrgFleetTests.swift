@@ -141,3 +141,35 @@ func mapsStatuses(code: Int, expected: FleetError) async {
     let isUnreachable = if case .unreachable? = thrown { true } else { false }
     #expect(isUnreachable, "an unreadable reply leaves the outcome unknown; got \(describe(thrown))")
 }
+
+private func getLocation(_ id: String, _ name: String, orgs: [String]) -> Viam_App_V1_GetLocationResponse {
+    var response = Viam_App_V1_GetLocationResponse()
+    response.location.id = id
+    response.location.name = name
+    response.location.organizations = orgs.map {
+        var org = Viam_App_V1_LocationOrganization()
+        org.organizationID = $0
+        return org
+    }
+    return response
+}
+
+@Test func readsOneLocationOfTheOrg() async throws {
+    let seen = Seen([])
+    let fleet = fleet(seen: seen) { _ in ok(getLocation("l1", "Shop floor", orgs: ["o1"])) }
+    #expect(try await fleet.location(id: "l1") == ViamLocation(id: "l1", name: "Shop floor"))
+    let call = try lastCall(seen)
+    #expect(call.path == "/viam.app.v1.AppService/GetLocation")
+    #expect(try unframe(Viam_App_V1_GetLocationRequest.self, call.body).locationID == "l1")
+}
+
+/// A location the key can read in another org isn't this org's grant.
+@Test func locationOfAnotherOrgIsRejected() async {
+    let fleet = fleet { _ in ok(getLocation("l9", "Elsewhere", orgs: ["o2"])) }
+    await #expect(throws: FleetError.self) { _ = try await fleet.location(id: "l9") }
+    do {
+        _ = try await fleet.location(id: "l9")
+    } catch {
+        guard case .rejected = error else { Issue.record("expected rejected, got \(error)"); return }
+    }
+}

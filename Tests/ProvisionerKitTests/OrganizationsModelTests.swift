@@ -107,4 +107,22 @@ private actor HeldLister: OrganizationLister {
         await model.load()
         #expect(model.state == .failed("Couldn't list your Viam organizations: offline"))
     }
+
+    @Test func grantedOrgsAreSortedByName() async {
+        let lister = FakeLister(result: .failure(.rejected("permission denied")),
+                                granted: ["o1": .success(ViamOrganization(id: "o1", name: "Zeta")),
+                                          "o2": .success(ViamOrganization(id: "o2", name: "alpha"))])
+        let model = OrganizationsModel(lister: lister, candidates: { ["o1", "o2"] })
+        await model.load()
+        #expect(model.rows.map(\.name) == ["alpha", "Zeta"])
+    }
+
+    @Test func clearForgetsThatTheOrgsWereGrantsOnly() async {
+        let lister = FakeLister(result: .failure(.rejected("permission denied")),
+                                granted: ["o1": .success(ViamOrganization(id: "o1", name: "Acme"))])
+        let model = OrganizationsModel(lister: lister, candidates: { ["o1"] })
+        await model.load()
+        model.clear()
+        #expect(model.listed)
+    }
 }

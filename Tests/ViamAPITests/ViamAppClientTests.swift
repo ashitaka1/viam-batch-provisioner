@@ -108,3 +108,43 @@ func providerFailureReachesTheCallerWithoutARequest(failure: ViamCLIError, expec
     }, session: session)
     await #expect(throws: FleetError.rejected("no access")) { _ = try await lister.organizations() }
 }
+
+// MARK: - API-key sign-in
+
+@Test func authenticateSendsTheKeyAsAnAPIKeyEntity() async throws {
+    let body = Locked<Data?>(nil)
+    let base = StubProtocol.register { request, data in
+        #expect(request.url!.path == "/proto.rpc.v1.AuthService/Authenticate")
+        body.withLock { $0 = data }
+        return ok(authenticated(token: "access-1"))
+    }
+    #expect(try await ViamAppClient.authenticate(keyID: "kid", key: "kval", baseURL: base, session: session) == "access-1")
+    let request = try unframe(Proto_Rpc_V1_AuthenticateRequest.self, try #require(body.withLock { $0 }))
+    #expect(request.entity == "kid")
+    #expect(request.credentials.type == "api-key")
+    #expect(request.credentials.payload == "kval")
+}
+
+@Test(arguments: [7, 16])
+func refusedKeyIsAPIKeyRefused(code: Int) async {
+    let base = StubProtocol.register { _, _ in trailerStatus(code, "bad key") }
+    await #expect(throws: APIKeyRefused()) {
+        _ = try await ViamAppClient.authenticate(keyID: "kid", key: "kval", baseURL: base, session: session)
+    }
+}
+
+/// Viam failing to answer says nothing about the key, so the session isn't signed out.
+@Test func unavailableViamIsNotARefusal() async {
+    let base = StubProtocol.register { _, _ in trailerStatus(14, "unavailable") }
+    await #expect(throws: ViamError.self) {
+        _ = try await ViamAppClient.authenticate(keyID: "kid", key: "kval", baseURL: base, session: session)
+    }
+}
+
+@Test func listerReadsOneOrganization() async throws {
+    let lister = ViamOrganizationLister(tokens: ScriptedTokens(["t1"]), baseURL: StubProtocol.register { request, _ in
+        #expect(request.url!.path == "/viam.app.v1.AppService/GetOrganization")
+        return ok(organization("o1", "Acme"))
+    }, session: session)
+    #expect(try await lister.organization(id: "o1") == ViamOrganization(id: "o1", name: "Acme"))
+}

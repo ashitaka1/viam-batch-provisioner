@@ -116,9 +116,15 @@ private final class CLIConfigFile: Sendable {
     deinit { try? FileManager.default.removeItem(atPath: path) }
 }
 
+/// An error whose description quotes the request, as a transport error may.
+private struct QuotingError: Error, CustomStringConvertible {
+    let text: String
+    var description: String { "request failed: \(text)" }
+}
+
 /// Viam's `AuthService/Authenticate`, scripted.
 private final class ScriptedAuth: @unchecked Sendable {
-    enum Outcome { case token(String), refused, unreachable }
+    enum Outcome { case token(String), refused, unreachable, failsQuoting(String) }
 
     private let lock = NSLock()
     private var outcome = Outcome.token(jwt(expiresIn: 3600))
@@ -137,6 +143,7 @@ private final class ScriptedAuth: @unchecked Sendable {
             case .token(let token): return token
             case .refused: throw APIKeyRefused()
             case .unreachable: throw URLError(.notConnectedToInternet)
+            case .failsQuoting(let text): throw QuotingError(text: text)
             }
         }
     }
@@ -385,18 +392,35 @@ private final class ScriptedAuth: @unchecked Sendable {
     #expect(!cli.calls.contains(["logout"]))
 }
 
-@MainActor @Test func unreachableViamFailsWithoutTheKey() async {
+@MainActor @Test func failedExchangeFailsWithoutTheKey() async {
     let config = CLIConfigFile()
     config.holdAPIKey(key: "key-secret-1")
     let viam = ScriptedAuth()
-    viam.answer(.unreachable)
+    viam.answer(.failsQuoting("key-secret-1"))
     let model = session(ScriptedCLI(), config: config, viam: viam)
     await model.load()
-    guard case .failed(let message) = model.state else {
-        Issue.record("state \(model.state)")
-        return
-    }
-    #expect(!message.contains("key-secret-1"))
+    #expect(model.state == .failed("Viam couldn't be reached to check the API key."))
+}
+
+@MainActor @Test func keyRefusedAtLoadIsSignedOut() async {
+    let config = CLIConfigFile()
+    config.holdAPIKey()
+    let viam = ScriptedAuth()
+    viam.answer(.refused)
+    let model = session(ScriptedCLI(), config: config, viam: viam)
+    await model.load()
+    #expect(model.state == .signedOut)
+}
+
+/// A config naming a key without its secret holds no usable key.
+@MainActor @Test func keyWithoutItsSecretSignsTheSessionOut() async {
+    let config = CLIConfigFile()
+    config.holdAPIKey(key: "")
+    let viam = ScriptedAuth()
+    let model = session(ScriptedCLI(), config: config, viam: viam)
+    await model.load()
+    #expect(model.state == .signedOut)
+    #expect(viam.calls.isEmpty)
 }
 
 @MainActor @Test func signingOutAKeyLoginRunsLogout() async {
@@ -424,6 +448,11 @@ private final class ScriptedAuth: @unchecked Sendable {
     viam.answer(.token(token))
     #expect(try await model.tokens.token(refresh: false) == token)
     #expect(viam.calls.count == 1)
+
+    config.holdUserLogin()
+    _ = try await model.tokens.token(refresh: false)
+    #expect(cli.tokenReads == 1, "the user login's cached token is used again")
+    #expect(viam.calls.count == 1, "a user login never exchanges a key")
 }
 
 /// The code reaches the session through a hop to the main actor.
