@@ -30,6 +30,19 @@ struct BatchHistoryTests {
         #expect(reopened.records == [newer, older])
     }
 
+    @Test func datesRoundTripExactly() throws {
+        let file = temporaryFile()
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        var batch = record(["lab-1"], at: 0)
+        batch.date = Date(timeIntervalSinceReferenceDate: 815_000_000.123_456_7)
+        try BatchHistory(file: file).save(batch)
+
+        let reopened = BatchHistory(file: file)
+        reopened.load()
+        #expect(reopened.records.first?.date == batch.date,
+                "saved \(batch.date.timeIntervalSinceReferenceDate), reloaded \(String(describing: reopened.records.first?.date.timeIntervalSinceReferenceDate))")
+    }
+
     @Test func savingAKnownRecordReplacesIt() throws {
         let file = temporaryFile()
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }

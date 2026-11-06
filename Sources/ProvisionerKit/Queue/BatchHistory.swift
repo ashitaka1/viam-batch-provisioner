@@ -73,7 +73,8 @@ public final class BatchHistory {
         all.sort { $0.date > $1.date }
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        // A number (seconds since 2001) keeps every bit of the Date; ISO 8601 keeps whole seconds.
+        encoder.dateEncodingStrategy = .deferredToDate
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(all).write(to: file, options: .atomic)
         records = all
@@ -83,7 +84,18 @@ public final class BatchHistory {
     private func read() throws -> [BatchRecord] {
         guard FileManager.default.fileExists(atPath: file.path) else { return [] }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // Earlier files hold ISO 8601 strings.
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            if let seconds = try? container.decode(Double.self) {
+                return Date(timeIntervalSinceReferenceDate: seconds)
+            }
+            let text = try container.decode(String.self)
+            guard let date = try? Date(text, strategy: .iso8601) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Not an ISO 8601 date: \(text)")
+            }
+            return date
+        }
         return try decoder.decode([BatchRecord].self, from: Data(contentsOf: file)).sorted { $0.date > $1.date }
     }
 }
