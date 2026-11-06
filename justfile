@@ -126,10 +126,14 @@ app:
     ./scripts/bundle-app.sh
     open "build/Viam Provisioner.app"
 
-# Register, unregister or show the ProvisionerHelper launch daemon (register asks for approval in System Settings)
+# Register, unregister or show the ProvisionerHelper launch daemon (register asks for approval
+# in System Settings). Status reads the built app; the other actions rebuild it first.
 helper action="status":
-    ./scripts/bundle-app.sh >/dev/null
-    "build/Viam Provisioner.app/Contents/MacOS/ViamProvisioner" --helper-daemon {{action}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    app="build/Viam Provisioner.app/Contents/MacOS/ViamProvisioner"
+    if [[ "{{action}}" != status || ! -x "$app" ]]; then ./scripts/bundle-app.sh >/dev/null; fi
+    "$app" --helper-daemon {{action}}
 
 # Import config/environments/<name>.env and its packages file into the macOS
 # app's environments (builds the app; replaces an environment of that name)
