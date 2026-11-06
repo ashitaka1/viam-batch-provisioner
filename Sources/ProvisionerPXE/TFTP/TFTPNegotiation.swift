@@ -12,11 +12,14 @@ struct TFTPNegotiation: Equatable, Sendable {
 
     /// `maxBlockSize` is the largest block the server can send to this client.
     init(requested: [TFTPOption], fileSize: Int, maxBlockSize: Int = Self.blockSizeRange.upperBound) {
-        for option in requested {
+        // A repeated option counts once, with its last value.
+        let lastIndex = Dictionary(requested.enumerated().map { ($1.name, $0) }, uniquingKeysWith: { $1 })
+        for (index, option) in requested.enumerated() where lastIndex[option.name] == index {
             switch option.name {
             case "blksize":
-                guard let size = Int(option.value) else { continue }
-                blockSize = min(max(size, Self.blockSizeRange.lowerBound), Self.blockSizeRange.upperBound, maxBlockSize)
+                // RFC 2348 lets the server answer only an equal or smaller size, so a size below the minimum is ignored.
+                guard let size = Int(option.value), size >= Self.blockSizeRange.lowerBound else { continue }
+                blockSize = min(size, Self.blockSizeRange.upperBound, maxBlockSize)
                 acknowledged.append(TFTPOption(name: "blksize", value: String(blockSize)))
             case "timeout":
                 guard let seconds = Int(option.value), Self.timeoutRange.contains(seconds) else { continue }

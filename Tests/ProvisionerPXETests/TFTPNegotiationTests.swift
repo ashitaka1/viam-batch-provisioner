@@ -12,11 +12,42 @@ import Testing
         #expect(result.acknowledged == [TFTPOption(name: "blksize", value: "1468")])
     }
 
-    @Test(arguments: [("70000", 65464), ("4", 8)])
-    func blksizeClamped(requested: String, expected: Int) {
+    @Test func blksizeAboveMaximumLowered() {
+        let result = negotiate([("blksize", "70000")])
+        #expect(result.blockSize == 65464)
+        #expect(result.acknowledged == [TFTPOption(name: "blksize", value: "65464")])
+    }
+
+    /// RFC 2348: the server may answer only an equal or smaller blksize, so one below 8 is ignored.
+    @Test(arguments: ["7", "4", "0", "-1"])
+    func blksizeBelowMinimumIgnored(requested: String) {
         let result = negotiate([("blksize", requested)])
-        #expect(result.blockSize == expected)
-        #expect(result.acknowledged == [TFTPOption(name: "blksize", value: String(expected))])
+        #expect(result.blockSize == 512)
+        #expect(result.acknowledged.isEmpty)
+    }
+
+    @Test func blksizeMinimumAccepted() {
+        #expect(negotiate([("blksize", "8")]).blockSize == 8)
+    }
+
+    @Test func repeatedOptionKeepsLastValue() {
+        let result = negotiate([("blksize", "1024"), ("timeout", "2"), ("blksize", "1468"), ("timeout", "3")])
+        #expect(result.blockSize == 1468)
+        #expect(result.timeoutSeconds == 3)
+        #expect(result.acknowledged == [
+            TFTPOption(name: "blksize", value: "1468"),
+            TFTPOption(name: "timeout", value: "3"),
+        ])
+    }
+
+    @Test func repeatedOptionWithInvalidLastValueIsIgnored() {
+        let result = negotiate([("blksize", "1468"), ("blksize", "x")])
+        #expect(result.blockSize == 512)
+        #expect(result.acknowledged.isEmpty)
+    }
+
+    @Test func repeatedTsizeAcknowledgedOnce() {
+        #expect(negotiate([("tsize", "0"), ("tsize", "0")]).acknowledged == [TFTPOption(name: "tsize", value: "1234")])
     }
 
     @Test func tsizeAnswered() {
