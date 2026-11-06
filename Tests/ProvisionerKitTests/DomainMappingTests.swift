@@ -68,12 +68,12 @@ private let stamp = "2026-10-04T04:08:29+00:00"
 @Test func queueEntryMapsAllFields() throws {
     let wire = try decode(Components.Schemas.QueueEntry.self, """
         {"name":"usb1","status":"failed","mac":"\(mac)","assigned_at":"\(stamp)","completed_at":"\(stamp)",
-         "failed_at":"\(stamp)","failure_reason":"disk","stage":"late-commands","has_credentials":true,"flashed_via":"usb"}
+         "failed_at":"\(stamp)","failure_reason":"disk","stage":"late-commands","warning":"moved","has_credentials":true,"flashed_via":"usb"}
         """)
     let date = utc(2026, 10, 4, 4, 8, 29)
     #expect(QueueEntry(wire) == QueueEntry(
         name: "usb1", status: .failed, mac: mac, assignedAt: date, completedAt: date, failedAt: date,
-        failureReason: "disk", stage: "late-commands", hasCredentials: true, flashedViaUSB: true))
+        failureReason: "disk", stage: "late-commands", warning: "moved", hasCredentials: true, flashedViaUSB: true))
 }
 
 @Test(arguments: [

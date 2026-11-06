@@ -48,7 +48,7 @@ private struct RefusingTransport: ClientTransport {
     let environment = EnvironmentConfig(
         provisionMode: .agent, username: "viam", passwordHash: "$6$salt$hash", sshPublicKey: "ssh-ed25519 AAAA",
         timezone: "America/New_York", packages: ["htop", "jq"], wifi: .init(ssid: "lab", password: nil, country: "US"),
-        tailscaleAuthKey: "tskey-1")
+        tailscaleAuthKey: "tskey-1", robotNetAddress: "10.20.0.1/16", robotNetPort: "enp3s0")
     let viamJSON = Data(#"{"cloud":{"app_address":"https://app.viam.com:443","id":"part-1","secret":"s3cr3t"}}"#.utf8)
 
     _ = try await client.provision([ProvisionRequest(name: "m1", credentialsJSON: viamJSON, environment: environment)])
@@ -63,6 +63,8 @@ private struct RefusingTransport: ClientTransport {
     #expect(env["packages"] as? [String] == ["htop", "jq"])
     #expect(env["tailscale_auth_key"] as? String == "tskey-1")
     #expect(env["wifi"] as? [String: String] == ["ssid": "lab", "country": "US"])
+    #expect(env["robot_net_address"] as? String == "10.20.0.1/16")
+    #expect(env["robot_net_port"] as? String == "enp3s0")
     let cloud = try #require((item["credentials"] as? [String: Any])?["cloud"] as? [String: String])
     #expect(cloud == ["app_address": "https://app.viam.com:443", "id": "part-1", "secret": "s3cr3t"])
 }

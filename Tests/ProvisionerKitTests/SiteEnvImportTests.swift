@@ -68,6 +68,26 @@ private func importing(_ text: String = tcos, packages: String? = packagesText,
         #expect(throws: SiteEnvImportError.missingSSHKey("/Users/test/.ssh/id_ed25519.pub")) { try importing(files: [:]) }
     }
 
+    @Test func importReadsTheRobotNetwork() throws {
+        var (env, _) = try importing(tcos + "\nROBOT_NET_ADDRESS=10.20.0.1/16\nROBOT_NET_PORT=enp3s0\n")
+        #expect((env.robotNetEnabled, env.robotNetAddress, env.robotNetPort) == (true, "10.20.0.1/16", "enp3s0"))
+
+        (env, _) = try importing(tcos + "\nROBOT_NET_ADDRESS=none\n")
+        #expect((env.robotNetEnabled, env.robotNetAddress) == (false, "192.168.20.1/24"))
+
+        (env, _) = try importing(tcos + "\nROBOT_NET_ADDRESS=\nROBOT_NET_PORT=\n")
+        #expect((env.robotNetEnabled, env.robotNetAddress, env.robotNetPort) == (true, "192.168.20.1/24", nil))
+    }
+
+    @Test func importRefusesAPublicAddressOrABadPort() {
+        #expect(throws: SiteEnvImportError.invalidRobotNetAddress("8.8.8.8/24")) {
+            try importing(tcos + "\nROBOT_NET_ADDRESS=8.8.8.8/24\n")
+        }
+        #expect(throws: SiteEnvImportError.invalidRobotNetPort("enp3s0x123456789")) {
+            try importing(tcos + "\nROBOT_NET_PORT=enp3s0x123456789\n")
+        }
+    }
+
     @Test func missingPasswordIsAnError() {
         #expect(throws: SiteEnvImportError.missingPassword) {
             try importing(tcos.replacingOccurrences(of: "PASSWORD=hunter22\n", with: ""))

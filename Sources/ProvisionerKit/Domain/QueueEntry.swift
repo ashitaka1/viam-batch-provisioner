@@ -26,6 +26,8 @@ public struct QueueEntry: Sendable, Equatable, Identifiable {
     public var failedAt: Date?
     public var failureReason: String?
     public var stage: String?
+    /// The warning the installer's `done` report carried.
+    public var warning: String?
     public var hasCredentials: Bool
     public var flashedViaUSB: Bool
     public var queuedAt: Date?
@@ -41,10 +43,10 @@ public struct QueueEntry: Sendable, Equatable, Identifiable {
 
     public init(
         name: String, status: EntryStatus, mac: String? = nil, assignedAt: Date? = nil, completedAt: Date? = nil,
-        failedAt: Date? = nil, failureReason: String? = nil, stage: String? = nil, hasCredentials: Bool,
-        flashedViaUSB: Bool = false, queuedAt: Date? = nil, steps: [StepTime] = [], osName: String? = nil,
-        downloadBytes: Int? = nil, downloadTotal: Int? = nil, failureStep: ProvisioningStep? = nil,
-        provisionMode: ProvisionMode? = nil, joinsTailscale: Bool? = nil
+        failedAt: Date? = nil, failureReason: String? = nil, stage: String? = nil, warning: String? = nil,
+        hasCredentials: Bool, flashedViaUSB: Bool = false, queuedAt: Date? = nil, steps: [StepTime] = [],
+        osName: String? = nil, downloadBytes: Int? = nil, downloadTotal: Int? = nil,
+        failureStep: ProvisioningStep? = nil, provisionMode: ProvisionMode? = nil, joinsTailscale: Bool? = nil
     ) {
         self.name = name
         self.status = status
@@ -54,6 +56,7 @@ public struct QueueEntry: Sendable, Equatable, Identifiable {
         self.failedAt = failedAt
         self.failureReason = failureReason
         self.stage = stage
+        self.warning = warning
         self.hasCredentials = hasCredentials
         self.flashedViaUSB = flashedViaUSB
         self.queuedAt = queuedAt
@@ -76,6 +79,7 @@ public struct QueueEntry: Sendable, Equatable, Identifiable {
             failedAt: wire.failedAt,
             failureReason: wire.failureReason,
             stage: wire.stage?.rawValue,
+            warning: wire.warning,
             hasCredentials: wire.hasCredentials,
             flashedViaUSB: wire.flashedVia == .usb,
             queuedAt: wire.queuedAt,

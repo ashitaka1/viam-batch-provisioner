@@ -21,12 +21,17 @@ public enum SiteEnvImportError: Error, Sendable, Equatable, LocalizedError {
     case missingSSHKey(String)
     case missingPassword
     case unknownProvisionMode(String)
+    case invalidRobotNetAddress(String)
+    case invalidRobotNetPort(String)
 
     public var errorDescription: String? {
         switch self {
         case .missingSSHKey(let path): "No SSH public key at \(path) (SSH_PUBLIC_KEY_FILE)."
         case .missingPassword: "The file has no PASSWORD."
         case .unknownProvisionMode(let mode): "PROVISION_MODE \"\(mode)\" isn't full, agent or os-only."
+        case .invalidRobotNetAddress(let address):
+            "ROBOT_NET_ADDRESS \"\(address)\" isn't none or a private address with a prefix, like \(RobotNetwork.defaultAddress)."
+        case .invalidRobotNetPort(let port): "ROBOT_NET_PORT \"\(port)\" isn't an interface name."
         }
     }
 }
@@ -54,6 +59,19 @@ public enum SiteEnvImport {
         if let country = value("WIFI_COUNTRY") { environment.wifiCountry = country }
         environment.orgID = value("VIAM_ORG_ID")
         environment.locationID = value("VIAM_LOCATION_ID")
+        if let address = value("ROBOT_NET_ADDRESS") {
+            if address == RobotNetwork.none {
+                environment.robotNetEnabled = false
+            } else if RobotNetwork.addressProblem(address) == nil {
+                environment.robotNetAddress = address
+            } else {
+                throw .invalidRobotNetAddress(address)
+            }
+        }
+        if let port = value("ROBOT_NET_PORT") {
+            guard RobotNetwork.portProblem(port) == nil else { throw .invalidRobotNetPort(port) }
+            environment.robotNetPort = port
+        }
 
         let keyPath = (value("SSH_PUBLIC_KEY_FILE") ?? "~/.ssh/id_ed25519.pub").replacing(/^~/, with: home)
         guard let key = try? readFile(keyPath) else { throw .missingSSHKey(keyPath) }

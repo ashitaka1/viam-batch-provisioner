@@ -19,6 +19,11 @@ public struct Environment: Codable, Sendable, Equatable, Identifiable {
     public var packages: [String]
     public var wifiSSID: String?
     public var wifiCountry: String?
+    /// Off means `ROBOT_NET_ADDRESS=none`; the address is kept for turning it back on.
+    public var robotNetEnabled: Bool
+    public var robotNetAddress: String
+    /// nil: the first `enp*` port other than the one cabled at install.
+    public var robotNetPort: String?
     public var hasPassword: Bool
     public var hasWifiPassword: Bool
     public var hasTailscaleKey: Bool
@@ -38,8 +43,38 @@ public struct Environment: Codable, Sendable, Equatable, Identifiable {
             namePrefix: MachineName.prefixProblems(name).isEmpty ? name : "",
             provisionMode: .full, username: "viam", sshPublicKey: "", timezone: TimeZone.current.identifier,
             packages: defaultPackages, wifiSSID: nil, wifiCountry: Locale.current.region?.identifier ?? "US",
+            robotNetEnabled: true, robotNetAddress: RobotNetwork.defaultAddress, robotNetPort: nil,
             hasPassword: false, hasWifiPassword: false, hasTailscaleKey: false
         )
+    }
+}
+
+extension Environment {
+    /// An environment saved before the robot-network settings existed reads as
+    /// on, with the default address and no port.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            name: try container.decode(String.self, forKey: .name),
+            orgID: try container.decodeIfPresent(String.self, forKey: .orgID),
+            orgName: try container.decodeIfPresent(String.self, forKey: .orgName),
+            locationID: try container.decodeIfPresent(String.self, forKey: .locationID),
+            locationName: try container.decodeIfPresent(String.self, forKey: .locationName),
+            namePrefix: try container.decode(String.self, forKey: .namePrefix),
+            provisionMode: try container.decode(ProvisionMode.self, forKey: .provisionMode),
+            username: try container.decode(String.self, forKey: .username),
+            sshPublicKey: try container.decode(String.self, forKey: .sshPublicKey),
+            timezone: try container.decode(String.self, forKey: .timezone),
+            packages: try container.decode([String].self, forKey: .packages),
+            wifiSSID: try container.decodeIfPresent(String.self, forKey: .wifiSSID),
+            wifiCountry: try container.decodeIfPresent(String.self, forKey: .wifiCountry),
+            robotNetEnabled: try container.decodeIfPresent(Bool.self, forKey: .robotNetEnabled) ?? true,
+            robotNetAddress: try container.decodeIfPresent(String.self, forKey: .robotNetAddress) ?? RobotNetwork.defaultAddress,
+            robotNetPort: try container.decodeIfPresent(String.self, forKey: .robotNetPort),
+            hasPassword: try container.decode(Bool.self, forKey: .hasPassword),
+            hasWifiPassword: try container.decode(Bool.self, forKey: .hasWifiPassword),
+            hasTailscaleKey: try container.decode(Bool.self, forKey: .hasTailscaleKey))
     }
 }
 
@@ -71,6 +106,7 @@ public enum EnvironmentField: String, CaseIterable, Sendable {
     case name, org, location, namePrefix, provisionMode
     case username, password, sshPublicKey, timezone
     case wifiSSID, wifiPassword, wifiCountry
+    case robotNetAddress, robotNetPort
     case packages, tailscaleAuthKey
 
     /// The settings the Python server ignores: it renders installs from

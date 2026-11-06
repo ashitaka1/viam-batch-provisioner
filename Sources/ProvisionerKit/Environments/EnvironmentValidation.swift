@@ -51,6 +51,11 @@ extension Environment {
             add(.wifiPassword, "WiFi passwords are 8 to 63 characters.")
         }
 
+        if robotNetEnabled {
+            if let problem = RobotNetwork.addressProblem(robotNetAddress) { add(.robotNetAddress, problem) }
+            if let port = robotNetPort, !port.isEmpty, let problem = RobotNetwork.portProblem(port) { add(.robotNetPort, problem) }
+        }
+
         var seen: Set<String> = []
         for (index, package) in packages.enumerated() {
             let line = index + 1
@@ -84,7 +89,9 @@ extension Environment {
         return EnvironmentConfig(
             provisionMode: provisionMode, username: username, passwordHash: passwordHash,
             sshPublicKey: sshPublicKey.trimmingCharacters(in: .whitespacesAndNewlines), timezone: timezone,
-            packages: packages, wifi: wifi, tailscaleAuthKey: secrets.tailscaleAuthKey.flatMap { $0.isEmpty ? nil : $0 }
+            packages: packages, wifi: wifi, tailscaleAuthKey: secrets.tailscaleAuthKey.flatMap { $0.isEmpty ? nil : $0 },
+            robotNetAddress: robotNetEnabled ? robotNetAddress : RobotNetwork.none,
+            robotNetPort: robotNetEnabled ? robotNetPort.flatMap { $0.isEmpty ? nil : $0 } : nil
         )
     }
 }
