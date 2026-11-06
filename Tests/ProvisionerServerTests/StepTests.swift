@@ -84,11 +84,29 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
 @Test func reachRecordsOncePerAttempt() async throws {
     let (provisioner, _) = try await queued()
     var record = MachineRecord(attempt: 1)
-    await provisioner.reach(.found, &record, name: "m-1", mac: "aa:bb:cc:dd:ee:ff")
-    await provisioner.reach(.found, &record, name: "m-1", mac: nil)
+    #expect(await provisioner.reach(.found, &record, name: "m-1", mac: "aa:bb:cc:dd:ee:ff"))
+    #expect(await !provisioner.reach(.found, &record, name: "m-1", mac: nil))
     #expect(record.steps.count == 1)
     await provisioner.beginAttempt(&record)
-    await provisioner.reach(.found, &record, name: "m-1", mac: nil)
+    #expect(await provisioner.reach(.found, &record, name: "m-1", mac: nil))
     #expect(record.steps.map(\.attempt) == [1, 2])
-    #expect(await eventSummary(provisioner) == ["step-reached m-1 found", "step-reached m-1 found"])
+    #expect(await eventSummary(provisioner).isEmpty)
+}
+
+@Test func announceEmitsStepReached() async throws {
+    let (provisioner, _) = try await queued()
+    var record = MachineRecord(attempt: 1)
+    await provisioner.reach(.found, &record, name: "m-1", mac: "aa:bb:cc:dd:ee:ff")
+    await provisioner.announce(.found, record, name: "m-1", mac: "aa:bb:cc:dd:ee:ff")
+
+    #expect(await eventSummary(provisioner) == ["step-reached m-1 found"])
+}
+
+@Test func failedSaveEmitsNoStepReached() async throws {
+    let (provisioner, dir) = try await queued()
+    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.machines.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.machines.path) }
+
+    #expect(await failure { try await provisioner.report(report(.progress, .lateCommands, name: "m-1")) }?.kind == "internal")
+    #expect(await eventSummary(provisioner).isEmpty)
 }

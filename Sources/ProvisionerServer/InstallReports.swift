@@ -48,8 +48,9 @@ extension Provisioner {
             record.progressAt = time
             if stage == .done { record.completedAt = time }
             let step = reportedStep(stage)
-            if let step { reach(step, &record, name: queued.name, mac: nil) }
+            let reached = step.map { reach($0, &record, name: queued.name, mac: nil) } ?? false
             try save(record, queued.key, store)
+            if reached, let step { announce(step, record, name: queued.name, mac: nil) }
             emit { .installProgress(.init(id: $0, _type: .installProgress, timestamp: time, name: queued.name, stage: stage)) }
             if stage == .done, let started = record.attemptStartedAt {
                 let duration = time.timeIntervalSince(started)
