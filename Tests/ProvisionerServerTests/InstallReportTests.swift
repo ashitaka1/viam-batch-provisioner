@@ -46,7 +46,7 @@ private func queued(_ name: String = "m-1", clock: TestClock = TestClock()) asyn
     let entry = try await provisioner.entry("m-1")
     #expect(entry.status == .installing)
     #expect(entry.stage == .lateCommands)
-    #expect(await eventSummary(provisioner) == ["install-progress m-1 late-commands"])
+    #expect(await eventSummary(provisioner) == ["step-reached m-1 configuring", "install-progress m-1 late-commands"])
 }
 
 @Test func repeatStageIsDuplicate() async throws {
@@ -54,7 +54,7 @@ private func queued(_ name: String = "m-1", clock: TestClock = TestClock()) asyn
     _ = try await provisioner.report(report(.progress, .tooling, name: "m-1"))
 
     #expect(try await provisioner.report(report(.progress, .tooling, name: "m-1")) == .duplicate)
-    #expect(await eventSummary(provisioner).count == 1)
+    #expect(await eventSummary(provisioner).count == 2)
 }
 
 @Test func doneCompletes() async throws {
@@ -68,7 +68,8 @@ private func queued(_ name: String = "m-1", clock: TestClock = TestClock()) asyn
     let entry = try await provisioner.entry("m-1")
     #expect(entry.status == .installed)
     #expect(entry.completedAt == t0 + 30)
-    #expect(await eventSummary(provisioner) == ["install-progress m-1 late-commands", "install-progress m-1 done", "install-complete m-1 30.0"])
+    #expect(await eventSummary(provisioner) == ["step-reached m-1 configuring", "install-progress m-1 late-commands",
+                                                "step-reached m-1 installed", "install-progress m-1 done", "install-complete m-1 30.0"])
 }
 
 @Test func progressAfterCompletionIgnored() async throws {
@@ -137,7 +138,8 @@ private func queued(_ name: String = "m-1", clock: TestClock = TestClock()) asyn
     #expect(entry.failedAt == nil)
     #expect(entry.failureReason == nil)
     #expect(await provisioner.machineRecord("m-1")?.attempt == 2)
-    #expect(await eventSummary(provisioner, after: 2) == ["install-progress m-1 late-commands", "install-progress m-1 done", "install-complete m-1 20.0"])
+    #expect(await eventSummary(provisioner, after: 3) == ["step-reached m-1 configuring", "install-progress m-1 late-commands",
+                                                         "step-reached m-1 installed", "install-progress m-1 done", "install-complete m-1 20.0"])
 }
 
 @Test(arguments: [(Schemas.InstallReport.KindPayload.progress, Schemas.InstallStage.unknown),

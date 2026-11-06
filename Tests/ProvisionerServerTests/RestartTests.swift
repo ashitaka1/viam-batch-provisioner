@@ -17,7 +17,7 @@ import Testing
         let snapshot = try await client.queue()
         #expect(snapshot.entries.map(\.name) == ["m-1", "m-2"])
         #expect(snapshot.entries.map(\.status) == [.installed, .queued])
-        #expect(snapshot.lastEventID == 3)
+        #expect(snapshot.lastEventID == 5)
 
         try await postReport(port: test.port!, #"{"kind":"progress","stage":"identity","name":"m-2"}"#)
 

@@ -33,6 +33,8 @@ extension Schemas.MachineEvent {
         case .installProgress(let e): "install-progress \(e.name) \(e.stage.rawValue)"
         case .installFailed(let e): "install-failed \(e.name) \(e.stage.rawValue) \(e.source.rawValue): \(e.reason)"
         case .installComplete(let e): "install-complete \(e.name) \(e.durationSeconds)"
+        case .stepReached(let e): "step-reached \(e.name) \(e.step.rawValue)"
+        case .downloadProgress(let e): "download-progress \(e.name) \(e.bytes)/\(e.total)"
         case .resync(let e): "resync \(e.latestId)"
         default: "unexpected \(self)"
         }

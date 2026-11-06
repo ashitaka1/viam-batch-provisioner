@@ -45,7 +45,7 @@ private final class TextBox: @unchecked Sendable {
     func append(_ more: String) { lock.withLock { value += more } }
 }
 
-/// Reports three progress stages for m-1, producing events 1 to 3.
+/// Reports three progress stages for m-1, producing events 1 to 4.
 private func threeEvents(_ client: ProvisionerClient, _ port: Int) async throws {
     _ = try await client.provision([ProvisionRequest(name: "m-1")])
     for stage in ["late-commands", "identity", "tooling"] {
@@ -74,9 +74,15 @@ private func ids(_ text: String) -> [String] {
             Issue.record("expected an event after the snapshot")
             return
         }
-        #expect(event.kind == .installProgress(stage: "late-commands"))
+        #expect(event.kind == .stepReached(step: .configuring, attempt: 1))
         #expect(event.name == "m-1")
         #expect(!inSnapshot)
+
+        guard case .event(let progress, _) = await updates.next() else {
+            Issue.record("expected the progress event after the step")
+            return
+        }
+        #expect(progress.kind == .installProgress(stage: "late-commands"))
     }
 }
 
@@ -110,7 +116,7 @@ private func ids(_ text: String) -> [String] {
 
         let frames = text.components(separatedBy: "\n\n")
         #expect(frames[1].hasPrefix("event: resync\ndata: "))
-        #expect(frames[1].contains(#""latest_id":3"#))
+        #expect(frames[1].contains(#""latest_id":4"#))
         #expect(!frames[1].contains("id: "))
     }
 }
@@ -224,10 +230,10 @@ private func pollStatus(port: Int, until: (UInt) -> Bool, within limit: Duration
         try await postReport(port: test.port!, #"{"kind":"progress","stage":"done","name":"m-1"}"#)
         try await postReport(port: test.port!, #"{"kind":"failed","stage":"tooling","name":"m-2"}"#)
 
-        let text = try await readEvents(port: test.port!, lastEventID: 0) { ids($0).count >= 3 }
+        let text = try await readEvents(port: test.port!, lastEventID: 0) { ids($0).count >= 4 }
 
         let names = text.split(separator: "\n").filter { $0.hasPrefix("event: ") }.map { String($0.dropFirst(7)) }
-        #expect(names == ["install-progress", "install-complete", "install-failed"])
+        #expect(names == ["step-reached", "install-progress", "install-complete", "install-failed"])
     }
 }
 

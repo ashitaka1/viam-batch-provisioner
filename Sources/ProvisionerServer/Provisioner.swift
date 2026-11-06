@@ -61,7 +61,9 @@ actor Provisioner {
                                         environment: try item.environment.map { try StoreCoding.encoder.encode($0) },
                                         key: key)
                     }
-                    added.append(QueueRecord(name: item.name, addedAt: now()))
+                    added.append(QueueRecord(name: item.name, addedAt: now(),
+                                             provisionMode: item.environment?.provisionMode.rawValue,
+                                             joinsTailscale: item.environment.map { $0.tailscaleAuthKey != nil }))
                     results.append(.init(name: item.name, result: .added))
                 }
             }
@@ -198,6 +200,15 @@ actor Provisioner {
                      completedAt: machine?.completedAt, failedAt: machine?.failedAt,
                      failureReason: machine?.failureReason,
                      stage: machine?.stage.flatMap(Components.Schemas.InstallStage.init(rawValue:)),
-                     hasCredentials: store.hasCredentials(record.key))
+                     hasCredentials: store.hasCredentials(record.key),
+                     queuedAt: record.addedAt,
+                     steps: machine?.steps.compactMap { step in
+                         Components.Schemas.ProvisioningStep(rawValue: step.step).map { .init(step: $0, at: step.at, attempt: step.attempt) }
+                     },
+                     osName: record.osName,
+                     downloadBytes: machine?.downloadBytes, downloadTotal: machine?.downloadTotal,
+                     failureStep: machine?.failureStep.flatMap(Components.Schemas.ProvisioningStep.init(rawValue:)),
+                     provisionMode: record.provisionMode.flatMap(Components.Schemas.QueueEntry.ProvisionModePayload.init(rawValue:)),
+                     joinsTailscale: record.joinsTailscale)
     }
 }

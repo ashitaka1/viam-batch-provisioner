@@ -24,9 +24,9 @@ private func backlogIDs(_ subscription: EventSubscription) -> [Int?] {
     let subscription = await provisioner.subscribe(after: 1)
     _ = try await provisioner.report(report(.progress, .tailscale, name: "m-1"))
 
-    #expect(backlogIDs(subscription) == [2])
+    #expect(backlogIDs(subscription) == [2, 3])
     var live = subscription.live.makeAsyncIterator()
-    #expect(await live.next()?.id == 3)
+    #expect(await live.next()?.id == 4)
 }
 
 @Test func aheadIsResync() async throws {
@@ -38,13 +38,13 @@ private func backlogIDs(_ subscription: EventSubscription) -> [Int?] {
         Issue.record("expected resync, got \(subscription.backlog)")
         return
     }
-    #expect(latest == 3)
+    #expect(latest == 4)
 }
 
 @Test func caughtUpGetsEmptyBacklog() async throws {
     let provisioner = try await withEvents(3)
 
-    #expect(backlogIDs(await provisioner.subscribe(after: 3)) == [])
+    #expect(backlogIDs(await provisioner.subscribe(after: 4)) == [])
 }
 
 @Test func nilIsLiveOnly() async throws {

@@ -36,11 +36,7 @@ extension Provisioner {
         case .progress:
             if record.completedAt != nil { return .ignored }
             if record.failedAt != nil {
-                record.failedAt = nil
-                record.failureReason = nil
-                record.failureSource = nil
-                record.attempt += 1
-                record.attemptStartedAt = time
+                beginAttempt(&record)
             } else if record.stage == stage.rawValue {
                 return .duplicate
             }
@@ -51,6 +47,8 @@ extension Provisioner {
             record.stage = stage.rawValue
             record.progressAt = time
             if stage == .done { record.completedAt = time }
+            let step = reportedStep(stage)
+            if let step { reach(step, &record, name: queued.name, mac: nil) }
             try save(record, queued.key, store)
             emit { .installProgress(.init(id: $0, _type: .installProgress, timestamp: time, name: queued.name, stage: stage)) }
             if stage == .done, let started = record.attemptStartedAt {
@@ -70,11 +68,21 @@ extension Provisioner {
             record.failedAt = time
             record.failureReason = reason
             record.failureSource = "installer"
+            let failureStep: Components.Schemas.ProvisioningStep = stage == .installer ? .installing : .configuring
+            record.failureStep = failureStep.rawValue
             try save(record, queued.key, store)
             emit { .installFailed(.init(id: $0, _type: .installFailed, timestamp: time, name: queued.name, stage: stage,
-                                        reason: reason, source: .installer)) }
+                                        reason: reason, source: .installer, step: failureStep)) }
         }
         return .recorded
+    }
+
+    private func reportedStep(_ stage: Components.Schemas.InstallStage) -> Components.Schemas.ProvisioningStep? {
+        switch stage {
+        case .lateCommands, .identity, .tooling, .tailscale: .configuring
+        case .done: .installed
+        default: nil
+        }
     }
 
     private func validate(_ report: Components.Schemas.InstallReport) throws(ProvisionerFailure) {

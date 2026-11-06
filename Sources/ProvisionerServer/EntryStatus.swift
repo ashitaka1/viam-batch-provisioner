@@ -7,5 +7,6 @@ func derivedStatus(_ record: MachineRecord?) -> Components.Schemas.EntryStatus {
     if record.failedAt != nil { return .failed }
     if record.completedAt != nil { return .installed }
     if record.stage != nil { return .installing }
+    if record.steps.contains(where: { $0.attempt == record.attempt }) { return .assigned }
     return .queued
 }

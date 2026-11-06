@@ -113,3 +113,18 @@ func posixMode(_ url: URL) throws -> Int {
     #expect(try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int == 0o600)
     #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["queue.json"])
 }
+
+@Test func recordWithoutStepsDecodes() throws {
+    let dir = DataDirectory(try temporaryDirectory())
+    try dir.prepare()
+    try Data(#"{"attempt":1,"stage":"tooling"}"#.utf8).write(to: dir.machine("m-1"))
+    try Data(#"[{"name":"m-1","addedAt":"2026-11-06T00:00:00Z"}]"#.utf8).write(to: dir.queue)
+
+    let store = try MachineStore(dir)
+    let machine = try #require(store.machine("m-1"))
+    #expect(machine.steps == [])
+    #expect(machine.bootFilesSent == [])
+    #expect(derivedStatus(machine) == .installing)
+    #expect(store.queue.count == 1)
+    #expect(store.queue[0].osName == nil)
+}
