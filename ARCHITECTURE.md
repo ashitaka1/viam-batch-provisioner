@@ -84,9 +84,9 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 
 All under `http-server/machines/` unless noted. Every file the root watcher creates is chowned to the owner of that directory.
 
-- **`queue.json`** — array of entries, written only by `queue_store.py` under an flock on `queue.lock` with temp-file-and-rename. `{"name", "assigned"}`; full mode adds `slot_id` (`slot-<name>`); PXE assignment adds `mac`; USB flashing adds `flashed_via`. A USB machine's failure markers live on its entry. Every lookup by name ignores case, since Viam treats such names as one machine (decision 41).
+- **`queue.json`** — array of entries, written only by `queue_store.py` under an flock on `queue.lock` with temp-file-and-rename. `{"name", "assigned"}`; full mode adds `slot_id` (`slot-<name>`); PXE assignment adds `mac`; USB flashing adds `flashed_via`. A USB machine's failure markers and `done` warning live on its entry. Every lookup by name ignores case, since Viam treats such names as one machine (decision 41).
 - **`slot-<name>/viam.json`** — full-mode credentials staged at provision time, before a MAC is known.
-- **`<mac>/machine-info.json`** — one PXE machine: `name`, `mac`, `assigned_at`, `attempt`, `progress_at`, `completed_at`, `failed_at`/`failure_reason`/`failure_source` (`installer`, `timeout` or `reboot`), `armed`. Every change to an existing file goes through `watcher.update_info` (flock on `info.lock`).
+- **`<mac>/machine-info.json`** — one PXE machine: `name`, `mac`, `assigned_at`, `attempt`, `progress_at`, `completed_at`, `failed_at`/`failure_reason`/`failure_source` (`installer`, `timeout` or `reboot`), `armed`, `warning` (from the `done` report; a new attempt clears it). Every change to an existing file goes through `watcher.update_info` (flock on `info.lock`).
 - **`by-name/<name>/`** — credentials for USB machines, which fetch by name.
 - **`netboot/grub/provisioned/<MAC>.cfg`** — the guard. Its presence makes GRUB exit to disk instead of installing.
 - **`logs/events.jsonl`** — the event journal. Ids derive from the last line, read under the file's flock.

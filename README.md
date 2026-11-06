@@ -247,6 +247,13 @@ The environment holds stable settings (credentials, WiFi, SSH key, timezone). Pe
 
 For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set `PXE_PROXY_SUBNET` (CIDR, e.g. `10.1.0.0/20`) in `site.env` when the provisioning network differs from that interface's own subnet.
 
+### Robot network
+
+Each x86 machine gets a static address on its robot-network port: `192.168.20.1/24` on the first `enp*` port other than the one cabled at install. Two settings in `site.env`, also asked by `just setup-wizard` and kept per environment in the app, change that:
+
+- `ROBOT_NET_ADDRESS`: the address with its prefix, or `none` for no robot network. Only private addresses (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) are accepted; `build-config.sh` refuses anything else.
+- `ROBOT_NET_PORT`: the interface that carries it, such as `enp3s0`. [`docs/hardware.md`](docs/hardware.md) lists each model's. The named port gets the address and every other wired port DHCP, so the installed machine comes online on whichever of them is cabled. A machine without that port fails its install before partitioning with `No port <port>`. A machine installed through the named port finishes, offline: its `done` report carries the warning `Cabled on the robot-network port <port>: move the cable to another port.`, which the queue entry and the app show. Moving the cable brings it online without a reboot.
+
 Set `API_PORT` in `site.env` to move the provisioner API off 8235. Set `INSTALL_TIMEOUT_MINUTES` to change how long an install may go without any sign of life before it is marked failed (default 45, `0` turns it off).
 
 ## Commands
@@ -286,6 +293,7 @@ Configurable via `config/site.env`:
 - SSH authorized key
 - WiFi SSID + password (optional)
 - Timezone (default: `America/New_York`)
+- Robot network address and port (see [Robot network](#robot-network))
 - Console font: Terminus 16x32 for readability
 
 Installed automatically:
