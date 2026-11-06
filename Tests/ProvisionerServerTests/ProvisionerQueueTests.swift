@@ -7,9 +7,9 @@ typealias Schemas = Components.Schemas
 
 let t0 = Date(timeIntervalSince1970: 1_790_000_000)
 
-func makeProvisioner(_ root: URL? = nil, now: @escaping @Sendable () -> Date = { t0 }) throws -> (Provisioner, DataDirectory) {
+func makeProvisioner(_ root: URL? = nil, bindings: any MachineBindings = NoBindings(), now: @escaping @Sendable () -> Date = { t0 }) throws -> (Provisioner, DataDirectory) {
     let dir = DataDirectory(try root ?? temporaryDirectory())
-    return (try Provisioner(dataDirectory: dir, now: now, logger: testLogger), dir)
+    return (try Provisioner(dataDirectory: dir, bindings: bindings, now: now, logger: testLogger), dir)
 }
 
 func request(_ name: String, credentials: Schemas.ViamCredentials? = nil,

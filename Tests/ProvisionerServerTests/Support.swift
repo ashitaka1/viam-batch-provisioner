@@ -122,3 +122,8 @@ private struct CapturingHandler: LogHandler {
         if level >= .error { log.append(message.description) }
     }
 }
+
+/// Binds `aa:bb:cc:00:00:01` to `m-1`.
+struct FixedBindings: MachineBindings {
+    func name(boundTo mac: String) async -> String? { mac == "aa:bb:cc:00:00:01" ? "m-1" : nil }
+}

@@ -18,11 +18,13 @@ actor Provisioner {
     let logger: Logger
     let store: MachineStore?
     private let loadError: String?
+    let bindings: any MachineBindings
     let journal: EventJournal
     private var fanout = EventFanout()
 
-    init(dataDirectory: DataDirectory, now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {
+    init(dataDirectory: DataDirectory, bindings: any MachineBindings = NoBindings(), now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {
         self.now = now
+        self.bindings = bindings
         self.logger = logger
         do {
             store = try MachineStore(dataDirectory)
