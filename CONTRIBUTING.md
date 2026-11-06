@@ -43,7 +43,7 @@ Runs `swift test` over the root package (Swift 6, macOS 14+). The ProvisionerPXE
 
 ### ProvisionerHelper
 
-`just app` also puts the `ProvisionerHelper` launch daemon inside the bundle and builds `build/provisioner-helperctl`. `just helper register` registers the daemon from the app's process and opens System Settings → General → Login Items & Extensions, where it must be allowed; `just helper status` and `just helper unregister` do the rest. The daemon runs as root and serves only when asked:
+`just app` also puts the `ProvisionerHelper` launch daemon inside the bundle and builds `build/provisioner-helperctl`. `just helper register` registers the daemon from the app's process and opens System Settings → General → Login Items & Extensions on the server Mac's own display, where it must be allowed under Allow in the Background. An ad-hoc build can be allowed and runs. `just helper status` and `just helper unregister` do the rest. The daemon runs as root and serves only when asked:
 
 ```bash
 build/provisioner-helperctl push netboot   # copy netboot/ into /Library/Application Support/Viam Provisioner/TFTP
@@ -101,4 +101,4 @@ Broadcast a forged PXE DHCPDISCOVER from an unprivileged UDP socket bound to the
 
 A change to the boot chain, autoinstall config, watcher or install reports is finished when a real machine has installed through it. The testbed is a Minisforum UM890 Pro on Ubuntu 24.04.
 
-The helper's run: with `netboot/` filled by `just setup`, the HTTP server up (`just up`) and dnsmasq stopped, register and allow the helper, `push netboot`, then `serve <interface>` and PXE-boot the machine. It passes when `serve` prints an `offered` line for the machine's MAC, `sent` lines for `grubx64.efi`, the GRUB config, kernel and initrd carrying that MAC, and the machine installs.
+The helper's run: with `netboot/` filled by `just setup`, the HTTP server up (`just up`) and dnsmasq stopped, register and allow the helper, `push netboot`, then `serve <interface>` and PXE-boot the machine. It passes when `serve` prints an `offered` line for the machine's MAC, `sent` lines for `grubx64.efi`, the GRUB config, kernel and initrd carrying that MAC, and the machine boots into the installer. The helper's part ends at the initrd; the installer talks only to nginx.
