@@ -9,9 +9,11 @@ struct MainWindow: View {
     let environments: EnvironmentsModel
     let servers: ServerSelection
     let history: BatchHistory
+    let fleet: @Sendable (String) -> any ViamFleet
 
     @SceneStorage("sidebarSelection") private var selectedItem: String?
     @State private var queue: QueueModel?
+    @State private var online: OnlineMonitor?
     @State private var provisioning: ProvisionerKit.Environment?
     @State private var renamingID: UUID?
     @State private var deleting: ProvisionerKit.Environment?
@@ -73,11 +75,16 @@ struct MainWindow: View {
         .task(id: servers.selected) {
             guard let server = servers.selected else {
                 queue = nil
+                online = nil
                 return
             }
             let model = QueueModel(serverName: server.name, source: ProvisionerClient(baseURL: server.baseURL))
+            let monitor = OnlineMonitor(serverURL: server.baseURL, history: history, fleet: fleet)
             queue = model
+            online = monitor
+            async let watching: Void = monitor.run(model)
             await model.run()
+            await watching
         }
         .sheet(item: $provisioning) { environment in
             ProvisionSheet(environment: environment, environments: environments, servers: servers, history: history,
@@ -117,7 +124,7 @@ struct MainWindow: View {
 
     @ViewBuilder private var detail: some View {
         if sidebarSelection.wrappedValue == .queue {
-            QueueView(servers: servers, queue: queue)
+            QueueView(servers: servers, queue: queue, onlineAt: online?.onlineAt ?? [:])
         } else if sidebarSelection.wrappedValue == .history {
             HistoryView(history: history, queue: queue)
         } else if let environment = selected {

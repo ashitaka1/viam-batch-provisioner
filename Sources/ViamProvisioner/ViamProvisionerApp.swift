@@ -10,6 +10,7 @@ struct ViamProvisionerApp: App {
     @State private var environments: EnvironmentsModel
     @State private var servers = ServerSelection()
     @State private var history = BatchHistory()
+    private let fleet: @Sendable (String) -> any ViamFleet
 
     init() {
         ImportEnvironmentCommand.runIfRequested()
@@ -18,6 +19,8 @@ struct ViamProvisionerApp: App {
         let tokens = session.tokens
         let baseURL = session.baseURL
         let organizations = OrganizationsModel(lister: ViamOrganizationLister(tokens: tokens, baseURL: baseURL))
+        let fleet: @Sendable (String) -> any ViamFleet = { ViamOrgFleet(orgID: $0, tokens: tokens, baseURL: baseURL) }
+        self.fleet = fleet
         _session = State(initialValue: session)
         _organizations = State(initialValue: organizations)
         _environments = State(initialValue: EnvironmentsModel(
@@ -29,13 +32,13 @@ struct ViamProvisionerApp: App {
                 case .cliMissing, .signedOut, .signingIn, .failed: .signedOut
                 }
             },
-            fleet: { ViamOrgFleet(orgID: $0, tokens: tokens, baseURL: baseURL) }))
+            fleet: fleet))
     }
 
     var body: some Scene {
         Window("Viam Provisioner", id: "main") {
             MainWindow(session: session, organizations: organizations, environments: environments,
-                       servers: servers, history: history)
+                       servers: servers, history: history, fleet: fleet)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
                     environments.load()

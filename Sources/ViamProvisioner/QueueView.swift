@@ -6,6 +6,7 @@ import SwiftUI
 struct QueueView: View {
     let servers: ServerSelection
     let queue: QueueModel?
+    let onlineAt: [String: Date]
 
     @State private var selection: String?
     @State private var showingDetail = false
@@ -36,19 +37,20 @@ struct QueueView: View {
                     queue.connection == .live ? "The Queue Is Empty" : "Connecting…", systemImage: "tray",
                     description: Text(queue.connection == .live ? "Provision a batch from an environment." : queue.serverName))
             } else {
-                QueueTable(entries: queue.entries, selection: $selection, remove: { removing = $0 })
+                QueueTable(entries: queue.entries, onlineAt: onlineAt, selection: $selection, remove: { removing = $0 })
             }
         }
         .onChange(of: selection) { _, name in if name != nil { showingDetail = true } }
         .inspector(isPresented: $showingDetail) {
             Group {
                 if let name = selection, let entry = queue.entry(named: name) {
-                    MachineDetail(entry: entry, timeline: queue.timeline(for: name))
+                    MachineDetail(entry: entry, progress: ProvisioningProgress(entry: entry, onlineAt: onlineAt[name]),
+                                  timeline: queue.timeline(for: name))
                 } else {
                     ContentUnavailableView("No Machine Selected", systemImage: "desktopcomputer")
                 }
             }
-            .inspectorColumnWidth(min: 240, ideal: 300)
+            .inspectorColumnWidth(min: 240, ideal: 340)
         }
         .toolbar {
             ToolbarItem {
@@ -114,20 +116,23 @@ struct CountsBar: View {
 
 struct QueueTable: View {
     let entries: [QueueEntry]
+    let onlineAt: [String: Date]
     @Binding var selection: String?
     let remove: (String) -> Void
 
     var body: some View {
-        Table(entries, selection: $selection) {
-            TableColumn("Name", value: \.name)
-            TableColumn("Status") { StatusBadge(status: $0.status) }
+        Table(entries.map { Row(entry: $0, progress: ProvisioningProgress(entry: $0, onlineAt: onlineAt[$0.name])) },
+              selection: $selection) {
+            TableColumn("Name", value: \.entry.name)
+            TableColumn("Status") { StatusBadge(status: $0.entry.status) }
                 .width(min: 90, ideal: 100)
-            TableColumn("Stage") { Text($0.stage ?? "") }
-            TableColumn("MAC") { Text($0.mac ?? ($0.flashedViaUSB ? "USB" : "")).monospaced() }
-            TableColumn("Updated") { entry in
-                if let date = entry.lastChange { Text(date, format: .dateTime.month().day().hour().minute()) }
+            TableColumn("Step") { Text($0.step).help($0.step) }
+                .width(min: 120, ideal: 260)
+            TableColumn("MAC") { Text($0.entry.mac ?? ($0.entry.flashedViaUSB ? "USB" : "")).monospaced() }
+            TableColumn("Updated") { row in
+                if let date = row.entry.lastChange { Text(date, format: .dateTime.month().day().hour().minute()) }
             }
-            TableColumn("Failure") { Text($0.failureReason ?? "").foregroundStyle(.red).help($0.failureReason ?? "") }
+            TableColumn("Failure") { Text($0.failure).foregroundStyle(.red).help($0.failure) }
         }
         .contextMenu(forSelectionType: String.self) { names in
             if let name = names.first {
@@ -142,8 +147,36 @@ struct QueueTable: View {
     }
 }
 
+extension QueueTable {
+    struct Row: Identifiable {
+        let entry: QueueEntry
+        let progress: ProvisioningProgress?
+
+        var id: String { entry.name }
+
+        /// The current step, then its sub-step or download percentage.
+        var step: String {
+            guard let progress else { return entry.stage ?? "" }
+            let current = progress.current
+            let detail: String? = if current.kind == .downloading {
+                current.fraction.map { "\(Int(($0 * 100).rounded()))%" }
+            } else {
+                current.subSteps.first { $0.state == .current || $0.state == .failed }?.title
+            }
+            return [current.title, detail].compactMap { $0 }.joined(separator: " · ")
+        }
+
+        var failure: String {
+            guard let reason = entry.failureReason else { return "" }
+            guard let failed = progress?.rows.first(where: { $0.state == .failed }) else { return reason }
+            return "At \(failed.title): \(reason)"
+        }
+    }
+}
+
 struct MachineDetail: View {
     let entry: QueueEntry
+    let progress: ProvisioningProgress?
     let timeline: [MachineEvent]
 
     var body: some View {
@@ -152,8 +185,29 @@ struct MachineDetail: View {
                 LabeledContent("Status") { StatusBadge(status: entry.status) }
                 LabeledContent("Hostname", value: entry.name)
                 LabeledContent("MAC", value: entry.mac ?? (entry.flashedViaUSB ? "Flashed to USB" : "Not yet booted"))
-                if let stage = entry.stage { LabeledContent("Install stage", value: stage) }
+                if progress == nil, let stage = entry.stage { LabeledContent("Install stage", value: stage) }
                 LabeledContent("Viam credentials", value: entry.hasCredentials ? "Staged" : "None")
+            }
+            if let progress {
+                Section("Steps") {
+                    ForEach(Array(progress.rows.enumerated()), id: \.offset) { _, row in
+                        StepLine(title: row.title, state: row.state, at: row.at)
+                        ForEach(row.subSteps, id: \.title) { sub in
+                            StepLine(title: sub.title, state: sub.state, at: nil).padding(.leading, 20)
+                        }
+                    }
+                }
+                if !progress.earlierAttempts.isEmpty {
+                    Section("Earlier attempts") {
+                        ForEach(Array(progress.earlierAttempts.enumerated()), id: \.offset) { index, rows in
+                            DisclosureGroup("Attempt \(index + 1)") {
+                                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                                    StepLine(title: row.title, state: row.state, at: row.at)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             Section("Times") {
                 time("Assigned", entry.assignedAt)
@@ -184,6 +238,34 @@ struct MachineDetail: View {
     @ViewBuilder private func time(_ label: String, _ date: Date?) -> some View {
         if let date {
             LabeledContent(label) { Text(date, format: .dateTime.month().day().hour().minute().second()) }
+        }
+    }
+}
+
+/// One step or sub-step in the machine detail: its state's symbol, title and time.
+struct StepLine: View {
+    let title: String
+    let state: ProvisioningProgress.State
+    let at: Date?
+
+    var body: some View {
+        LabeledContent {
+            if let at { Text(at, format: .dateTime.hour().minute().second()).monospacedDigit() }
+        } label: {
+            Label {
+                Text(title).foregroundStyle(state == .pending ? .secondary : .primary)
+            } icon: {
+                symbol
+            }
+        }
+    }
+
+    @ViewBuilder private var symbol: some View {
+        switch state {
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .current: Image(systemName: "circle.dotted.circle").foregroundStyle(.blue)
+        case .failed: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .pending: Image(systemName: "circle").foregroundStyle(.secondary)
         }
     }
 }
