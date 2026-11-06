@@ -130,7 +130,13 @@ struct QueueTable: View {
             TableColumn("Updated") { row in
                 if let date = row.entry.lastChange { Text(date, format: .dateTime.month().day().hour().minute()) }
             }
-            TableColumn("Failure") { Text($0.entry.failureReason ?? "").foregroundStyle(.red).help($0.entry.failureReason ?? "") }
+            TableColumn("Problem") { row in
+                if let reason = row.entry.failureReason {
+                    Text(reason).foregroundStyle(.red).help(reason)
+                } else if let warning = row.entry.warning {
+                    Text(warning).foregroundStyle(.orange).help(warning)
+                }
+            }
         }
         .contextMenu(forSelectionType: String.self) { names in
             if let name = names.first {
@@ -200,6 +206,13 @@ struct MachineDetail: View {
             if let reason = entry.failureReason {
                 Section("Failure") {
                     Text(reason).textSelection(.enabled)
+                }
+            }
+            if let warning = entry.warning {
+                Section("Warning") {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
                 }
             }
             Section("Events") {
