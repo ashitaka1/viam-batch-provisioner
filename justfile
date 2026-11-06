@@ -117,6 +117,10 @@ test:
 test-swift:
     swift test
 
+# Build ProvisionerPXE and ProvisionerServer for Linux in a Swift container (Docker; decision 34)
+build-linux:
+    docker run --rm -v "{{justfile_directory()}}":/src -v viam-provisioner-linux-build:/build -w /src swift:6.4 sh -c 'swift build --target ProvisionerPXE --scratch-path /build && swift build --target ProvisionerServer --scratch-path /build'
+
 # Build, register and open the macOS app (build/Viam Provisioner.app)
 app:
     ./scripts/bundle-app.sh

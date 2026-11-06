@@ -31,6 +31,12 @@ just test-swift
 
 Runs `swift test` over the root package (Swift 6, macOS 14+). The ProvisionerPXE tests bind unprivileged loopback ports.
 
+```bash
+just build-linux
+```
+
+Builds ProvisionerPXE and ProvisionerServer in the `swift:6.4` Linux container (decision 34), caching the build in the `viam-provisioner-linux-build` Docker volume. It needs Docker running (`colima start`). Only the build is checked; the tests use macOS interfaces.
+
 `swift-openapi-generator` generates `ProvisionerAPI`'s types, `ProvisionerKit`'s client and `ProvisionerServer`'s server stubs from `openapi/provisioner.yaml` at build time, through the `openapi.yaml` symlinks in each target's directory. The generator drops the properties of a schema whose `oneOf` branches only list required fields, so the contract states such rules in descriptions.
 
 `swift run provisioner-server --files <dir>` serves `<dir>` at `/` and the API under `/api/v1/` on one port, `--port` (8234 by default), bound to `--bind` (`0.0.0.0`). Its state lives in `--data-dir`, by default `~/Library/Application Support/Viam Provisioner/Server/`; it never touches the Python server's files, and it must lie outside `--files`. `--advertise-address <host:port>` is reported as `address` in `/api/v1/status`. Point `provisioner-probe check`, `watch` or `notify` at it to exercise it; SIGTERM or Ctrl-C ends open event streams and exits.

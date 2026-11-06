@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import NIOConcurrencyHelpers
 import NIOCore
@@ -106,7 +105,7 @@ public final class PXEServer: Sendable {
                 let handler = DHCPHandler(
                     listener: listener, responder: responder, offerDestination: offerDestination,
                     leases: leases, report: { events.yield(.offered($0)) })
-                bound.append(try await bindDHCP(port: port, interfaceIndex: interface.index, handler: handler))
+                bound.append(try await bindDHCP(port: port, interface: interface, handler: handler))
             }
             bound.append(try await DatagramBootstrap(group: group)
                 .channelInitializer { channel in
@@ -162,13 +161,14 @@ public final class PXEServer: Sendable {
 
     /// Binds 0.0.0.0 restricted to the interface: on macOS a socket bound to a unicast
     /// address never receives the 255.255.255.255 discovers PXE firmware sends.
-    private func bindDHCP(port: Int, interfaceIndex: UInt32, handler: DHCPHandler) async throws -> any Channel {
+    private func bindDHCP(port: Int, interface: NetworkInterface, handler: DHCPHandler) async throws -> any Channel {
         try await DatagramBootstrap(group: group)
             .channelOption(.socketOption(.so_reuseaddr), value: 1)
             .channelOption(.socketOption(.so_broadcast), value: 1)
-            .channelOption(ChannelOptions.socket(SocketOptionLevel(IPPROTO_IP), IP_BOUND_IF), value: SocketOptionValue(interfaceIndex))
             .channelInitializer { channel in
-                channel.eventLoop.makeCompletedFuture { try channel.pipeline.syncOperations.addHandler(handler) }
+                InterfaceBinding.restrict(channel, to: interface).flatMapThrowing {
+                    try channel.pipeline.syncOperations.addHandler(handler)
+                }
             }
             .bind(host: "0.0.0.0", port: port)
             .get()

@@ -1,4 +1,9 @@
+import Foundation
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 public enum PXEServerError: Error, Equatable {
     case interfaceNotFound(String)
@@ -9,7 +14,7 @@ public enum PXEServerError: Error, Equatable {
     case stopped
 }
 
-/// The serving interface: its index for `IP_BOUND_IF` and its first IPv4 address.
+/// The serving interface: its name and index for binding, and its first IPv4 address.
 struct NetworkInterface: Sendable {
     let name: String
     let index: UInt32
@@ -57,16 +62,26 @@ struct NetworkInterface: Sendable {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let first = list else { return [] }
         defer { freeifaddrs(list) }
-        return sequence(first: first, next: { $0.pointee.ifa_next }).compactMap { entry in
+        var addresses: [Address] = sequence(first: first, next: { $0.pointee.ifa_next }).compactMap { entry in
             guard let address = entry.pointee.ifa_addr, String(cString: entry.pointee.ifa_name) == name else { return nil }
             switch Int32(address.pointee.sa_family) {
             case AF_INET:
                 return .ipv4(address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) })
+            #if canImport(Darwin)
             case AF_LINK:
                 return entry.pointee.ifa_data.map { .link(mtu: Int($0.assumingMemoryBound(to: if_data.self).pointee.ifi_mtu)) }
+            #endif
             default:
                 return nil
             }
         }
+        #if !canImport(Darwin)
+        // Linux lists no link-layer MTU through getifaddrs.
+        if let text = try? String(contentsOfFile: "/sys/class/net/\(name)/mtu", encoding: .utf8),
+           let mtu = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            addresses.append(.link(mtu: mtu))
+        }
+        #endif
+        return addresses
     }
 }

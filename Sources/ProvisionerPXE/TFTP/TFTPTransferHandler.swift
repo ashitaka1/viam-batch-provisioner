@@ -1,4 +1,8 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import NIOCore
 
 /// Runs one `TFTPTransfer` on its own socket, reading each block from the file as it is sent.

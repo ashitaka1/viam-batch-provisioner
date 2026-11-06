@@ -1,4 +1,8 @@
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
@@ -119,12 +123,9 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
     }
 
     /// Builds the report when the transfer completes, so a DHCP request seen meanwhile still names the MAC.
-    private func delivery(of filename: String, bytes: Int, to client: SocketAddress) -> () -> TFTPDelivery {
+    private func delivery(of filename: String, bytes: Int, to client: SocketAddress) -> @Sendable () -> TFTPDelivery {
         let name = String(filename.drop { $0 == "/" })
-        var address: UInt32?
-        if case let .v4(v4) = client {
-            address = UInt32(bigEndian: v4.address.sin_addr.s_addr)
-        }
+        let address: UInt32? = if case let .v4(v4) = client { UInt32(bigEndian: v4.address.sin_addr.s_addr) } else { nil }
         let clientAddress = client.ipAddress ?? "\(client)"
         return { [leases] in
             TFTPDelivery(filename: name, clientAddress: clientAddress, mac: address.flatMap(leases.mac(at:)), bytes: bytes)
