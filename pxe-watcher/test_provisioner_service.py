@@ -518,6 +518,16 @@ class ReportInstallTest(ServiceLayoutTest):
             service.report_install({"kind": "progress", "stage": "done", "name": "u"})
             self.assertNotIn("warning", service.get_entry("u"))
 
+        with self.subTest("the next install's first report clears it"):
+            service.report_install({"kind": "progress", "stage": "done", "name": "u", "warning": WARNING})
+            service.report_install({"kind": "progress", "stage": "late-commands", "name": "u"})
+            self.assertNotIn("warning", service.get_entry("u"))
+
+        with self.subTest("flashing the stick again clears it"):
+            service.report_install({"kind": "progress", "stage": "done", "name": "u", "warning": WARNING})
+            queue_store.mark_assigned(self.queue_dir, "u", flashed_via="usb")
+            self.assertNotIn("warning", service.get_entry("u"))
+
         with self.subTest("just reset clears it"):
             service.report_install({"kind": "progress", "stage": "done", "name": "u", "warning": WARNING})
             queue_store.reset(self.queue_dir)
