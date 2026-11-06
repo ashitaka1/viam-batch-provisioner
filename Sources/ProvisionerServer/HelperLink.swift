@@ -15,11 +15,12 @@ extension PXEObservation {
 /// every event it sends. Returns when `client.events` finishes.
 func linkHelper(_ client: HelperClient, to provisioner: Provisioner, logger: Logger,
                 retry: Duration = .seconds(30)) async {
-    while true {
+    while !Task.isCancelled {
         do {
             _ = try await client.servingInterface()
             break
         } catch {
+            if case HelperError.connection("invalidated") = error { return }
             logger.warning("registering with the helper failed, retrying in \(retry): \(error)")
             do { try await Task.sleep(for: retry) } catch { return }
         }
@@ -27,5 +28,26 @@ func linkHelper(_ client: HelperClient, to provisioner: Provisioner, logger: Log
     for await event in client.events {
         if let observation = PXEObservation(event) { await provisioner.observe(observation) }
     }
+}
+
+/// Starts `linkHelper` when the configuration asks for it. The returned closure
+/// cancels the link, invalidates its client and waits for it to end.
+func startHelperLink(_ configuration: ServerConfiguration, provisioner: Provisioner,
+                     logger: Logger) -> @Sendable () async -> Void {
+    guard configuration.linksHelper else { return {} }
+    let client = HelperClient()
+    let link = Task { await linkHelper(client, to: provisioner, logger: logger) }
+    return {
+        link.cancel()
+        client.invalidate()
+        await link.value
+    }
+}
+#else
+import Logging
+
+func startHelperLink(_ configuration: ServerConfiguration, provisioner: Provisioner,
+                     logger: Logger) -> @Sendable () async -> Void {
+    {}
 }
 #endif

@@ -80,4 +80,33 @@ private func linkedSteps(refusals: Int) async throws -> [String] {
 @Test func linkRetriesUntilTheHelperAccepts() async throws {
     #expect(try await linkedSteps(refusals: 2) == ["found"])
 }
+/// Runs `linkHelper` against a helper that refuses every connection, ends it with `stop`,
+/// and reports whether it returned well inside the retry interval.
+private func linkEnds(after stop: (HelperClient, Task<Void, Never>) -> Void) async throws -> Bool {
+    let (provisioner, _) = try makeProvisioner(bindings: FixedBindings())
+    let helper = FakeHelper(event: .offered(mac: mac, architecture: 7, uuid: nil), refusals: .max)
+    let listener = NSXPCListener.anonymous()
+    listener.delegate = helper
+    listener.resume()
+    defer { listener.invalidate() }
+    let endpoint = listener.endpoint
+    let client = HelperClient { NSXPCConnection(listenerEndpoint: endpoint) }
+    let link = Task { await linkHelper(client, to: provisioner, logger: testLogger, retry: .seconds(30)) }
+    try await Task.sleep(for: .milliseconds(200))
+    let started = ContinuousClock.now
+    stop(client, link)
+    await link.value
+    return ContinuousClock.now - started < .seconds(5)
+}
+
+@Test func cancellingTheLinkEndsItWhileNoHelperAnswers() async throws {
+    #expect(try await linkEnds { _, link in link.cancel() })
+}
+
+@Test func shuttingDownEndsTheLinkWhileNoHelperAnswers() async throws {
+    #expect(try await linkEnds { client, link in
+        link.cancel()
+        client.invalidate()
+    })
+}
 #endif
