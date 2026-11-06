@@ -29,6 +29,17 @@ autoinstall:
   packages:
 ${PACKAGES}
 
+  # A named robot-network port the machine lacks fails the install here, before
+  # partitioning. error-commands sends the reason from /tmp/viam-install-failure.
+  early-commands:
+    - |
+      PORT="${ROBOT_NET_PORT}"
+      if [ -z "$PORT" ] || [ "${ROBOT_NET_ADDRESS}" = none ] || [ -e "/sys/class/net/$PORT" ]; then exit 0; fi
+      echo "No port $PORT" > /tmp/viam-install-failure
+      curl -sf --max-time 5 http://${PXE_SERVER}/scripts/install-report.sh -o /tmp/install-report.sh || true
+      sh /tmp/install-report.sh ${PXE_SERVER} failed installer "No port $PORT" || true
+      exit 1
+
   late-commands:
     # Progress reports for the provisioner. None of them can fail the install:
     # the helper always exits 0 and each call ends in || true.
@@ -111,12 +122,23 @@ ${PACKAGES}
 
     # Discover ethernet NICs and write netplan config
     # WiFi is handled by a first-boot service (firmware not available in installer)
+    # ROBOT_NET_ADDRESS is an address with prefix, or none. With ROBOT_NET_PORT
+    # unset, the uplink gets DHCP and the first other enp* port the address.
+    # With it set, that port gets the address and every other wired port DHCP,
+    # so the machine comes online on whichever of them is cabled.
     - |
       LOG=/target/var/log/provisioning.log
+      NETPLAN=/target/etc/netplan/99-netplan.yaml
+      ROBOT_ADDRESS="${ROBOT_NET_ADDRESS}"
+      ROBOT_PORT="${ROBOT_NET_PORT}"
       UPLINK_IFACE=$(ip -o -4 addr show | awk '$2 != "lo" {print $2; exit}')
-      ROBOTNET_IFACE=$(ip -o link show | awk -v up="$UPLINK_IFACE" '$2 ~ /^enp/ && $2 !~ up {gsub(/:/, "", $2); print $2; exit}')
-      echo "NIC discovery: uplink=$UPLINK_IFACE robotnet=$ROBOTNET_IFACE" >> $LOG
-      cat > /target/etc/netplan/99-netplan.yaml <<NETPLAN
+      if [ "$ROBOT_ADDRESS" = none ] || [ -z "$ROBOT_PORT" ]; then
+        ROBOTNET_IFACE=""
+        if [ "$ROBOT_ADDRESS" != none ]; then
+          ROBOTNET_IFACE=$(ip -o link show | awk -v up="$UPLINK_IFACE" '$2 ~ /^enp/ && $2 !~ up {gsub(/:/, "", $2); print $2; exit}')
+        fi
+        echo "NIC discovery: uplink=$UPLINK_IFACE robotnet=$ROBOTNET_IFACE" >> $LOG
+        cat > $NETPLAN <<NETPLAN
       network:
         version: 2
         ethernets:
@@ -124,14 +146,29 @@ ${PACKAGES}
             dhcp4: true
             dhcp6: true
       NETPLAN
-      if [ -n "$ROBOTNET_IFACE" ]; then
-        cat >> /target/etc/netplan/99-netplan.yaml <<NETPLAN
+        if [ -n "$ROBOTNET_IFACE" ]; then
+          cat >> $NETPLAN <<NETPLAN
           ${ROBOTNET_IFACE}:
             addresses:
-              - 192.168.20.1/24
+              - ${ROBOT_ADDRESS}
             dhcp4: false
             optional: true
       NETPLAN
+        fi
+      else
+        echo "NIC discovery: uplink=$UPLINK_IFACE robotnet=$ROBOT_PORT (named)" >> $LOG
+        printf 'network:\n  version: 2\n  ethernets:\n' > $NETPLAN
+        for IFACE in $(ip -o link show | awk -F': ' '$2 ~ /^(en|eth)/ {sub(/@.*/, "", $2); print $2}'); do
+          if [ "$IFACE" = "$ROBOT_PORT" ]; then
+            printf '    %s:\n      addresses:\n        - %s\n      dhcp4: false\n      optional: true\n' "$IFACE" "$ROBOT_ADDRESS" >> $NETPLAN
+          else
+            printf '    %s:\n      dhcp4: true\n      dhcp6: true\n      optional: true\n' "$IFACE" >> $NETPLAN
+          fi
+        done
+        if [ "$UPLINK_IFACE" = "$ROBOT_PORT" ]; then
+          echo "Cabled on the robot-network port $ROBOT_PORT: move the cable to another port." > /tmp/viam-install-warning
+          echo "WARNING: installed through the robot-network port $ROBOT_PORT" >> $LOG
+        fi
       fi
 
     # WiFi setup as a first-boot service (Intel WiFi firmware isn't in the installer)
@@ -292,8 +329,9 @@ ${PACKAGES}
     # Last, so a machine that reached here is never timed out as silent.
     - sh /tmp/install-report.sh ${PXE_SERVER} progress done || true
 
-  # Autoinstall runs these when the install fails. The reason is a fixed phrase plus, when the
-  # installer left a crash report, its exception class. Never log text: it can
+  # Autoinstall runs these when the install fails. The reason is the one an
+  # early-command left, or a fixed phrase plus, when the installer left a crash
+  # report, its exception class. Never log text: it can
   # echo commands that contain the WiFi password.
   error-commands:
     - |
@@ -301,4 +339,5 @@ ${PACKAGES}
       CLASS=$(sed -n 's/^Title:.* crashed with \([A-Za-z_.]*\).*/\1/p' /var/crash/*.crash 2>/dev/null | head -n 1)
       REASON="autoinstall failed"
       [ -n "$CLASS" ] && REASON="autoinstall failed: $CLASS"
+      [ -s /tmp/viam-install-failure ] && REASON=$(cat /tmp/viam-install-failure)
       sh /tmp/install-report.sh ${PXE_SERVER} failed auto "$REASON" || true
