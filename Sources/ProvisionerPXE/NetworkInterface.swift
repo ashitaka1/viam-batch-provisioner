@@ -20,29 +20,53 @@ struct NetworkInterface: Sendable {
     static func lookup(_ name: String) throws -> NetworkInterface {
         let index = if_nametoindex(name)
         guard index != 0 else { throw PXEServerError.interfaceNotFound(name) }
+        return try NetworkInterface(name: name, index: index, addresses: addresses(of: name))
+    }
 
-        var list: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&list) == 0, let first = list else { throw PXEServerError.interfaceHasNoIPv4(name) }
-        defer { freeifaddrs(list) }
+    /// An address `getifaddrs` lists for an interface.
+    enum Address: Equatable {
+        /// Host byte order.
+        case ipv4(UInt32)
+        case link(mtu: Int)
+    }
 
+    /// The first IPv4 address, and the MTU from the link entry, else 1500.
+    init(name: String, index: UInt32, addresses: [Address]) throws {
         var ipv4: UInt32?
         var mtu = 1500
-        for entry in sequence(first: first, next: { $0.pointee.ifa_next }) {
-            guard let address = entry.pointee.ifa_addr,
-                  String(cString: entry.pointee.ifa_name) == name
-            else { continue }
-            switch Int32(address.pointee.sa_family) {
-            case AF_INET where ipv4 == nil:
-                ipv4 = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
-            case AF_LINK:
-                if let data = entry.pointee.ifa_data {
-                    mtu = Int(data.assumingMemoryBound(to: if_data.self).pointee.ifi_mtu)
-                }
-            default:
-                continue
+        for address in addresses {
+            switch address {
+            case let .ipv4(value) where ipv4 == nil: ipv4 = value
+            case .ipv4: continue
+            case let .link(value): mtu = value
             }
         }
         guard let ipv4 else { throw PXEServerError.interfaceHasNoIPv4(name) }
-        return NetworkInterface(name: name, index: index, address: ipv4, mtu: mtu)
+        self.init(name: name, index: index, address: ipv4, mtu: mtu)
+    }
+
+    init(name: String, index: UInt32, address: UInt32, mtu: Int) {
+        self.name = name
+        self.index = index
+        self.address = address
+        self.mtu = mtu
+    }
+
+    /// Empty when `getifaddrs` fails.
+    private static func addresses(of name: String) -> [Address] {
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0, let first = list else { return [] }
+        defer { freeifaddrs(list) }
+        return sequence(first: first, next: { $0.pointee.ifa_next }).compactMap { entry in
+            guard let address = entry.pointee.ifa_addr, String(cString: entry.pointee.ifa_name) == name else { return nil }
+            switch Int32(address.pointee.sa_family) {
+            case AF_INET:
+                return .ipv4(address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) })
+            case AF_LINK:
+                return entry.pointee.ifa_data.map { .link(mtu: Int($0.assumingMemoryBound(to: if_data.self).pointee.ifi_mtu)) }
+            default:
+                return nil
+            }
+        }
     }
 }

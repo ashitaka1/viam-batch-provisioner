@@ -99,6 +99,15 @@ private func freePorts(_ count: Int) async throws -> [Int] {
     return ports
 }
 
+/// How many of this process's descriptors are open on `url`.
+private func descriptorsOpen(on url: URL) -> Int {
+    guard let target = realpath(url.path, nil) else { return 0 }
+    defer { free(target) }
+    let targetPath = String(cString: target)
+    var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+    return (0..<getdtablesize()).filter { fcntl($0, F_GETPATH, &path) == 0 && String(cString: path) == targetPath }.count
+}
+
 private func readRequest(_ filename: String, options: [TFTPOption] = []) -> ByteBuffer {
     TFTPPacket.readRequest(filename: filename, mode: "octet", options: options).encoded()
 }
@@ -339,6 +348,31 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
             }
             #expect(sends >= 2, "block 1 was never resent")
             #expect(sends < 50, "the server kept resending an unacknowledged block")
+        }
+    }
+
+    @Test func abandonedTransferClosesItsFile() async throws {
+        try await withHarness(tftpTimeout: .milliseconds(100)) { harness in
+            let file = harness.root.appendingPathComponent("grubx64.efi")
+            try await harness.client.send(readRequest("grubx64.efi"), to: harness.ports.tftp)
+            _ = try #require(await harness.client.receive())
+            #expect(descriptorsOpen(on: file) == 1, "the transfer holds no descriptor on the file")
+
+            let deadline = ContinuousClock.now + .seconds(3)
+            while descriptorsOpen(on: file) > 0, ContinuousClock.now < deadline {
+                _ = await harness.client.receive(timeout: .milliseconds(50))
+            }
+            #expect(descriptorsOpen(on: file) == 0, "the abandoned transfer kept its file open")
+        }
+    }
+
+    /// Block numbers are 16 bits; at blksize 8 a 512 KiB file passes block 65535.
+    @Test func fetchesAcrossBlockNumberWrap() async throws {
+        try await withHarness { harness in
+            let file = randomData(65_536 * 8 + 100)
+            try file.write(to: harness.root.appendingPathComponent("large"))
+            let data = try await harness.client.fetch("large", options: [TFTPOption(name: "blksize", value: "8")], port: harness.ports.tftp)
+            #expect(data == file, "got \(data.count) of \(file.count) bytes")
         }
     }
 
