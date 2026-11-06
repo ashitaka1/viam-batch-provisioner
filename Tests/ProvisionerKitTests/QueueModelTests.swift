@@ -213,7 +213,7 @@ struct QueueModelTests {
         #expect(h.model.connection == waiting)
     }
 
-    @Test func removeDropsTheEntryOnlyWhenTheServerRemovedIt() async throws {
+    @Test func removeKeepsTheEntryWhenTheServerRefuses() async throws {
         let h = Harness()
         await h.send(.snapshot([entry("m1", .queued), entry("m2", .installing)]))
 
