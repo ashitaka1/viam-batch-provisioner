@@ -80,9 +80,11 @@ final class TFTPListenerHandler: ChannelInboundHandler, Sendable {
             reply(.error(code: TFTPErrorCode.notDefined.rawValue, message: "Server busy"), to: client, context: context)
             return
         }
-        let descriptor = open(url.path, O_RDONLY)
+        // O_NONBLOCK and the S_IFREG check cover a file swapped for a FIFO after
+        // resolve: opening a FIFO blocks the event loop until a writer appears.
+        let descriptor = open(url.path, O_RDONLY | O_NONBLOCK)
         var status = stat()
-        guard descriptor >= 0, fstat(descriptor, &status) == 0 else {
+        guard descriptor >= 0, fstat(descriptor, &status) == 0, status.st_mode & S_IFMT == S_IFREG else {
             if descriptor >= 0 { close(descriptor) }
             release(client, id: id)
             reply(.error(code: TFTPErrorCode.accessViolation.rawValue, message: "Cannot read file"), to: client, context: context)

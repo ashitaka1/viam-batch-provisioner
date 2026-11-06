@@ -42,4 +42,11 @@ import Testing
     func rejectsNonFiles(filename: String) {
         #expect(root.resolve(filename) == nil, "served \(filename)")
     }
+
+    /// Opening a FIFO blocks until a writer appears, which would stall the event loop.
+    @Test func rejectsFIFO() throws {
+        let fifo = root.url.appendingPathComponent("pipe")
+        try #require(mkfifo(fifo.path, 0o644) == 0, "mkfifo failed: errno \(errno)")
+        #expect(root.resolve("pipe") == nil, "served a FIFO")
+    }
 }

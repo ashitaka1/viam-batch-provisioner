@@ -19,9 +19,8 @@ struct TFTPRoot: Sendable {
               components.starts(with: rootComponents)
         else { return nil }
 
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
-              !isDirectory.boolValue
+        guard let type = try? FileManager.default.attributesOfItem(atPath: candidate.path)[.type] as? FileAttributeType,
+              type == .typeRegular
         else { return nil }
         return candidate
     }
