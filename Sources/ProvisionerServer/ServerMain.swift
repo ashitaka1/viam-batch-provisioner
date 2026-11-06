@@ -15,7 +15,9 @@ public enum ServerMain {
             return 64
         }
         do {
-            let provisioner = try Provisioner(dataDirectory: DataDirectory(configuration.dataDirectory), logger: logger)
+            let bootImage = try configuration.bootImage.map { try BootImage(files: configuration.files, path: $0) }
+            let provisioner = try Provisioner(dataDirectory: DataDirectory(configuration.dataDirectory),
+                                              bootImage: bootImage, logger: logger)
             let app = try buildApplication(configuration, provisioner: provisioner, logger: logger)
             logger.info("serving \(configuration.files.path) on \(configuration.bind):\(configuration.port), data in \(configuration.dataDirectory.path)")
             let group = ServiceGroup(configuration: .init(services: [app], gracefulShutdownSignals: [.sigterm, .sigint],

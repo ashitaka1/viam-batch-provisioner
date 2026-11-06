@@ -10,9 +10,11 @@ struct ServerConfiguration: Sendable {
     var files: URL
     var dataDirectory: URL
     var advertiseAddress: String?
+    /// The PXE install image, relative to `files`.
+    var bootImage: String?
 
     static let usage = """
-        usage: provisioner-server --files <dir> [--port <n>] [--bind <address>] [--data-dir <dir>] [--advertise-address <host:port>]
+        usage: provisioner-server --files <dir> [--port <n>] [--bind <address>] [--data-dir <dir>] [--advertise-address <host:port>] [--boot-image <path under --files>]
         """
 
     static var defaultDataDirectory: URL {
@@ -30,7 +32,7 @@ struct ServerConfiguration: Sendable {
     static func parse(_ arguments: [String]) throws(ConfigurationError) -> ServerConfiguration {
         var values: [String: String] = [:]
         var rest = arguments[...]
-        let known: Set = ["--port", "--bind", "--files", "--data-dir", "--advertise-address"]
+        let known: Set = ["--port", "--bind", "--files", "--data-dir", "--advertise-address", "--boot-image"]
         while let flag = rest.popFirst() {
             guard known.contains(flag) else { throw ConfigurationError(description: "unknown option \(flag)") }
             guard let value = rest.popFirst() else { throw ConfigurationError(description: "\(flag) needs a value") }
@@ -49,9 +51,20 @@ struct ServerConfiguration: Sendable {
             bind: values["--bind"] ?? "0.0.0.0",
             files: URL(filePath: files),
             dataDirectory: values["--data-dir"].map { URL(filePath: $0) } ?? defaultDataDirectory,
-            advertiseAddress: values["--advertise-address"])
+            advertiseAddress: values["--advertise-address"],
+            bootImage: values["--boot-image"])
         if contains(configuration.files, configuration.dataDirectory) {
             throw ConfigurationError(description: "--data-dir must be outside --files, which is served to the network")
+        }
+        if let image = configuration.bootImage {
+            let url = configuration.files.appending(path: image)
+            guard !image.hasPrefix("/"), !image.split(separator: "/").contains("..") else {
+                throw ConfigurationError(description: "--boot-image must be a path under --files, got \(image)")
+            }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+                throw ConfigurationError(description: "--boot-image \(image) is not a file under --files")
+            }
         }
         return configuration
     }

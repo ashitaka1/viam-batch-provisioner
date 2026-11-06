@@ -77,3 +77,16 @@ func dataDirectoryBesideFilesIsAccepted(relative: String) throws {
 
     #expect(configuration.dataDirectory.path == root.appending(path: relative).path)
 }
+
+@Test func bootImageMustBeUnderFiles() throws {
+    let (root, files) = try scratchTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("iso".utf8).write(to: root.appending(path: "x.iso"))
+    try FileManager.default.createDirectory(at: files.appending(path: "ubuntu"), withIntermediateDirectories: true)
+    try Data("iso".utf8).write(to: files.appending(path: "ubuntu/x.iso"))
+    let base = ["--files", files.path, "--data-dir", root.appending(path: "data").path]
+
+    #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(base + ["--boot-image", "../x.iso"]) }
+    #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(base + ["--boot-image", "ubuntu/missing.iso"]) }
+    #expect(try ServerConfiguration.parse(base + ["--boot-image", "ubuntu/x.iso"]).bootImage == "ubuntu/x.iso")
+}

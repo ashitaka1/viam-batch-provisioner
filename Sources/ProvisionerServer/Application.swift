@@ -21,6 +21,7 @@ func buildApplication(_ configuration: ServerConfiguration, provisioner: Provisi
                              streams: StreamLimiter(limit: streamOptions.limit),
                              serverName: localHostName(), logger: logger)
     try handler.registerHandlers(on: router, serverURL: URL(string: "/")!)
+    addImageRoute(to: router, provisioner: provisioner)
     return Application(
         router: router,
         configuration: .init(address: .hostname(configuration.bind, port: configuration.port),

@@ -20,11 +20,16 @@ actor Provisioner {
     private let loadError: String?
     let bindings: any MachineBindings
     let journal: EventJournal
+    let bootImage: BootImage?
     private var fanout = EventFanout()
+    /// The last journaled progress of each download in flight, by queue key.
+    var downloads: [String: DownloadMark] = [:]
 
-    init(dataDirectory: DataDirectory, bindings: any MachineBindings = NoBindings(), now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {
+    init(dataDirectory: DataDirectory, bindings: any MachineBindings = NoBindings(), bootImage: BootImage? = nil,
+         now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {
         self.now = now
         self.bindings = bindings
+        self.bootImage = bootImage
         self.logger = logger
         do {
             store = try MachineStore(dataDirectory)
@@ -63,7 +68,7 @@ actor Provisioner {
                                         environment: try item.environment.map { try StoreCoding.encoder.encode($0) },
                                         key: key)
                     }
-                    added.append(QueueRecord(name: item.name, addedAt: now(),
+                    added.append(QueueRecord(name: item.name, addedAt: now(), osName: bootImage?.osName,
                                              provisionMode: item.environment?.provisionMode.rawValue,
                                              joinsTailscale: item.environment.map { $0.tailscaleAuthKey != nil }))
                     results.append(.init(name: item.name, result: .added))
