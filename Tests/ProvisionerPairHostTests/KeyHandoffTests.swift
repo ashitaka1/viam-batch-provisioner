@@ -42,6 +42,46 @@ private func handOff(_ host: PairingHost, _ cli: ViamCLI) -> Task<PairingEnd, Ne
     #expect(await end.value == PairingEnd(message: "Signed in to Acme.", succeeded: true))
 }
 
+@Test(.timeLimit(.minutes(1))) func cliFailureCancelsWithoutAKey() async throws {
+    let (host, _, key) = try await connectedApp()
+    let loggedOut = ViamCLI(run: { _, _ in (1, "", "Error: not logged in") })
+    let end = await handOff(host, loggedOut).value
+    #expect(end == PairingEnd(message: "Run 'viam login' first.", succeeded: false))
+    await #expect(throws: PairingHostError.cancelled, "the app is told the session ended") { try await key.value }
+}
+
+@Test(arguments: [
+    (ViamCLIError.notInstalled, "Install the viam CLI: https://docs.viam.com/cli/"),
+    (.notLoggedIn, "Run 'viam login' first."),
+    (.failed("Error: boom"), "The viam CLI failed: Error: boom"),
+    (.unparsableOrganizations, "Couldn't read the viam CLI's organization list. Update it with 'viam update'."),
+])
+func cliMessages(error: ViamCLIError, expected: String) {
+    #expect(pairingCLIMessage(error) == expected)
+}
+
+@Test(.timeLimit(.minutes(1))) func eventsEndingAfterReleaseIsATimeout() async throws {
+    let (host, _, key) = try await connectedApp()
+    let end = Task { await KeyHandoff(host: host, cli: cli(), orgID: "o1", orgName: "Acme", keyName: keyName).run { nil } }
+    _ = try await key.value
+    #expect(await end.value.message.hasPrefix("Timed out waiting for the app after creating key"))
+}
+
+@Test(.timeLimit(.minutes(1))) func connectedEventIsSkipped() async throws {
+    let (host, _, key) = try await connectedApp()
+    let events = Feed([.connected(code: "1234"), .result(.stored, message: nil)])
+    let end = Task { await KeyHandoff(host: host, cli: cli(), orgID: "o1", orgName: "Acme", keyName: keyName).run { await events.next() } }
+    _ = try await key.value
+    #expect(await end.value == PairingEnd(message: "Signed in to Acme.", succeeded: true))
+}
+
+/// Hands out scripted events, then nil.
+private actor Feed {
+    private var events: [PairingHost.Event]
+    init(_ events: [PairingHost.Event]) { self.events = events }
+    func next() -> PairingHost.Event? { events.isEmpty ? nil : events.removeFirst() }
+}
+
 @Test(.timeLimit(.minutes(1))) func unparsableKeyCancelsAndNamesTheKey() async throws {
     let (host, _, key) = try await connectedApp()
     let end = await handOff(host, cli(stdout: "Created.\n")).value
