@@ -42,7 +42,7 @@ ROBOT_NET_PORT="${ROBOT_NET_PORT:-}"
 valid_robot_net_address "$ROBOT_NET_ADDRESS" \
     || die "ROBOT_NET_ADDRESS '${ROBOT_NET_ADDRESS}' must be none or a private address with a prefix (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), like ${ROBOT_NET_DEFAULT_ADDRESS}"
 valid_robot_net_port "$ROBOT_NET_PORT" \
-    || die "ROBOT_NET_PORT '${ROBOT_NET_PORT}' is not an interface name (up to 15 letters, digits, '.', '_' and '-')"
+    || die "ROBOT_NET_PORT '${ROBOT_NET_PORT}' is not an interface name (up to 15 letters, digits, '.', '_' and '-', starting with a letter or digit)"
 
 # --- PXE server address ---
 

@@ -386,7 +386,7 @@ components:
             The interface that carries the robot network; every other wired
             port gets DHCP. Absent means the first enp* port other than the one
             cabled at install.
-          pattern: '^[A-Za-z0-9_.-]{1,15}$'
+          pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$'
 
     Wifi:
       type: object

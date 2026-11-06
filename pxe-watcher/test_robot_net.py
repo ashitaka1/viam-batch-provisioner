@@ -35,12 +35,12 @@ class RobotNetAddressTest(unittest.TestCase):
 
 class RobotNetPortTest(unittest.TestCase):
     def test_interface_names_and_blank_are_accepted(self):
-        for value in ("", "enp3s0", "eno1", "enx00e04c680001", "eth0.20", "br_lan-1"):
+        for value in ("", "enp3s0", "eno1", "enx00e04c680012", "eth0.20", "br_lan-1"):
             with self.subTest(repr(value)):
                 self.assertTrue(accepted("valid_robot_net_port", value))
 
     def test_names_linux_could_not_hold_or_that_carry_shell_are_refused(self):
-        for value in ("enp3s0x123456789", "en p3", "enp3s0;reboot", "$(id)", "enp3/0", "en\"p"):
+        for value in ("enx00e04c6800123", "en p3", "enp3s0;reboot", "$(id)", "enp3/0", "en\"p", ".", "..", "-enp3"):
             with self.subTest(repr(value)):
                 self.assertFalse(accepted("valid_robot_net_port", value))
 

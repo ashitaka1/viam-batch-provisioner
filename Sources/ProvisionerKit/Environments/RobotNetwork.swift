@@ -18,9 +18,10 @@ public enum RobotNetwork {
         return a == 10 || (a == 172 && (16...31).contains(b)) || (a == 192 && b == 168) ? nil : problem
     }
 
-    /// Why `port` can't name the robot-network port, or nil for a Linux interface name.
+    /// Why `port` can't name the robot-network port, or nil for a Linux interface
+    /// name starting with a letter or digit.
     public static func portProblem(_ port: String) -> String? {
-        port.wholeMatch(of: /[A-Za-z0-9_.\-]{1,15}/) == nil
-            ? "Port names are up to 15 letters, digits, ., _ and -, like enp3s0." : nil
+        port.wholeMatch(of: /[A-Za-z0-9][A-Za-z0-9_.\-]{0,14}/) == nil
+            ? "Port names are up to 15 letters, digits, ., _ and -, starting with a letter or digit, like enp3s0." : nil
     }
 }

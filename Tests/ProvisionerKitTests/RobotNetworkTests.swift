@@ -25,13 +25,20 @@ private func robotProblems(_ env: Environment) -> [EnvironmentProblem] {
 
     @Test(arguments: ["8.8.8.8/24", "172.15.0.1/16", "172.32.0.1/16", "192.169.0.1/24", "192.168.20.1",
                       "192.168.20.1/33", "192.168.256.1/24", "192.168.020.1/24", "", "none", " 10.0.0.1/8"])
-    func otherAddressesAreRefused(_ address: String) {
+    func otherAddressesAndTheWordNoneAreRefused(_ address: String) {
         var env = validEnvironment()
         env.robotNetAddress = address
         #expect(robotProblems(env).map(\.field) == [.robotNetAddress])
     }
 
-    @Test(arguments: ["enp3s0x123456789", "en p3", "enp3s0;reboot", "enp3/0"])
+    @Test(arguments: ["", "enp3s0", "enx00e04c680012", "eth0.20"])
+    func interfaceNamesAndABlankPortAreAccepted(_ port: String) {
+        var env = validEnvironment()
+        env.robotNetPort = port
+        #expect(robotProblems(env) == [])
+    }
+
+    @Test(arguments: ["enx00e04c6800123", "en p3", "enp3s0;reboot", "enp3/0", ".", "..", "-enp3"])
     func portsLinuxCouldNotNameAreRefused(_ port: String) {
         var env = validEnvironment()
         env.robotNetPort = port

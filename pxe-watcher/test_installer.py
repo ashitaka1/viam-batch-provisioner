@@ -266,19 +266,25 @@ case "$*" in
 esac
 """
 
-# Stands in for curl in the installer: a download (-o) gets the real report
-# script, and a report's JSON body is recorded and answered 200.
+# Stands in for curl in the installer: a download (-o) records its URL and gets
+# the real report script, and a report's JSON body is recorded and answered 200.
 STUB_INSTALLER_CURL = """#!/bin/sh
 out=""
 body=""
+url=""
 while [ $# -gt 0 ]; do
     case "$1" in
         -o) out="$2"; shift ;;
         -d) body="$2"; shift ;;
+        http://*) url="$1" ;;
     esac
     shift
 done
-if [ -n "$out" ] && [ "$out" != /dev/null ]; then cp "$REPORT_SCRIPT" "$out"; exit 0; fi
+if [ -n "$out" ] && [ "$out" != /dev/null ]; then
+    printf '%s\\n' "$url" >> "$STUB_DIR/downloads"
+    cp "$REPORT_SCRIPT" "$out"
+    exit 0
+fi
 printf '%s\\n' "$body" >> "$STUB_DIR/bodies"
 printf 200
 """
@@ -350,20 +356,26 @@ class RobotNetworkTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         config = yaml.safe_load((self.repo / "http-server" / "autoinstall" / "user-data").read_text())["autoinstall"]
         network = next(c for c in config["late-commands"] if "99-netplan.yaml" in c)
+        self.done = config["late-commands"][-1]
         return config["early-commands"][0], network, config["error-commands"][0]
 
-    def run_command(self, command, *, uplink="enp2s0", links=("enp2s0", "enp3s0", "enp4s0", "enp5s0")):
+    def run_command(self, command, *, uplink="enp2s0", links=("enp2s0", "enp3s0", "enp4s0", "enp5s0"), fails=False):
         for old in ("/target", "/tmp/", "/sys/class/net/", "/var/crash/"):
             command = command.replace(old, f"{self.root}{old}")
         for link in links:
-            (self.root / "sys" / "class" / "net" / link).mkdir(exist_ok=True)
+            (self.root / "sys" / "class" / "net" / link.split("@")[0]).mkdir(exist_ok=True)
         env = {
             "PATH": f"{self.bin}:{os.environ['PATH']}", "STUB_DIR": str(self.tmp), "STUB_UPLINK": uplink,
             "STUB_LINKS": " ".join(links), "REPORT_SCRIPT": str(SCRIPT), "REPORT_STATE_DIR": str(self.root / "tmp"),
             "REPORT_CMDLINE": str(self.tmp / "cmdline"), "REPORT_RETRY_DELAY": "0",
         }
         (self.tmp / "cmdline").write_text("ip=dhcp viam_hostname=lab-7 ---\n")
-        return subprocess.run(["/bin/sh", "-c", command], env=env, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(["/bin/sh", "-c", command], env=env, capture_output=True, text=True, timeout=30)
+        if fails:
+            self.assertNotEqual(result.returncode, 0, "the command was expected to fail")
+        else:
+            self.assertEqual(result.returncode, 0, result.stderr)
+        return result
 
     def netplan(self):
         return (self.root / "target" / "etc" / "netplan" / "99-netplan.yaml").read_text()
@@ -377,8 +389,8 @@ class RobotNetworkTest(unittest.TestCase):
 
     def test_without_either_setting_the_network_is_configured_as_before(self):
         early, network, _ = self.commands()
-        self.assertEqual(self.run_command(early).returncode, 0)
-        self.assertEqual(self.run_command(network).returncode, 0)
+        self.run_command(early)
+        self.run_command(network)
         self.assertEqual(self.netplan(), NETPLAN_BEFORE)
         self.assertFalse(self.warning_file().exists())
 
@@ -393,15 +405,15 @@ class RobotNetworkTest(unittest.TestCase):
 
     def test_none_leaves_only_the_uplink_and_ignores_a_named_port(self):
         early, network, _ = self.commands(ROBOT_NET_ADDRESS="none", ROBOT_NET_PORT="enp9s0")
-        self.assertEqual(self.run_command(early).returncode, 0)
+        self.run_command(early)
         self.run_command(network)
         self.assertEqual(yaml.safe_load(self.netplan())["network"]["ethernets"],
                          {"enp2s0": {"dhcp4": True, "dhcp6": True}})
 
     def test_a_named_port_takes_the_address_and_every_other_wired_port_takes_dhcp(self):
         early, network, _ = self.commands(ROBOT_NET_PORT="enp3s0")
-        self.assertEqual(self.run_command(early).returncode, 0)
-        self.run_command(network, uplink="enp2s0", links=("enp2s0", "enp3s0", "enp4s0", "wlp0s20f3", "eth0"))
+        self.run_command(early)
+        self.run_command(network, uplink="enp2s0", links=("enp2s0", "enp3s0", "enp4s0", "wlp0s20f3", "eth0", "eth0.20@eth0"))
         ethernets = yaml.safe_load(self.netplan())["network"]["ethernets"]
         dhcp = {"dhcp4": True, "dhcp6": True, "optional": True}
         self.assertEqual(ethernets, {
@@ -409,25 +421,26 @@ class RobotNetworkTest(unittest.TestCase):
             "enp3s0": {"addresses": ["192.168.20.1/24"], "dhcp4": False, "optional": True},
             "enp4s0": dhcp,
             "eth0": dhcp,
+            "eth0.20": dhcp,
         })
         self.assertFalse(self.warning_file().exists())
 
     def test_cabled_on_the_named_port_the_install_goes_on_and_done_carries_the_warning(self):
         _, network, _ = self.commands(ROBOT_NET_PORT="enp3s0")
-        result = self.run_command(network, uplink="enp3s0")
-        self.assertEqual(result.returncode, 0)
+        self.run_command(network, uplink="enp3s0")
         ethernets = yaml.safe_load(self.netplan())["network"]["ethernets"]
         self.assertEqual(ethernets["enp3s0"]["addresses"], ["192.168.20.1/24"])
         self.assertTrue(ethernets["enp2s0"]["dhcp4"])
         self.assertEqual(self.warning_file().read_text().strip(), ROBOT_WARNING)
 
-        self.run_command(f"sh {SCRIPT} 10.1.0.5:8234 progress done")
-        self.assertEqual(self.bodies()[-1]["warning"], ROBOT_WARNING)
+        shutil.copy(SCRIPT, self.root / "tmp" / "install-report.sh")  # the first late-command's download
+        self.run_command(self.done)
+        self.assertEqual(self.bodies()[-1], {"kind": "progress", "stage": "done", "name": "lab-7", "warning": ROBOT_WARNING})
 
     def test_a_named_port_the_machine_lacks_fails_the_install_early_with_its_reason(self):
         early, _, error = self.commands(ROBOT_NET_PORT="enp9s0")
-        result = self.run_command(early)
-        self.assertNotEqual(result.returncode, 0)
+        self.run_command(early, fails=True)
+        self.assertEqual((self.tmp / "downloads").read_text().split(), ["http://10.1.0.5:8234/scripts/install-report.sh"])
         self.assertEqual(self.bodies()[-1], {"kind": "failed", "stage": "installer", "name": "lab-7",
                                              "reason": "No port enp9s0"})
 
