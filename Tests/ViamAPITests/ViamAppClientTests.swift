@@ -83,6 +83,15 @@ func providerFailureReachesTheCallerWithoutARequest(failure: ViamCLIError, expec
     #expect(seen.withLock { $0.isEmpty }, "a request went out without a token")
 }
 
+/// An error from outside Viam and its CLI leaves the outcome unknown.
+@Test func unrecognizedProviderFailureIsUnreachable() async {
+    struct KeychainLocked: LocalizedError { var errorDescription: String? { "The keychain is locked." } }
+    let fleet = ViamOrgFleet(orgID: "o1", tokens: ScriptedTokens(failing: KeychainLocked()), baseURL: StubProtocol.register { _, _ in
+        ok(Viam_App_V1_ListLocationsResponse())
+    }, session: session)
+    await #expect(throws: FleetError.unreachable("The keychain is locked.")) { _ = try await fleet.locations() }
+}
+
 @Test func listsOrganizationsByName() async throws {
     let seen = Seen([])
     let client = client(ScriptedTokens(["t1"]), seen: seen) { _ in

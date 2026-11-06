@@ -26,6 +26,11 @@ private let charactersRule = "Viam machine names contain only letters, digits an
     #expect(try MachineNaming.names(prefix: "lab-pi", count: 2, existing: existing, queued: ["LAB-PI-3"]) == ["lab-pi-4", "lab-pi-5"])
 }
 
+@Test func ignoresNumbersTooLargeForInt() throws {
+    let existing = ["lab-pi-1", "lab-pi-99999999999999999999"]
+    #expect(try MachineNaming.names(prefix: "lab-pi", count: 2, existing: existing, queued: []) == ["lab-pi-2", "lab-pi-3"])
+}
+
 @Test func keepsPrefixCase() throws {
     #expect(try MachineNaming.names(prefix: "Lab-Pi", count: 1, existing: ["lab-pi-1"], queued: []) == ["Lab-Pi-2"])
 }
