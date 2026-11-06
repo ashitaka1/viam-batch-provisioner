@@ -290,8 +290,11 @@ def apply_progress(queue_dir: Path, *, name: str, mac: Optional[str], stage: str
                 for key in queue_store.FAILURE_KEYS:
                     entry.pop(key, None)
                 outcome["cleared"] = changed = True
-            if stage == "done" and entry.get("warning") != warning:
-                _set_warning(entry, warning)
+            # A USB machine's attempts are told apart only by their reports:
+            # any stage before done starts a new one.
+            new_warning = warning if stage == "done" else None
+            if entry.get("warning") != new_warning:
+                _set_warning(entry, new_warning)
                 changed = True
             return changed
 

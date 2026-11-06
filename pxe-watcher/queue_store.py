@@ -205,12 +205,14 @@ def assign_next(queue_dir: Path, mac: str) -> Optional[dict]:
 
 
 def mark_assigned(queue_dir: Path, name: str, **extra) -> bool:
-    """Mark the named entry assigned, setting any extra keys. False if absent."""
+    """Mark the named entry assigned, setting any extra keys and clearing the
+    last install's warning. False if absent."""
     with locked(queue_dir):
         entries = read(queue_dir)
         for e in entries:
             if e["name"] == name:
                 e["assigned"] = True
+                e.pop("warning", None)
                 e.update(extra)
                 write(queue_dir, entries)
                 return True
