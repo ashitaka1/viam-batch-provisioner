@@ -231,8 +231,19 @@ public final class EnvironmentsModel {
     /// Signed in with an API key whose grant leaves out the environment's org or
     /// location. Its stored org and location are kept.
     public func isUnreachableWithKey(_ environment: Environment) -> Bool {
-        guard keyLogin() else { return false }
-        return problems(for: environment).contains { $0.message == Self.notReachable }
+        guard keyLogin(), environment.provisionMode == .full, let orgID = environment.orgID, !orgID.isEmpty,
+              case .known(let orgs) = orgs() else { return false }
+        guard orgs.contains(where: { $0.id == orgID }) else { return true }
+        guard let locationID = environment.locationID, !locationID.isEmpty,
+              case .loaded(let locations) = locationStates[orgID] else { return false }
+        return !locations.contains { $0.id == locationID }
+    }
+
+    /// Forgets every org's locations, when the login changes: what one credential
+    /// reached says nothing about the next.
+    public func forgetLocations() {
+        locationStates = [:]
+        grantedOnly = []
     }
 
     /// Whether the org's loaded locations are those the credential is granted,
@@ -287,10 +298,10 @@ public final class EnvironmentsModel {
         let fleet = fleet(orgID)
         do {
             locationStates[orgID] = .loaded(try await fleet.locations())
-        } catch .rejected(let message) {
-            await readGrantedLocations(org: orgID, fleet: fleet, refusal: message)
         } catch {
             switch error {
+            // A user login refused is signed out or stale; only a key's refusal says something about its grant.
+            case .rejected(let message) where keyLogin(): await readGrantedLocations(org: orgID, fleet: fleet, refusal: message)
             case .rejected(let message): locationStates[orgID] = .rejected(message)
             case .failed(let message), .unreachable(let message): locationStates[orgID] = .unreachable(message)
             }

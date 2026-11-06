@@ -434,6 +434,34 @@ private final class ScriptedAuth: @unchecked Sendable {
     #expect(cli.calls.contains(["logout"]))
 }
 
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func add() { lock.withLock { count += 1 } }
+}
+
+/// Calls at sign-in arrive together; they share one Authenticate exchange.
+@Test func concurrentCallersShareOneExchange() async throws {
+    let gate = AsyncStream<Void>.makeStream()
+    let calls = Counter()
+    let source = APIKeyTokenSource(readKey: { ("kid", "kval") }, authenticate: { _, _ in
+        calls.add()
+        for await _ in gate.stream { break }
+        return "shared-token"
+    }, now: { now })
+    async let first = source.token(refresh: false)
+    async let second = source.token(refresh: false)
+    // Both callers are waiting once the one exchange has started.
+    while calls.value == 0 { await Task.yield() }
+    for _ in 0..<100 { await Task.yield() }
+    // Twice, so a second exchange, were one started, finishes too.
+    gate.continuation.yield()
+    gate.continuation.yield()
+    #expect(try await [first, second] == ["shared-token", "shared-token"])
+    #expect(calls.value == 1)
+}
+
 /// `viam login api-key` in Terminal replaces the user login while the app runs.
 @MainActor @Test func tokensFollowTheLoginTheCLIHoldsNow() async throws {
     let cli = ScriptedCLI()

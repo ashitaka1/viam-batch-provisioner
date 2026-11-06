@@ -21,7 +21,10 @@ struct ViamProvisionerApp: App {
         let environmentsRef = WeakRef<EnvironmentsModel>()
         let organizations = OrganizationsModel(
             lister: ViamOrganizationLister(tokens: tokens, baseURL: baseURL),
-            candidates: { (environmentsRef.value?.orgIDsInUse ?? []) + [CLIConfig.defaults().org].compactMap { $0 } })
+            candidates: {
+                guard case .signedIn(.apiKey) = session.state else { return [] }
+                return (environmentsRef.value?.orgIDsInUse ?? []) + [CLIConfig.defaults().org].compactMap { $0 }
+            })
         let environments = EnvironmentsModel(
             store: FileEnvironmentStore(),
             orgs: {
@@ -51,6 +54,7 @@ struct ViamProvisionerApp: App {
                     await session.load()
                 }
                 .onChange(of: session.state) { _, state in
+                    environments.forgetLocations()
                     if case .signedIn = state {
                         Task {
                             await organizations.load()
@@ -60,6 +64,14 @@ struct ViamProvisionerApp: App {
                         }
                     } else if state == .signedOut {
                         organizations.clear()
+                    }
+                }
+                .onChange(of: environments.orgIDsInUse) {
+                    // A key Viam won't list orgs for reaches those read one by one; an environment's new org is read too.
+                    guard case .signedIn(.apiKey) = session.state, organizations.state == .loaded, !organizations.listed else { return }
+                    Task {
+                        await organizations.load()
+                        await environments.loadLocationsInUse()
                     }
                 }
                 // The scheme stays registered for a later OAuth callback; pairing links are ignored.

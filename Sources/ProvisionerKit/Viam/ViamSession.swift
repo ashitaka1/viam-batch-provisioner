@@ -57,9 +57,11 @@ public final class ViamSession {
 
     /// Reads the CLI's login.
     public func load() async {
+        let login = CLIConfig.login(path: configPath)
         do {
+            // Sign Out runs `viam logout`, so a key login needs the CLI too.
             let cli = try await resolver.cli()
-            if case .apiKey(let id) = CLIConfig.login(path: configPath) {
+            if case .apiKey(let id) = login {
                 _ = try await tokenSource.token(refresh: true)
                 state = .signedIn(.apiKey(id: id))
                 return
@@ -68,7 +70,7 @@ public final class ViamSession {
             // The token was read, so a whoami failure says nothing about the login.
             state = .signedIn(.user(try? await cli.whoami()))
         } catch {
-            state = await state(for: error)
+            state = await state(for: error, login: login)
         }
     }
 
@@ -121,7 +123,7 @@ public final class ViamSession {
         if case .signedIn = state { state = .signedOut }
     }
 
-    private func state(for error: any Error) async -> State {
+    private func state(for error: any Error, login: CLIConfig.Login = .none) async -> State {
         if case .notInstalled? = error as? ViamCLIError { await resolver.forget() }
         return switch error as? ViamCLIError {
         case .notInstalled: .cliMissing
@@ -131,7 +133,7 @@ public final class ViamSession {
         default:
             if error is CancellationError { .signedOut }
             // Authenticating an API key failed without refusing it; the error may quote the request.
-            else if case .apiKey = CLIConfig.login(path: configPath) { .failed("Viam couldn't be reached to check the API key.") }
+            else if case .apiKey = login { .failed("Viam couldn't be reached to check the API key.") }
             else { .failed("The viam CLI failed: \(error)") }
         }
     }

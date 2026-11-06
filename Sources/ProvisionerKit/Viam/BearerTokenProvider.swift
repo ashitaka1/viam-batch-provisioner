@@ -65,6 +65,8 @@ public actor APIKeyTokenSource: BearerTokenProvider {
     private let now: @Sendable () -> Date
     private let onSignedOut: @Sendable () async -> Void
     private var cached: (token: String, expiry: Date?)?
+    /// The exchange in flight, which concurrent callers share.
+    private var exchange: Task<String, any Error>?
 
     /// `authenticate` throws `APIKeyRefused` when Viam refuses the key.
     public init(readKey: @escaping @Sendable () -> (id: String, key: String)?, authenticate: @escaping Authenticate,
@@ -79,29 +81,47 @@ public actor APIKeyTokenSource: BearerTokenProvider {
         if !refresh, let cached, cached.expiry.map({ $0.timeIntervalSince(now()) > 60 }) ?? true {
             return cached.token
         }
+        if let exchange { return try await finish(exchange) }
         cached = nil
         guard let key = readKey() else {
             await onSignedOut()
             throw ViamCLIError.notLoggedIn
         }
+        let task = Task { [authenticate] in try await authenticate(key.id, key.key) }
+        exchange = task
+        return try await finish(task)
+    }
+
+    private func finish(_ task: Task<String, any Error>) async throws -> String {
         do {
-            let token = try await authenticate(key.id, key.key)
-            cached = (token, JWT.expiry(of: token))
+            let token = try await task.value
+            if exchange == task {
+                exchange = nil
+                cached = (token, JWT.expiry(of: token))
+            }
             return token
         } catch is APIKeyRefused {
-            await onSignedOut()
+            if exchange == task {
+                exchange = nil
+                await onSignedOut()
+            }
             throw ViamCLIError.notLoggedIn
+        } catch {
+            if exchange == task { exchange = nil }
+            throw error
         }
     }
 
     /// Viam refused a token just issued for the key: the key is no longer valid.
     public func rejected() async {
         cached = nil
+        exchange = nil
         await onSignedOut()
     }
 
     public func clear() {
         cached = nil
+        exchange = nil
     }
 }
 

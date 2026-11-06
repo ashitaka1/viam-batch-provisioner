@@ -125,7 +125,7 @@ func providerFailureReachesTheCallerWithoutARequest(failure: ViamCLIError, expec
     #expect(request.credentials.payload == "kval")
 }
 
-@Test(arguments: [7, 16])
+@Test(arguments: [3, 5, 7, 16])
 func refusedKeyIsAPIKeyRefused(code: Int) async {
     let base = StubProtocol.register { _, _ in trailerStatus(code, "bad key") }
     await #expect(throws: APIKeyRefused()) {

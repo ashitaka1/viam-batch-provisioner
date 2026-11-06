@@ -129,12 +129,13 @@ public final class ViamAppClient: Sendable {
     }
 
     /// Exchanges an API key for an access token through `AuthService/Authenticate`.
-    /// Throws `APIKeyRefused` when Viam refuses the key.
+    /// Throws `APIKeyRefused` when Viam refuses the key, or says it doesn't exist
+    /// or is malformed (INVALID_ARGUMENT, NOT_FOUND).
     public static func authenticate(keyID: String, key: String, baseURL: URL = ViamAppClient.defaultBaseURL,
                                     session: URLSession = .shared) async throws -> String {
         do {
             return try await authenticate(keyID: keyID, key: key, grpc: GRPCWeb(baseURL: baseURL, session: session))
-        } catch ViamError.unauthenticated, ViamError.permissionDenied {
+        } catch ViamError.unauthenticated, ViamError.permissionDenied, ViamError.status(code: 3, _), ViamError.status(code: 5, _) {
             throw APIKeyRefused()
         }
     }

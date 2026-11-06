@@ -113,12 +113,31 @@ private final class KeyHarness {
 
     /// A user login keeps its own wording; reach is a key's notion.
     @Test func userLoginIsNeverUnreachableWithKey() async throws {
-        let h = KeyHarness()
+        let h = KeyHarness(fleet: GrantFleet(listing: .success([shopFloor])))
         h.keyLogin = false
         let lab = try h.environment("Lab", location: "loc-lab")
         await h.model.loadLocations(org: "org-1")
         #expect(!h.model.isUnreachableWithKey(lab))
         #expect(h.model.problems(for: lab).contains(EnvironmentProblem(field: .location, message: "\"loc-lab\" no longer exists in Acme.")))
+    }
+
+    /// A user login refused is signed out or stale: its locations stay refused, to be retried.
+    @Test func userLoginsRefusedListIsNotReadOneByOne() async throws {
+        let h = KeyHarness()
+        h.keyLogin = false
+        let lab = try h.environment("Lab", location: "loc-lab")
+        await h.model.loadLocations(org: "org-1")
+        #expect(h.model.locations(org: "org-1") == .rejected("permission denied"))
+        #expect(h.model.problems(for: lab).allSatisfy { $0.field != .location })
+    }
+
+    @Test func forgettingLocationsClearsTheGrant() async throws {
+        let h = KeyHarness()
+        _ = try h.environment("Shop", location: "loc-shop")
+        await h.model.loadLocations(org: "org-1")
+        h.model.forgetLocations()
+        #expect(h.model.locations(org: "org-1") == .idle)
+        #expect(!h.model.locationsAreGrantsOnly(org: "org-1"))
     }
 
     @Test func orgsInUseAreFullModeOnesWithoutRepeats() throws {
