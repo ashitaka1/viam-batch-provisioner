@@ -48,6 +48,9 @@ func files(under directory: URL) -> [String] {
     }.sorted()
 }
 
+// Events print as they arrive even when stdout is a pipe, such as `serve en0 | tee`.
+setvbuf(stdout, nil, _IOLBF, 0)
+
 let client = HelperClient()
 let arguments = Array(CommandLine.arguments.dropFirst())
 do {
