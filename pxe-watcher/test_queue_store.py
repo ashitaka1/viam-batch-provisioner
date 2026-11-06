@@ -162,6 +162,11 @@ class MarkAssignedTest(QueueDirTest):
         self.assertFalse(queue_store.mark_assigned(self.queue_dir, "nope"))
         self.assertEqual(self.snapshot(), before)
 
+    def test_ignores_case(self):
+        self.seed([_entry("Lab-3")])
+        self.assertTrue(queue_store.mark_assigned(self.queue_dir, "lab-3", flashed_via="usb"))
+        self.assertTrue(self.on_disk()[0]["assigned"])
+
 
 class SummaryTest(QueueDirTest):
     def test_counts_unassigned_and_total(self):
@@ -179,6 +184,10 @@ class NextIndexTest(QueueDirTest):
     def test_continues_after_highest_with_gaps(self):
         self.seed([_entry("p-1"), _entry("p-2"), _entry("p-5")])
         self.assertEqual(queue_store.next_index(self.queue_dir, "p"), 6)
+
+    def test_ignores_case(self):
+        self.seed([_entry("Lab-3")])
+        self.assertEqual(queue_store.next_index(self.queue_dir, "lab"), 4)
 
     def test_compares_numerically(self):
         self.seed([_entry("p-9"), _entry("p-10")])
@@ -328,6 +337,11 @@ class RemoveTest(QueueDirTest):
 
 
 class UpdateEntryTest(QueueDirTest):
+    def test_ignores_case(self):
+        self.seed([_entry("Lab-3")])
+        got = queue_store.update_entry(self.queue_dir, "lab-3", lambda entry: False)
+        self.assertEqual(got["name"], "Lab-3")
+
     def test_writes_only_when_the_callback_reports_a_change(self):
         self.seed([_entry("p-1"), _entry("p-2")])
         before = self.snapshot()
@@ -389,7 +403,7 @@ class CliTest(QueueDirTest):
         self.seed([_entry("p-1")])
         self.assertEqual(self.run_cli("has-name", "--name", "p-1").returncode, 0)
         self.assertEqual(self.run_cli("has-name", "--name", "p-2").returncode, 1)
-        self.assertEqual(self.run_cli("has-name", "--name", "P-1").returncode, 0, "has-name must ignore case")
+        self.assertEqual(self.run_cli("has-name", "--name", "P-1").returncode, 0)
 
     def test_next_index_prints_integer(self):
         self.seed([_entry("p-4")])

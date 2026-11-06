@@ -214,7 +214,7 @@ def mark_assigned(queue_dir: Path, name: str, **extra) -> bool:
     with locked(queue_dir):
         entries = read(queue_dir)
         for e in entries:
-            if e["name"] == name:
+            if same_name(e["name"], name):
                 e["assigned"] = True
                 e.update(extra)
                 write(queue_dir, entries)
@@ -231,7 +231,7 @@ def update_entry(queue_dir: Path, name: str, mutate: Callable[[dict], bool]) -> 
     with locked(queue_dir):
         entries = read(queue_dir)
         for e in entries:
-            if e["name"] == name:
+            if same_name(e["name"], name):
                 if mutate(e):
                     write(queue_dir, entries)
                 return dict(e)
@@ -259,7 +259,7 @@ def reset(queue_dir: Path) -> int:
 
 def next_index(queue_dir: Path, prefix: str) -> int:
     """1 + the highest N among names of the form <prefix>-N; 1 if none."""
-    pattern = re.compile(rf"^{re.escape(prefix)}-(\d+)$")
+    pattern = re.compile(rf"^{re.escape(prefix)}-(\d+)$", re.IGNORECASE)
     highest = 0
     for e in read(queue_dir):
         m = pattern.match(e.get("name", ""))

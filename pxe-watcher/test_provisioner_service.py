@@ -444,6 +444,14 @@ class ReportInstallTest(ServiceLayoutTest):
             self.assertNotIn("mac", events[0])
             self.assertEqual(result, {"result": "recorded"})
 
+        with self.subTest("a name in another case reaches the queued machine under its queued name"):
+            self.journal_path.unlink(missing_ok=True)
+            self.seed([{"name": "U-1", "assigned": True, "flashed_via": "usb"}])
+            result = self.service().report_install(self.failed(name="u-1", stage="installer"))
+            self.assertIn("failed_at", self.queue()[0])
+            self.assertEqual([e["name"] for e in self.events()], ["U-1"])
+            self.assertEqual(result, {"result": "recorded"})
+
         for label, body, entries in [
             ("an unassigned entry", self.failed(name="q"), [{"name": "q", "assigned": False}]),
             ("an unknown name", self.failed(name="nope"), []),

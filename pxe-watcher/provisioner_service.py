@@ -369,9 +369,10 @@ class ProvisionService:
         name, mac = report["name"], report["mac"]
         entries = self._read()
         if name is not None:
-            entry = next((e for e in entries if e["name"] == name), None)
+            entry = next((e for e in entries if queue_store.same_name(e["name"], name)), None)
             if entry is None or not entry.get("assigned"):
                 raise NotFound(f"{name} is not an assigned machine")
+            name = entry["name"]
             mac = entry.get("mac")  # None for a USB-flashed machine
         else:
             entry = next((e for e in entries if e.get("assigned") and e.get("mac") == mac), None)
