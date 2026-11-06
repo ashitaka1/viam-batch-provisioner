@@ -250,6 +250,7 @@ def reset(queue_dir: Path) -> int:
             e["assigned"] = False
             e["mac"] = None
             e.pop("flashed_via", None)
+            e.pop("warning", None)
             for key in FAILURE_KEYS:
                 e.pop(key, None)
         if entries:
