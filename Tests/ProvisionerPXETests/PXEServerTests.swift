@@ -366,7 +366,8 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
         }
     }
 
-    /// Block numbers are 16 bits; at blksize 8 a 512 KiB file passes block 65535.
+    /// Block numbers are 16 bits; at blksize 8 a 512 KiB file passes block 65535. Beyond
+    /// TFTPTransferTests' wrap, this checks the handler reads the right offset after it.
     @Test func fetchesAcrossBlockNumberWrap() async throws {
         try await withHarness { harness in
             let file = randomData(65_536 * 8 + 100)
@@ -382,6 +383,7 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
             let first = try #require(await harness.client.receive())
             try await harness.client.send(TFTPPacket.error(code: 0, message: "abort").encoded(), to: first.remoteAddress)
             #expect(await harness.client.receive(timeout: .milliseconds(500)) == nil, "server kept sending after the client's ERROR")
+            #expect(descriptorsOpen(on: harness.root.appendingPathComponent("grubx64.efi")) == 0, "the ended transfer kept its file open")
         }
     }
 
@@ -426,6 +428,7 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
             try await harness.client.send(readRequest("grubx64.efi"), to: harness.ports.tftp)
             let first = try #require(await harness.client.receive())
             await harness.server.stop()
+            #expect(descriptorsOpen(on: harness.root.appendingPathComponent("grubx64.efi")) == 0, "stop() returned before the transfer closed its file")
             try await harness.client.send(TFTPPacket.ack(block: 1).encoded(), to: first.remoteAddress)
             #expect(await harness.client.receive(timeout: .milliseconds(300)) == nil, "transfer kept sending after stop()")
         }

@@ -94,7 +94,7 @@ private func discover(option93: [UInt8]) -> DHCPPacket {
         ("discover on 4011", pxeDiscover(), .pxe),
         ("server reply", { var p = pxeDiscover(); p.op = 2; return p }(), .dhcp),
         ("no option 93", { var p = pxeDiscover(); p.options.removeAll { $0.code == 93 }; return p }(), .dhcp),
-        ("short option 93", { var p = pxeDiscover(); p.options = p.options.map { $0.code == 93 ? DHCPOption(code: 93, data: [7]) : $0 }; return p }(), .dhcp),
+        ("short option 93", discover(option93: [7]), .dhcp),
         ("odd-length option 93", discover(option93: [0, 7, 0]), .dhcp),
         ("empty option 93", discover(option93: []), .dhcp),
         ("list without x86-64 UEFI", discover(option93: [0, 0, 0, 11]), .dhcp),
