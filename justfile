@@ -8,6 +8,10 @@ doctor:
 setup-wizard:
     ./scripts/setup-wizard.sh
 
+# Choose this Mac's codesigning identity for `just app` (writes config/signing.env)
+set-signing-identity:
+    ./scripts/set-signing-identity.sh
+
 dnsmasq_args := "--user=root --conf-file=netboot/dnsmasq.conf --tftp-root=" + justfile_directory() + "/netboot --log-facility=" + justfile_directory() + "/logs/dnsmasq.log --pid-file=" + justfile_directory() + "/logs/dnsmasq.pid"
 
 # Start all PXE services, run watcher in foreground. Ctrl-C stops everything.

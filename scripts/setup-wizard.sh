@@ -69,36 +69,6 @@ ensure_venv_for_full_mode() {
     echo ""
 }
 
-# Records this Mac's codesigning identity for `just app` in config/signing.env,
-# apart from the environments: the signature belongs to the Mac.
-configure_signing() {
-    local signing_config="${REPO_ROOT}/config/signing.env" current="" identities default choice
-    if [[ -f "$signing_config" ]]; then
-        current=$(sed -n 's/^CODESIGN_IDENTITY=//p' "$signing_config" | tr -d '"' | tail -1)
-        echo "Code signing: ${current:-ad hoc}"
-        read -p "  Change it? (y/n) [n]: " choice
-        [[ "$choice" == "y" ]] || { echo ""; return 0; }
-    else
-        echo "Code signing (the macOS app, 'just app'):"
-    fi
-    echo "  Builds signed with an identity keep their Keychain access across rebuilds."
-    echo "  Ad hoc works, but every rebuild asks for the login password again."
-    identities=$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/^ *[0-9]*) [0-9A-F]* "\(.*\)"$/\1/p')
-    default=${current:-$(grep -m1 '^Developer ID Application:' <<<"$identities" || true)}
-    if [[ -n "$identities" ]]; then
-        echo "  Identities in your keychain:"
-        while IFS= read -r identity; do echo "    ${identity}"; done <<<"$identities"
-    else
-        echo "  No signing identities found in this keychain (a locked keychain lists none)."
-    fi
-    read -p "  Signing identity (blank for ${default:-ad hoc}, '-' for ad hoc): " choice
-    choice="${choice:-$default}"
-    [[ "$choice" == "-" ]] && choice=""
-    printf '# This Mac'"'"'s codesigning identity for `just app`; blank signs ad hoc.\nCODESIGN_IDENTITY="%s"\n' "$choice" >"$signing_config"
-    echo "  Saved: config/signing.env (${choice:-ad hoc})"
-    echo ""
-}
-
 # Verify host tools before prompting — saves the user from filling out
 # the wizard only to hit a missing-tool error two commands later.
 if ! "${REPO_ROOT}/scripts/check-prereqs.sh"; then
@@ -110,8 +80,6 @@ echo ""
 
 echo "=== Viam Batch Provisioner Setup ==="
 echo ""
-
-configure_signing
 
 # --- Check for existing environments ---
 

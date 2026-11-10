@@ -18,7 +18,7 @@ if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
 else
     echo "WARNING: no CODESIGN_IDENTITY in the environment or config/signing.env; signing ad hoc." >&2
     echo "  An ad-hoc signature changes with every build, so the Keychain asks for the login" >&2
-    echo "  password again for each environment's secrets. 'just setup-wizard' records an identity." >&2
+    echo "  password again for each environment's secrets. 'just set-signing-identity' records one." >&2
 fi
 
 cd "$ROOT"
