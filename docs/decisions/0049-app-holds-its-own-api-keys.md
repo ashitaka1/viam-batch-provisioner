@@ -26,6 +26,7 @@ The app keeps its own Viam API keys in the login keychain, and never runs the `v
 - An operator creates keys at app.viam.com or with the CLI, and pastes them in. Removing a key from the app leaves it valid at Viam.
 - A key the app creates after OAuth, and any other way a key arrives, use the same storage.
 - Decision 43's CLI lookup, `viam login` and `print-access-token` leave the app. Its `BearerTokenProvider` stays, with the API-key provider as the app's implementation.
+- Decision 40's key handoff waits for the iPhone milestone, with iCloud Keychain sync (#175).
 
 ## Alternatives
 
