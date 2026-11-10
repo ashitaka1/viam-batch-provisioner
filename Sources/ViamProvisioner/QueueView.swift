@@ -93,8 +93,8 @@ struct CountsBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            count(counts.waiting, "Waiting", .secondary)
-            count(counts.installing, "Installing", .blue)
+            count(counts.waiting, "Queued", .secondary)
+            count(counts.installing, "In progress", .blue)
             count(counts.installed, "Installed", .green)
             count(counts.failed, "Failed", .red)
             Spacer()
@@ -124,15 +124,13 @@ struct QueueTable: View {
         Table(entries.map { Row(entry: $0, progress: ProvisioningProgress(entry: $0, onlineAt: onlineAt[$0.name])) },
               selection: $selection) {
             TableColumn("Name", value: \.entry.name)
-            TableColumn("Status") { StatusBadge(status: $0.entry.status) }
-                .width(min: 90, ideal: 100)
-            TableColumn("Step") { Text($0.step).help($0.step) }
-                .width(min: 120, ideal: 260)
+            TableColumn("Progress") { ProgressBadge(line: $0.line) }
+                .width(min: 140, ideal: 300)
             TableColumn("MAC") { Text($0.entry.mac ?? ($0.entry.flashedViaUSB ? "USB" : "")).monospaced() }
             TableColumn("Updated") { row in
                 if let date = row.entry.lastChange { Text(date, format: .dateTime.month().day().hour().minute()) }
             }
-            TableColumn("Failure") { Text($0.failure).foregroundStyle(.red).help($0.failure) }
+            TableColumn("Failure") { Text($0.entry.failureReason ?? "").foregroundStyle(.red).help($0.entry.failureReason ?? "") }
         }
         .contextMenu(forSelectionType: String.self) { names in
             if let name = names.first {
@@ -153,24 +151,7 @@ extension QueueTable {
         let progress: ProvisioningProgress?
 
         var id: String { entry.name }
-
-        /// The current step, then its sub-step or download percentage.
-        var step: String {
-            guard let progress else { return entry.stage ?? "" }
-            let current = progress.current
-            let detail: String? = if current.kind == .downloading {
-                current.fraction.map { "\(Int(($0 * 100).rounded()))%" }
-            } else {
-                current.subSteps.first { $0.state == .current || $0.state == .failed }?.title
-            }
-            return [current.title, detail].compactMap { $0 }.joined(separator: " · ")
-        }
-
-        var failure: String {
-            guard let reason = entry.failureReason else { return "" }
-            guard let failed = progress?.rows.first(where: { $0.state == .failed }) else { return reason }
-            return "At \(failed.title): \(reason)"
-        }
+        var line: ProgressLine { ProgressLine(entry: entry, progress: progress) }
     }
 }
 
@@ -182,7 +163,7 @@ struct MachineDetail: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Status") { StatusBadge(status: entry.status) }
+                LabeledContent("Progress") { ProgressBadge(line: ProgressLine(entry: entry, progress: progress)) }
                 LabeledContent("Hostname", value: entry.name)
                 LabeledContent("MAC", value: entry.mac ?? (entry.flashedViaUSB ? "Flashed to USB" : "Not yet booted"))
                 if progress == nil, let stage = entry.stage { LabeledContent("Install stage", value: stage) }

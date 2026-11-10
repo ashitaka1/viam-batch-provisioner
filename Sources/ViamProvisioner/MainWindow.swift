@@ -126,7 +126,7 @@ struct MainWindow: View {
         if sidebarSelection.wrappedValue == .queue {
             QueueView(servers: servers, queue: queue, onlineAt: online?.onlineAt ?? [:])
         } else if sidebarSelection.wrappedValue == .history {
-            HistoryView(history: history, queue: queue)
+            HistoryView(history: history, queue: queue, onlineAt: online?.onlineAt ?? [:])
         } else if let environment = selected {
             EnvironmentEditor(session: session, organizations: organizations, environments: environments, environment: environment)
                 .id(environment.id)

@@ -1,11 +1,12 @@
 import ProvisionerKit
 import SwiftUI
 
-/// The batches provisioned from this Mac, each with its machines' status on
+/// The batches provisioned from this Mac, each with its machines' progress on
 /// the connected server.
 struct HistoryView: View {
     let history: BatchHistory
     let queue: QueueModel?
+    let onlineAt: [String: Date]
     @State private var selection: UUID?
 
     var body: some View {
@@ -31,7 +32,7 @@ struct HistoryView: View {
                     .frame(minWidth: 200, idealWidth: 240, maxWidth: 320)
                     Group {
                         if let record = history.records.first(where: { $0.id == selection }) {
-                            BatchDetail(record: record, queue: queue?.serverName == record.serverName ? queue : nil)
+                            BatchDetail(record: record, queue: queue?.serverName == record.serverName ? queue : nil, onlineAt: onlineAt)
                         } else {
                             ContentUnavailableView("Select a Batch", systemImage: "clock")
                         }
@@ -50,6 +51,7 @@ struct BatchDetail: View {
     let record: BatchRecord
     /// The queue of the server the batch went to, when that's the connected one.
     let queue: QueueModel?
+    let onlineAt: [String: Date]
 
     var body: some View {
         Form {
@@ -81,7 +83,7 @@ struct BatchDetail: View {
     @ViewBuilder private func status(_ name: String) -> some View {
         if let queue {
             if let entry = queue.entry(named: name) {
-                StatusBadge(status: entry.status)
+                ProgressBadge(line: ProgressLine(entry: entry, progress: ProvisioningProgress(entry: entry, onlineAt: onlineAt[name])))
             } else if queue.connection == .live {
                 Text("No longer queued").foregroundStyle(.secondary)
             } else {

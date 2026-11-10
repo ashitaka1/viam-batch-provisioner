@@ -3,7 +3,7 @@ public import Foundation
 /// The rows a machine's provisioning timeline shows: reached steps with their
 /// times, then the steps after the latest one as pending. Steps skipped before it are omitted: nothing is inferred.
 public struct ProvisioningProgress: Equatable, Sendable {
-    public enum Kind: Sendable, Equatable { case queued, found, booting, downloading, installing, configuring, installed, online }
+    public enum Kind: Sendable, Equatable { case queued, found, booting, downloading, installing, configuring, installed, viamOnline }
     public enum State: Sendable, Equatable { case done, current, failed, pending }
 
     public struct SubStep: Sendable, Equatable {
@@ -79,7 +79,7 @@ public struct ProvisioningProgress: Equatable, Sendable {
         let installed = reachedSteps.contains(.installed)
         if entry.provisionMode == .full {
             let online = installed ? onlineAt : nil
-            rows.append(Row(kind: .online, title: "Online", at: online, state: online == nil ? .pending : .done))
+            rows.append(Row(kind: .viamOnline, title: "Viam online", at: online, state: online == nil ? .pending : .done))
             if online != nil {
                 for index in rows.indices where rows[index].state == .current { rows[index].state = .done }
             }

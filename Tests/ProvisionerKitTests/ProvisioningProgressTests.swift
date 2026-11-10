@@ -21,7 +21,7 @@ private func progress(_ entry: QueueEntry, onlineAt: Date? = nil) -> Provisionin
 struct ProvisioningProgressTests {
     @Test func queuedEntryShowsQueuedThenPending() {
         let rows = progress(entry()).rows
-        #expect(rows.map(\.title) == ["Queued", "Found", "Booting", "Downloading Ubuntu 24.04.4", "Installing Ubuntu 24.04.4", "Configuring", "Installed", "Online"])
+        #expect(rows.map(\.title) == ["Queued", "Found", "Booting", "Downloading Ubuntu 24.04.4", "Installing Ubuntu 24.04.4", "Configuring", "Installed", "Viam online"])
         #expect(rows.map(\.state) == [.current] + Array(repeating: .pending, count: 7))
         #expect(rows[0].at == t0)
     }
@@ -88,7 +88,7 @@ struct ProvisioningProgressTests {
         let steps: [(ProvisioningStep, Int)] = [(.installing, 1), (.configuring, 1)]
         let p = progress(entry(status: .installing, steps: steps, stage: "tooling"), onlineAt: t0.addingTimeInterval(99))
         #expect(p.current.kind == .configuring)
-        #expect(p.rows.last?.kind == .online)
+        #expect(p.rows.last?.kind == .viamOnline)
         #expect(p.rows.last?.state == .pending)
         #expect(p.rows.last?.at == nil)
     }
@@ -124,7 +124,7 @@ struct ProvisioningProgressTests {
         let steps: [(ProvisioningStep, Int)] = [(.found, 1), (.booting, 1), (.downloading, 1), (.installing, 1), (.configuring, 1), (.installed, 1)]
         let online = t0.addingTimeInterval(99)
         let p = progress(entry(status: .installed, steps: steps), onlineAt: online)
-        #expect(p.current.kind == .online)
+        #expect(p.current.kind == .viamOnline)
         #expect(p.current.state == .done)
         #expect(p.current.at == online)
         #expect(progress(entry(status: .installed, steps: steps)).current.kind == .installed)
@@ -152,7 +152,7 @@ struct ProvisioningProgressTests {
 
     @Test func entryAtInstallingShowsLaterStepsPending() {
         let p = progress(entry(status: .installing, steps: [(.installing, 1)]))
-        #expect(p.rows.map(\.title) == ["Queued", "Installing Ubuntu 24.04.4", "Configuring", "Installed", "Online"])
+        #expect(p.rows.map(\.title) == ["Queued", "Installing Ubuntu 24.04.4", "Configuring", "Installed", "Viam online"])
         #expect(p.current.kind == .installing)
     }
 
@@ -160,7 +160,7 @@ struct ProvisioningProgressTests {
         var e = entry(status: .failed, steps: [(.found, 1)])
         e.failureStep = .installing
         let rows = progress(e).rows
-        #expect(rows.map(\.title) == ["Queued", "Found", "Installing Ubuntu 24.04.4", "Configuring", "Installed", "Online"])
+        #expect(rows.map(\.title) == ["Queued", "Found", "Installing Ubuntu 24.04.4", "Configuring", "Installed", "Viam online"])
         #expect(rows.map(\.state) == [.done, .done, .failed, .pending, .pending, .pending])
     }
 

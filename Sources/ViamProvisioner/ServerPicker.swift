@@ -93,37 +93,3 @@ struct ServerAddressSheet: View {
     }
 }
 
-extension EntryStatus {
-    var label: String {
-        switch self {
-        case .queued: "Waiting"
-        case .flashed: "Flashed"
-        case .assigned: "Booting"
-        case .installing: "Installing"
-        case .installed: "Installed"
-        case .failed: "Failed"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .queued, .flashed: .secondary
-        case .assigned, .installing: .blue
-        case .installed: .green
-        case .failed: .red
-        }
-    }
-}
-
-struct StatusBadge: View {
-    let status: EntryStatus
-
-    var body: some View {
-        Label {
-            Text(status.label)
-        } icon: {
-            Image(systemName: "circle.fill").foregroundStyle(status.color).imageScale(.small)
-        }
-        .labelStyle(.titleAndIcon)
-    }
-}
