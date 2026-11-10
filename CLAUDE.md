@@ -5,7 +5,7 @@ Zero-touch provisioning for x86 Linux machines (PXE or USB stick) and Raspberry 
 Tracking: GitHub issues (ashitaka1/viam-batch-provisioner); project ashitaka1/4; auto-add ashitaka1/viam-batch-provisioner
 
 - `README.md` — usage, configuration, provision modes, known issues
-- `CONTRIBUTING.md` — setup, test, running services alone, hardware validation
+- `CONTRIBUTING.md` — setup, test, running services alone, the Mac app in a QA guest, hardware validation
 - `ARCHITECTURE.md` — boot chains, codemap, data model, invariants, boundaries
 - `docs/decisions/` — one decision per file
 - `openapi/provisioner.yaml` — the API contract; `pxe-watcher/test_contract.py` validates the server against it
