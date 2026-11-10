@@ -590,13 +590,13 @@ components:
           $ref: '#/components/schemas/QueueCounts'
         services:
           type: object
-          description: The Python server reports http, dnsmasq and watcher; the Swift server reports http and helper.
+          description: The Python server reports http, dnsmasq and watcher; the Swift server reports http and netboot.
           required: [http]
           additionalProperties: false
           properties:
             http:
               $ref: '#/components/schemas/ServiceState'
-            helper:
+            netboot:
               $ref: '#/components/schemas/ServiceState'
             dnsmasq:
               $ref: '#/components/schemas/ServiceState'

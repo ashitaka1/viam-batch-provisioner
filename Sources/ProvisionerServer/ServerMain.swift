@@ -22,7 +22,7 @@ public enum ServerMain {
             logger.info("serving \(configuration.files.path) on \(configuration.bind):\(configuration.port), data in \(configuration.dataDirectory.path)")
             let group = ServiceGroup(configuration: .init(services: [app], gracefulShutdownSignals: [.sigterm, .sigint],
                                                           logger: logger))
-            let stopLink = startHelperLink(configuration, provisioner: provisioner, logger: logger)
+            let stopLink = startNetbootLink(configuration, provisioner: provisioner, logger: logger)
             do {
                 try await group.run()
             } catch {

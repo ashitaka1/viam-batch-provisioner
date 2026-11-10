@@ -1,25 +1,25 @@
 import Dispatch
 import Foundation
-import ProvisionerHelperXPC
+import ProvisionerNetbootXPC
 
-// Drives ProvisionerHelper over XPC in place of ProvisionerServer, for development and hardware runs.
+// Drives ProvisionerNetboot over XPC in place of ProvisionerServer, for development and hardware runs.
 
 let usage = """
-    usage: provisioner-helperctl serve <interface> [<boot-file>]   serve, then print events until interrupted
-           provisioner-helperctl watch                             print events until interrupted
-           provisioner-helperctl status                            print the interface being served
-           provisioner-helperctl stop
-           provisioner-helperctl push <dir>                        copy every file under <dir> into the TFTP root
-           provisioner-helperctl write <path> <file>
-           provisioner-helperctl remove <path>
+    usage: provisioner-netbootctl serve <interface> [<boot-file>]   serve, then print events until interrupted
+           provisioner-netbootctl watch                             print events until interrupted
+           provisioner-netbootctl status                            print the interface being served
+           provisioner-netbootctl stop
+           provisioner-netbootctl push <dir>                        copy every file under <dir> into the TFTP root
+           provisioner-netbootctl write <path> <file>
+           provisioner-netbootctl remove <path>
     """
 
 func fail(_ message: String, code: Int32 = 1) -> Never {
-    FileHandle.standardError.write(Data("provisioner-helperctl: \(message)\n".utf8))
+    FileHandle.standardError.write(Data("provisioner-netbootctl: \(message)\n".utf8))
     exit(code)
 }
 
-func printEvents(_ client: HelperClient) async {
+func printEvents(_ client: NetbootClient) async {
     signal(SIGINT, SIG_IGN)
     let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
     interrupt.setEventHandler { client.invalidate() }
@@ -51,7 +51,7 @@ func files(under directory: URL) -> [String] {
 // Events print as they arrive even when stdout is a pipe, such as `serve en0 | tee`.
 setvbuf(stdout, nil, _IOLBF, 0)
 
-let client = HelperClient()
+let client = NetbootClient()
 let arguments = Array(CommandLine.arguments.dropFirst())
 do {
     switch (arguments.first, arguments.count) {

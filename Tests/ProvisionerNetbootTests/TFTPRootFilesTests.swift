@@ -1,6 +1,6 @@
 import Foundation
-import ProvisionerHelperCore
-import ProvisionerHelperXPC
+import ProvisionerNetbootCore
+import ProvisionerNetbootXPC
 import Testing
 
 @Suite struct TFTPRootFilesTests {
@@ -19,8 +19,8 @@ import Testing
     @Test(arguments: ["", "/etc/passwd", "../escape", "grub/../../escape", "grub//x", "./x", "grub/"])
     func refusesPathsThatCouldLeaveTheRoot(path: String) {
         defer { try? FileManager.default.removeItem(at: root) }
-        #expect(throws: HelperError.invalidPath(path)) { try files.write(Data(), to: path) }
-        #expect(throws: HelperError.invalidPath(path)) { try files.remove(path) }
+        #expect(throws: NetbootError.invalidPath(path)) { try files.write(Data(), to: path) }
+        #expect(throws: NetbootError.invalidPath(path)) { try files.remove(path) }
     }
 
     @Test func removesFileAndIgnoresMissing() throws {
@@ -35,7 +35,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: root) }
         try files.write(Data("x".utf8), to: "grub/a.cfg")
         #expect { try files.write(Data(), to: "grub") } throws: { error in
-            if case HelperError.writeFailed = error { true } else { false }
+            if case NetbootError.writeFailed = error { true } else { false }
         }
         #expect(try Data(contentsOf: root.appendingPathComponent("grub/a.cfg")) == Data("x".utf8))
     }
@@ -44,7 +44,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: root) }
         try files.write(Data("x".utf8), to: "grub/a.cfg")
         #expect { try files.remove("grub") } throws: { error in
-            if case HelperError.writeFailed = error { true } else { false }
+            if case NetbootError.writeFailed = error { true } else { false }
         }
         #expect(try Data(contentsOf: root.appendingPathComponent("grub/a.cfg")) == Data("x".utf8))
     }
@@ -60,16 +60,16 @@ import Testing
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link"), withDestinationURL: outside)
 
-        #expect(throws: HelperError.invalidPath("link/victim")) { try files.write(Data("x".utf8), to: "link/victim") }
-        #expect(throws: HelperError.invalidPath("link/new/file")) { try files.write(Data("x".utf8), to: "link/new/file") }
-        #expect(throws: HelperError.invalidPath("link/victim")) { try files.remove("link/victim") }
+        #expect(throws: NetbootError.invalidPath("link/victim")) { try files.write(Data("x".utf8), to: "link/victim") }
+        #expect(throws: NetbootError.invalidPath("link/new/file")) { try files.write(Data("x".utf8), to: "link/new/file") }
+        #expect(throws: NetbootError.invalidPath("link/victim")) { try files.remove("link/victim") }
         #expect(try Data(contentsOf: outside.appendingPathComponent("victim")) == Data("keep".utf8))
         #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("new").path))
     }
 }
 
 @Suite struct PeerRequirementTests {
-    @Test func adHocHelperAcceptsOnlyItsOwner() {
+    @Test func adHocNetbootDaemonAcceptsOnlyItsOwner() {
         #expect(PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 501, executableOwnerUID: 501))
         #expect(!PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 502, executableOwnerUID: 501))
         #expect(!PeerRequirement.acceptsPeer(teamIdentifier: nil, peerUID: 501, executableOwnerUID: nil))

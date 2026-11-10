@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.bringingfire.viam-provisioner.helper</string>
+	<string>com.bringingfire.viam-provisioner.netboot</string>
 	<key>BundleProgram</key>
-	<string>Contents/MacOS/ProvisionerHelper</string>
+	<string>Contents/MacOS/ProvisionerNetboot</string>
 	<key>MachServices</key>
 	<dict>
-		<key>com.bringingfire.viam-provisioner.helper</key>
+		<key>com.bringingfire.viam-provisioner.netboot</key>
 		<true/>
 	</dict>
 	<key>RunAtLoad</key>

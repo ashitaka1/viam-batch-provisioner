@@ -12,11 +12,11 @@ struct ServerConfiguration: Sendable {
     var advertiseAddress: String?
     /// The PXE install image, relative to `files`.
     var bootImage: String?
-    /// Whether to take PXE events from ProvisionerHelper (macOS).
-    var linksHelper = false
+    /// Whether to take PXE events from ProvisionerNetboot (macOS).
+    var linksNetboot = false
 
     static let usage = """
-        usage: provisioner-server --files <dir> [--port <n>] [--bind <address>] [--data-dir <dir>] [--advertise-address <host:port>] [--boot-image <path under --files>] [--helper]
+        usage: provisioner-server --files <dir> [--port <n>] [--bind <address>] [--data-dir <dir>] [--advertise-address <host:port>] [--boot-image <path under --files>] [--netboot]
         """
 
     static var defaultDataDirectory: URL {
@@ -35,18 +35,18 @@ struct ServerConfiguration: Sendable {
         var values: [String: String] = [:]
         var rest = arguments[...]
         let known: Set = ["--port", "--bind", "--files", "--data-dir", "--advertise-address", "--boot-image"]
-        var helper = false
+        var netboot = false
         while let flag = rest.popFirst() {
-            if flag == "--helper" {
-                helper = true
+            if flag == "--netboot" {
+                netboot = true
                 continue
             }
             guard known.contains(flag) else { throw ConfigurationError(description: "unknown option \(flag)") }
             guard let value = rest.popFirst() else { throw ConfigurationError(description: "\(flag) needs a value") }
             values[flag] = value
         }
-        #if !canImport(ProvisionerHelperXPC)
-        if helper { throw ConfigurationError(description: "--helper needs macOS") }
+        #if !canImport(ProvisionerNetbootXPC)
+        if netboot { throw ConfigurationError(description: "--netboot needs macOS") }
         #endif
         guard let files = values["--files"] else { throw ConfigurationError(description: "--files is required") }
         var port = 8234
@@ -63,7 +63,7 @@ struct ServerConfiguration: Sendable {
             dataDirectory: values["--data-dir"].map { URL(filePath: $0) } ?? defaultDataDirectory,
             advertiseAddress: values["--advertise-address"],
             bootImage: values["--boot-image"],
-            linksHelper: helper)
+            linksNetboot: netboot)
         if contains(configuration.files, configuration.dataDirectory) {
             throw ConfigurationError(description: "--data-dir must be outside --files, which is served to the network")
         }

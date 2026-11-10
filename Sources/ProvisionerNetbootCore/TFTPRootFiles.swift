@@ -1,5 +1,5 @@
 import Foundation
-import ProvisionerHelperXPC
+import ProvisionerNetbootXPC
 
 /// Writes and removes files the peer sends, confined to the TFTP root: a path may not climb out
 /// with `..`, nor through a symlink inside the root. Only regular files are removed.
@@ -15,7 +15,7 @@ public struct TFTPRootFiles: Sendable {
         let components = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.isEmpty, !path.hasPrefix("/"),
               components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." })
-        else { throw HelperError.invalidPath(path) }
+        else { throw NetbootError.invalidPath(path) }
         return components.reduce(root) { $0.appendingPathComponent(String($1)) }
     }
 
@@ -25,10 +25,10 @@ public struct TFTPRootFiles: Sendable {
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try contents.write(to: url, options: .atomic)
-        } catch let error as HelperError {
+        } catch let error as NetbootError {
             throw error
         } catch {
-            throw HelperError.writeFailed("\(path): \(error.localizedDescription)")
+            throw NetbootError.writeFailed("\(path): \(error.localizedDescription)")
         }
     }
 
@@ -41,15 +41,15 @@ public struct TFTPRootFiles: Sendable {
         } catch CocoaError.fileReadNoSuchFile, CocoaError.fileNoSuchFile {
             return
         } catch {
-            throw HelperError.writeFailed("\(path): \(error.localizedDescription)")
+            throw NetbootError.writeFailed("\(path): \(error.localizedDescription)")
         }
         guard attributes[.type] as? FileAttributeType == .typeRegular else {
-            throw HelperError.writeFailed("\(path): not a regular file")
+            throw NetbootError.writeFailed("\(path): not a regular file")
         }
         do {
             try FileManager.default.removeItem(at: url)
         } catch {
-            throw HelperError.writeFailed("\(path): \(error.localizedDescription)")
+            throw NetbootError.writeFailed("\(path): \(error.localizedDescription)")
         }
     }
 
@@ -58,7 +58,7 @@ public struct TFTPRootFiles: Sendable {
     private func requireInsideRoot(_ url: URL, _ path: String) throws {
         let rootComponents = Self.resolved(root).pathComponents
         guard Self.resolved(url.deletingLastPathComponent()).pathComponents.starts(with: rootComponents)
-        else { throw HelperError.invalidPath(path) }
+        else { throw NetbootError.invalidPath(path) }
     }
 
     /// `url` with symlinks resolved in its deepest existing ancestor, the missing rest appended.

@@ -39,7 +39,7 @@ Builds ProvisionerPXE and ProvisionerServer in the `swift:6.4` Linux container (
 
 `swift-openapi-generator` generates `ProvisionerAPI`'s types, `ProvisionerKit`'s client and `ProvisionerServer`'s server stubs from `openapi/provisioner.yaml` at build time, through the `openapi.yaml` symlinks in each target's directory. The generator drops the properties of a schema whose `oneOf` branches only list required fields, so the contract states such rules in descriptions.
 
-`swift run provisioner-server --files <dir>` serves `<dir>` at `/` and the API under `/api/v1/` on one port, `--port` (8234 by default), bound to `--bind` (`0.0.0.0`). Its state lives in `--data-dir`, by default `~/Library/Application Support/Viam Provisioner/Server/`; it never touches the Python server's files, and it must lie outside `--files`. `--advertise-address <host:port>` is reported as `address` in `/api/v1/status`. `--boot-image <path under --files>` names the OS image: its name feeds the provisioning steps and the server serves it per machine at `/pxe/<name>/<file>`. `--helper` (macOS only) links the server to `ProvisionerHelper`'s PXE events and registers with the helper every 30 s. Point `provisioner-probe check`, `watch` or `notify` at it to exercise it; SIGTERM or Ctrl-C ends open event streams and exits.
+`swift run provisioner-server --files <dir>` serves `<dir>` at `/` and the API under `/api/v1/` on one port, `--port` (8234 by default), bound to `--bind` (`0.0.0.0`). Its state lives in `--data-dir`, by default `~/Library/Application Support/Viam Provisioner/Server/`; it never touches the Python server's files, and it must lie outside `--files`. `--advertise-address <host:port>` is reported as `address` in `/api/v1/status`. `--boot-image <path under --files>` names the OS image: its name feeds the provisioning steps and the server serves it per machine at `/pxe/<name>/<file>`. `--netboot` (macOS only) links the server to `ProvisionerNetboot`'s PXE events and registers with the netboot daemon every 30 s. Point `provisioner-probe check`, `watch` or `notify` at it to exercise it; SIGTERM or Ctrl-C ends open event streams and exits.
 
 `swift run provisioner-probe` exercises ProvisionerKit against a running API (`scripts/api-service.sh start` runs it with its Bonjour advertisement): `check <base-url>` provisions, reads and removes a throwaway name and exits non-zero on any mismatch; `browse` lists advertised servers for five seconds; `watch <base-url>` prints every queue update and connection state; `notify <base-url>` prints each notification the app would post for an install that completes or fails. `viam-locations` and `viam-batch` call Viam with `VIAM_API_KEY_ID` and `VIAM_API_KEY` when set, otherwise with the `viam` CLI's login; `viam-delete-key` needs the key: `viam-locations <org-id>` lists the org's locations; `viam-batch <org-id> <location-id> <prefix> <count>` creates machines as the app does, checks each `viam.json` against Viam's part, deletes them and exits non-zero on any failure; `viam-delete-key <org-id> <key-id>` deletes an org key, which the `viam` CLI can't. To run `viam-batch` as an org key, mint a key with `viam organizations api-key create --org-id <org>`, export its `Key ID` and `Key Value`, and delete the key afterwards with `viam-delete-key`.
 
@@ -47,17 +47,17 @@ Builds ProvisionerPXE and ProvisionerServer in the `swift:6.4` Linux container (
 
 `swift run provisioner-pxe --interface en0 --root netboot` serves proxy DHCP and TFTP on the default ports 67, 4011 and 69 (sudo) and prints each PXE client it answers and each file a client reads, with the MAC its DHCP request named. `--dhcp-port`, `--pxe-port` and `--tftp-port` override the ports; `--offer-to <ip>:<port>` redirects offers away from the broadcast address, for testing without privileges. It runs beside no dnsmasq: stop `just dhcp` first.
 
-### ProvisionerHelper
+### ProvisionerNetboot
 
-`just app` also puts the `ProvisionerHelper` launch daemon inside the bundle and builds `build/provisioner-helperctl`. `just helper register` registers the daemon from the app's process and opens System Settings → General → Login Items & Extensions on the server Mac's own display, where it must be allowed under Allow in the Background. An ad-hoc build can be allowed and runs. `just helper status` and `just helper unregister` do the rest. The daemon runs as root and serves only when asked:
+`just app` also puts the `ProvisionerNetboot` launch daemon inside the bundle and builds `build/provisioner-netbootctl`. `just netboot register` registers the daemon from the app's process and opens System Settings → General → Login Items & Extensions on the server Mac's own display, where it must be allowed under Allow in the Background. An ad-hoc build can be allowed and runs. `just netboot status` and `just netboot unregister` do the rest. The daemon runs as root and serves only when asked:
 
 ```bash
-build/provisioner-helperctl push netboot   # copy netboot/ into /Library/Application Support/Viam Provisioner/TFTP
-build/provisioner-helperctl serve en5      # serve PXE on en5 and print each offer and file sent until ^C
-build/provisioner-helperctl stop
+build/provisioner-netbootctl push netboot   # copy netboot/ into /Library/Application Support/Viam Provisioner/TFTP
+build/provisioner-netbootctl serve en5      # serve PXE on en5 and print each offer and file sent until ^C
+build/provisioner-netbootctl stop
 ```
 
-Serving continues after `serve` exits. Its log: `log stream --predicate 'subsystem == "com.bringingfire.viam-provisioner.helper"'`. Stop dnsmasq (`just stop`) first; both bind port 67.
+Serving continues after `serve` exits. Its log: `log stream --predicate 'subsystem == "com.bringingfire.viam-provisioner.netboot"'`. Stop dnsmasq (`just stop`) first; both bind port 67.
 
 ### The Mac app in a QA guest
 
@@ -107,4 +107,4 @@ Broadcast a forged PXE DHCPDISCOVER from an unprivileged UDP socket bound to the
 
 A change to the boot chain, autoinstall config, watcher or install reports is finished when a real machine has installed through it. The testbed is a Minisforum UM890 Pro on Ubuntu 24.04.
 
-The helper's run: with `netboot/` filled by `just setup`, the HTTP server up (`just up`) and dnsmasq stopped, register and allow the helper, `push netboot`, then `serve <interface>` and PXE-boot the machine. It passes when `serve` prints an `offered` line for the machine's MAC, `sent` lines for `grubx64.efi`, the GRUB config, kernel and initrd carrying that MAC, and the machine boots into the installer. The helper's part ends at the initrd; the installer talks only to nginx.
+The netboot daemon's run: with `netboot/` filled by `just setup`, the HTTP server up (`just up`) and dnsmasq stopped, register and allow the netboot daemon, `push netboot`, then `serve <interface>` and PXE-boot the machine. It passes when `serve` prints an `offered` line for the machine's MAC, `sent` lines for `grubx64.efi`, the GRUB config, kernel and initrd carrying that MAC, and the machine boots into the installer. The netboot daemon's part ends at the initrd; the installer talks only to nginx.

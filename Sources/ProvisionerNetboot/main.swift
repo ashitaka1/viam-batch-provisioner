@@ -1,11 +1,11 @@
 import Dispatch
 import Foundation
-import ProvisionerHelperCore
-import ProvisionerHelperXPC
+import ProvisionerNetbootCore
+import ProvisionerNetbootXPC
 
-// The root launch daemon `com.bringingfire.viam-provisioner.helper`, registered by the app with
+// The root launch daemon `com.bringingfire.viam-provisioner.netboot`, registered by the app with
 // SMAppService. It serves only when a peer asks, so it binds nothing until ProvisionerServer
-// (or provisioner-helperctl) connects.
+// (or provisioner-netbootctl) connects.
 
 let defaultRoot = "/Library/Application Support/Viam Provisioner/TFTP"
 
@@ -13,7 +13,7 @@ var arguments = CommandLine.arguments.dropFirst()
 var rootPath = defaultRoot
 while let flag = arguments.popFirst() {
     guard flag == "--root", let value = arguments.popFirst() else {
-        FileHandle.standardError.write(Data("usage: ProvisionerHelper [--root <dir>]\n".utf8))
+        FileHandle.standardError.write(Data("usage: ProvisionerNetboot [--root <dir>]\n".utf8))
         exit(2)
     }
     rootPath = value
@@ -23,7 +23,7 @@ let root = URL(fileURLWithPath: rootPath, isDirectory: true)
 do {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 } catch {
-    FileHandle.standardError.write(Data("ProvisionerHelper: cannot create \(rootPath): \(error)\n".utf8))
+    FileHandle.standardError.write(Data("ProvisionerNetboot: cannot create \(rootPath): \(error)\n".utf8))
     exit(1)
 }
 
@@ -32,17 +32,17 @@ if getuid() == 0 {
     var status = stat()
     let resolved = root.resolvingSymlinksInPath().path
     guard stat(resolved, &status) == 0, status.st_uid == 0, status.st_mode & (S_IWGRP | S_IWOTH) == 0 else {
-        FileHandle.standardError.write(Data("ProvisionerHelper: \(resolved) must be owned by root and not group- or world-writable\n".utf8))
+        FileHandle.standardError.write(Data("ProvisionerNetboot: \(resolved) must be owned by root and not group- or world-writable\n".utf8))
         exit(1)
     }
 }
 
 let team = PeerRequirement.currentTeamIdentifier()
 let owner = PeerRequirement.executableOwnerUID()
-let service = HelperService(root: root, acceptPeer: { connection in
+let service = NetbootService(root: root, acceptPeer: { connection in
     PeerRequirement.acceptsPeer(teamIdentifier: team, peerUID: connection.effectiveUserIdentifier, executableOwnerUID: owner)
 })
-let listener = NSXPCListener(machServiceName: ProvisionerHelperXPC.machServiceName)
+let listener = NSXPCListener(machServiceName: ProvisionerNetbootXPC.machServiceName)
 listener.setConnectionCodeSigningRequirement(PeerRequirement.requirement(teamIdentifier: team))
 listener.delegate = service
 listener.resume()

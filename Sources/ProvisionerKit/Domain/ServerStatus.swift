@@ -15,14 +15,14 @@ public struct ServerStatus: Sendable, Equatable {
         /// Reported by the Python server only.
         public var dnsmasq, watcher: ServiceState?
         /// Reported by the Swift server only.
-        public var helper: ServiceState?
+        public var netboot: ServiceState?
 
         public init(http: ServiceState, dnsmasq: ServiceState? = nil, watcher: ServiceState? = nil,
-                    helper: ServiceState? = nil) {
+                    netboot: ServiceState? = nil) {
             self.http = http
             self.dnsmasq = dnsmasq
             self.watcher = watcher
-            self.helper = helper
+            self.netboot = netboot
         }
     }
 
@@ -47,7 +47,7 @@ public struct ServerStatus: Sendable, Equatable {
         services = Services(http: .init(rawValue: wire.services.http.rawValue)!,
                             dnsmasq: wire.services.dnsmasq.map { .init(rawValue: $0.rawValue)! },
                             watcher: wire.services.watcher.map { .init(rawValue: $0.rawValue)! },
-                            helper: wire.services.helper.map { .init(rawValue: $0.rawValue)! })
+                            netboot: wire.services.netboot.map { .init(rawValue: $0.rawValue)! })
         lastEventID = wire.lastEventId
     }
 }

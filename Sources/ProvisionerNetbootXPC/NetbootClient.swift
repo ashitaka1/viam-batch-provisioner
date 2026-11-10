@@ -1,15 +1,15 @@
 import Foundation
 import os
 
-/// The helper's peer side: calls the helper and streams its events.
+/// The netboot daemon's peer side: calls the netboot daemon and streams its events.
 ///
-/// Connects on first use. When launchd restarts the helper, the client reconnects, so `events`
+/// Connects on first use. When launchd restarts the netboot daemon, the client reconnects, so `events`
 /// continues, and asks it to serve again with the arguments of the last `serve` that succeeded
 /// and wasn't followed by a failed `serve` or a `stopServing`. After an invalidation, the next
 /// call connects afresh.
-public final class HelperClient: Sendable {
-    /// Every event from the helper, across reconnections. Finishes on `invalidate()`.
-    public let events: AsyncStream<HelperEvent>
+public final class NetbootClient: Sendable {
+    /// Every event from the netboot daemon, across reconnections. Finishes on `invalidate()`.
+    public let events: AsyncStream<NetbootEvent>
 
     private struct State {
         var connection: NSXPCConnection?
@@ -18,48 +18,48 @@ public final class HelperClient: Sendable {
     }
 
     private let makeConnection: @Sendable () -> NSXPCConnection
-    private let continuation: AsyncStream<HelperEvent>.Continuation
+    private let continuation: AsyncStream<NetbootEvent>.Continuation
     private let state = OSAllocatedUnfairLock(uncheckedState: State())
 
     public static let machService: @Sendable () -> NSXPCConnection = {
-        NSXPCConnection(machServiceName: ProvisionerHelperXPC.machServiceName, options: .privileged)
+        NSXPCConnection(machServiceName: ProvisionerNetbootXPC.machServiceName, options: .privileged)
     }
 
-    public init(makeConnection: @escaping @Sendable () -> NSXPCConnection = HelperClient.machService) {
+    public init(makeConnection: @escaping @Sendable () -> NSXPCConnection = NetbootClient.machService) {
         self.makeConnection = makeConnection
-        (events, continuation) = AsyncStream.makeStream(of: HelperEvent.self, bufferingPolicy: .bufferingNewest(1024))
+        (events, continuation) = AsyncStream.makeStream(of: NetbootEvent.self, bufferingPolicy: .bufferingNewest(1024))
     }
 
     public func serve(interface: String, bootFilename: String) async throws {
         do {
-            try await call { helper, reply in helper.serve(interface: interface, bootFilename: bootFilename, reply: reply) }
+            try await call { daemon, reply in daemon.serve(interface: interface, bootFilename: bootFilename, reply: reply) }
             state.withLockUnchecked { $0.serving = (interface, bootFilename) }
-        } catch HelperError.serveFailed(let detail) {
-            // The helper stopped the old server before the new one failed.
+        } catch NetbootError.serveFailed(let detail) {
+            // The netboot daemon stopped the old server before the new one failed.
             state.withLockUnchecked { $0.serving = nil }
-            throw HelperError.serveFailed(detail)
+            throw NetbootError.serveFailed(detail)
         }
     }
 
     public func stopServing() async throws {
         state.withLockUnchecked { $0.serving = nil }
-        try await call { helper, reply in helper.stopServing { reply(nil) } }
+        try await call { daemon, reply in daemon.stopServing { reply(nil) } }
     }
 
-    /// The interface the helper serves, nil when it serves none. Registers this client for events.
+    /// The interface the netboot daemon serves, nil when it serves none. Registers this client for events.
     public func servingInterface() async throws -> String? {
-        try await request { helper, reply in helper.servingInterface { reply(.success($0)) } }
+        try await request { daemon, reply in daemon.servingInterface { reply(.success($0)) } }
     }
 
     public func writeFile(_ path: String, contents: Data) async throws {
-        try await call { helper, reply in helper.writeFile(path, contents: contents, reply: reply) }
+        try await call { daemon, reply in daemon.writeFile(path, contents: contents, reply: reply) }
     }
 
     public func removeFile(_ path: String) async throws {
-        try await call { helper, reply in helper.removeFile(path, reply: reply) }
+        try await call { daemon, reply in daemon.removeFile(path, reply: reply) }
     }
 
-    /// Closes the connection and finishes `events`. Later calls throw `HelperError.invalidated`.
+    /// Closes the connection and finishes `events`. Later calls throw `NetbootError.invalidated`.
     public func invalidate() {
         let connection = state.withLockUnchecked { state in
             state.invalidated = true
@@ -70,26 +70,26 @@ public final class HelperClient: Sendable {
         continuation.finish()
     }
 
-    private func call(_ body: (any ProvisionerHelperProtocol, @escaping @Sendable (NSError?) -> Void) -> Void) async throws {
-        try await request { helper, reply in
-            body(helper) { error in reply(error.map { .failure(HelperError($0)) } ?? .success(())) }
+    private func call(_ body: (any ProvisionerNetbootProtocol, @escaping @Sendable (NSError?) -> Void) -> Void) async throws {
+        try await request { daemon, reply in
+            body(daemon) { error in reply(error.map { .failure(NetbootError($0)) } ?? .success(())) }
         }
     }
 
     private func request<T: Sendable>(
-        _ body: (any ProvisionerHelperProtocol, @escaping @Sendable (Result<T, HelperError>) -> Void) -> Void
+        _ body: (any ProvisionerNetbootProtocol, @escaping @Sendable (Result<T, NetbootError>) -> Void) -> Void
     ) async throws -> T {
-        guard let connection = connection() else { throw HelperError.invalidated }
+        guard let connection = connection() else { throw NetbootError.invalidated }
         return try await withCheckedThrowingContinuation { (waiter: CheckedContinuation<T, any Error>) in
             let once = ResumeOnce(waiter)
             let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                once.resume(with: .failure(HelperError.connection((error as NSError).localizedDescription)))
+                once.resume(with: .failure(NetbootError.connection((error as NSError).localizedDescription)))
             }
-            guard let helper = proxy as? any ProvisionerHelperProtocol else {
-                once.resume(with: .failure(HelperError.connection("proxy does not conform")))
+            guard let daemon = proxy as? any ProvisionerNetbootProtocol else {
+                once.resume(with: .failure(NetbootError.connection("proxy does not conform")))
                 return
             }
-            body(helper) { once.resume(with: $0.mapError { $0 }) }
+            body(daemon) { once.resume(with: $0.mapError { $0 }) }
         }
     }
 
@@ -113,8 +113,8 @@ public final class HelperClient: Sendable {
 
     private func configuredConnection() -> NSXPCConnection {
         let connection = makeConnection()
-        connection.remoteObjectInterface = ProvisionerHelperXPC.helperInterface()
-        connection.exportedInterface = ProvisionerHelperXPC.eventsInterface()
+        connection.remoteObjectInterface = ProvisionerNetbootXPC.netbootInterface()
+        connection.exportedInterface = ProvisionerNetbootXPC.eventsInterface()
         connection.exportedObject = EventReceiver(continuation: continuation)
         connection.interruptionHandler = { [weak self] in self?.resumeServing() }
         connection.invalidationHandler = { [weak self, weak connection] in
@@ -126,35 +126,35 @@ public final class HelperClient: Sendable {
         return connection
     }
 
-    /// The helper restarted and serves nothing. Any message reconnects this client for events;
+    /// The netboot daemon restarted and serves nothing. Any message reconnects this client for events;
     /// then ask again for what it served.
     private func resumeServing() {
         let serving = state.withLockUnchecked { $0.serving }
         Task {
             do {
                 if let serving {
-                    try await call { helper, reply in helper.serve(interface: serving.interface, bootFilename: serving.bootFilename, reply: reply) }
+                    try await call { daemon, reply in daemon.serve(interface: serving.interface, bootFilename: serving.bootFilename, reply: reply) }
                 } else {
                     _ = try await servingInterface()
                 }
             } catch {
-                Logger(subsystem: ProvisionerHelperXPC.machServiceName, category: "client")
-                    .error("serving again after the helper restarted failed: \(String(describing: error), privacy: .public)")
+                Logger(subsystem: ProvisionerNetbootXPC.machServiceName, category: "client")
+                    .error("serving again after the netboot daemon restarted failed: \(String(describing: error), privacy: .public)")
             }
         }
     }
 }
 
-private final class EventReceiver: NSObject, ProvisionerHelperEventsProtocol, Sendable {
-    private let continuation: AsyncStream<HelperEvent>.Continuation
+private final class EventReceiver: NSObject, ProvisionerNetbootEventsProtocol, Sendable {
+    private let continuation: AsyncStream<NetbootEvent>.Continuation
 
-    init(continuation: AsyncStream<HelperEvent>.Continuation) {
+    init(continuation: AsyncStream<NetbootEvent>.Continuation) {
         self.continuation = continuation
     }
 
-    func helperEvent(_ event: Data) {
-        guard let event = try? HelperEvent(encoded: event) else {
-            Logger(subsystem: ProvisionerHelperXPC.machServiceName, category: "client").error("undecodable helper event")
+    func netbootEvent(_ event: Data) {
+        guard let event = try? NetbootEvent(encoded: event) else {
+            Logger(subsystem: ProvisionerNetbootXPC.machServiceName, category: "client").error("undecodable netboot daemon event")
             return
         }
         continuation.yield(event)

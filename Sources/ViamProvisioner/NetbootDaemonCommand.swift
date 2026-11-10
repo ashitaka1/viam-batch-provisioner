@@ -1,9 +1,9 @@
 import Foundation
 import ServiceManagement
 
-/// The `ProvisionerHelper` launch daemon the app bundle carries in `Contents/Library/LaunchDaemons`.
-enum HelperDaemon {
-    static var service: SMAppService { .daemon(plistName: "com.bringingfire.viam-provisioner.helper.plist") }
+/// The `ProvisionerNetboot` launch daemon the app bundle carries in `Contents/Library/LaunchDaemons`.
+enum NetbootDaemon {
+    static var service: SMAppService { .daemon(plistName: "com.bringingfire.viam-provisioner.netboot.plist") }
 
     static func describe(_ status: SMAppService.Status) -> String {
         switch status {
@@ -16,14 +16,14 @@ enum HelperDaemon {
     }
 }
 
-/// `ViamProvisioner --helper-daemon register|unregister|status`: registers the helper from the
+/// `ViamProvisioner --netboot-daemon register|unregister|status`: registers the netboot daemon from the
 /// app's own process, which SMAppService requires, and exits before any window opens.
-enum HelperDaemonCommand {
+enum NetbootDaemonCommand {
     static func runIfRequested() {
         let arguments = CommandLine.arguments
-        guard let flag = arguments.firstIndex(of: "--helper-daemon") else { return }
+        guard let flag = arguments.firstIndex(of: "--netboot-daemon") else { return }
         let action = arguments.indices.contains(flag + 1) ? arguments[flag + 1] : ""
-        let service = HelperDaemon.service
+        let service = NetbootDaemon.service
         do {
             switch action {
             case "register":
@@ -37,12 +37,12 @@ enum HelperDaemonCommand {
             case "status":
                 break
             default:
-                fail("--helper-daemon takes register, unregister or status.")
+                fail("--netboot-daemon takes register, unregister or status.")
             }
         } catch {
-            fail("helper daemon \(action) failed: \(error.localizedDescription) (\((error as NSError).code))")
+            fail("netboot daemon \(action) failed: \(error.localizedDescription) (\((error as NSError).code))")
         }
-        print("helper daemon: \(HelperDaemon.describe(service.status))")
+        print("netboot daemon: \(NetbootDaemon.describe(service.status))")
         exit(0)
     }
 
@@ -51,7 +51,7 @@ enum HelperDaemonCommand {
         let done = DispatchSemaphore(value: 0)
         Task.detached {
             defer { done.signal() }
-            do { try await HelperDaemon.service.unregister() } catch { result.set(.failure(error)) }
+            do { try await NetbootDaemon.service.unregister() } catch { result.set(.failure(error)) }
         }
         done.wait()
         try result.get().get()

@@ -1,11 +1,11 @@
 import Foundation
 import os
-import ProvisionerHelperXPC
+import ProvisionerNetbootXPC
 import ProvisionerPXE
 
-/// The helper's XPC listener delegate: accepts peers, hosts at most one `PXEServer`, and
+/// The netboot daemon's XPC listener delegate: accepts peers, hosts at most one `PXEServer`, and
 /// sends every PXE event to every connected peer.
-public final class HelperService: NSObject, NSXPCListenerDelegate, Sendable {
+public final class NetbootService: NSObject, NSXPCListenerDelegate, Sendable {
     public typealias Configure = @Sendable (_ interface: String, _ bootFilename: String, _ root: URL) -> PXEConfiguration
 
     public static let standardConfiguration: Configure = { interface, bootFilename, root in
@@ -18,21 +18,21 @@ public final class HelperService: NSObject, NSXPCListenerDelegate, Sendable {
     let host: PXEHost
     private let acceptPeer: @Sendable (NSXPCConnection) -> Bool
     private let peers = OSAllocatedUnfairLock(uncheckedState: [ObjectIdentifier: NSXPCConnection]())
-    static let log = Logger(subsystem: ProvisionerHelperXPC.machServiceName, category: "helper")
+    static let log = Logger(subsystem: ProvisionerNetbootXPC.machServiceName, category: "netboot")
 
     /// `acceptPeer` runs on each connection, after the listener's code signing requirement.
     public init(
         root: URL,
         acceptPeer: @escaping @Sendable (NSXPCConnection) -> Bool = { _ in true },
-        configure: @escaping Configure = HelperService.standardConfiguration
+        configure: @escaping Configure = NetbootService.standardConfiguration
     ) {
         files = TFTPRootFiles(root: root)
         self.acceptPeer = acceptPeer
         let peers = peers
         host = PXEHost(root: root, configure: configure) { event in
-            guard let data = try? HelperEvent(event).encoded() else { return }
+            guard let data = try? NetbootEvent(event).encoded() else { return }
             for peer in peers.withLockUnchecked({ Array($0.values) }) {
-                (peer.remoteObjectProxyWithErrorHandler { _ in } as? any ProvisionerHelperEventsProtocol)?.helperEvent(data)
+                (peer.remoteObjectProxyWithErrorHandler { _ in } as? any ProvisionerNetbootEventsProtocol)?.netbootEvent(data)
             }
         }
     }
@@ -42,9 +42,9 @@ public final class HelperService: NSObject, NSXPCListenerDelegate, Sendable {
             Self.log.error("refused peer \(connection.processIdentifier) running as uid \(connection.effectiveUserIdentifier)")
             return false
         }
-        connection.exportedInterface = ProvisionerHelperXPC.helperInterface()
-        connection.exportedObject = HelperEndpoint(service: self)
-        connection.remoteObjectInterface = ProvisionerHelperXPC.eventsInterface()
+        connection.exportedInterface = ProvisionerNetbootXPC.netbootInterface()
+        connection.exportedObject = NetbootEndpoint(service: self)
+        connection.remoteObjectInterface = ProvisionerNetbootXPC.eventsInterface()
         let id = ObjectIdentifier(connection)
         connection.invalidationHandler = { [peers] in
             _ = peers.withLockUnchecked { $0.removeValue(forKey: id) }
@@ -61,7 +61,7 @@ public final class HelperService: NSObject, NSXPCListenerDelegate, Sendable {
     }
 }
 
-extension HelperEvent {
+extension NetbootEvent {
     init(_ event: PXEEvent) {
         switch event {
         case let .offered(client):
@@ -86,12 +86,12 @@ actor PXEHost {
     }
 
     private let root: URL
-    private let configure: HelperService.Configure
+    private let configure: NetbootService.Configure
     private let send: @Sendable (PXEEvent) -> Void
     private var serving: Serving?
     private var tail: Task<Void, Never>?
 
-    init(root: URL, configure: @escaping HelperService.Configure, send: @escaping @Sendable (PXEEvent) -> Void) {
+    init(root: URL, configure: @escaping NetbootService.Configure, send: @escaping @Sendable (PXEEvent) -> Void) {
         self.root = root
         self.configure = configure
         self.send = send
@@ -107,14 +107,14 @@ actor PXEHost {
             do {
                 try await server.start()
             } catch {
-                throw HelperError.serveFailed("\(interface): \(error)")
+                throw NetbootError.serveFailed("\(interface): \(error)")
             }
             let send = self.send
             let pump = Task {
                 for await event in server.events { send(event) }
             }
             await self.setServing(Serving(interface: interface, bootFilename: bootFilename, server: server, pump: pump))
-            HelperService.log.info("serving on \(interface, privacy: .public) with \(bootFilename, privacy: .public)")
+            NetbootService.log.info("serving on \(interface, privacy: .public) with \(bootFilename, privacy: .public)")
         }
     }
 
@@ -131,7 +131,7 @@ actor PXEHost {
         self.serving = nil
         await serving.server.stop()
         await serving.pump.value
-        HelperService.log.info("stopped serving on \(serving.interface, privacy: .public)")
+        NetbootService.log.info("stopped serving on \(serving.interface, privacy: .public)")
     }
 
     /// Runs `operation` after every operation queued before it has finished.
@@ -147,10 +147,10 @@ actor PXEHost {
 }
 
 /// The object a peer's calls land on.
-final class HelperEndpoint: NSObject, ProvisionerHelperProtocol, Sendable {
-    private let service: HelperService
+final class NetbootEndpoint: NSObject, ProvisionerNetbootProtocol, Sendable {
+    private let service: NetbootService
 
-    init(service: HelperService) {
+    init(service: NetbootService) {
         self.service = service
     }
 
@@ -160,7 +160,7 @@ final class HelperEndpoint: NSObject, ProvisionerHelperProtocol, Sendable {
                 try await service.host.serve(interface: interface, bootFilename: bootFilename)
                 reply(nil)
             } catch {
-                HelperService.log.error("serve failed: \(String(describing: error), privacy: .public)")
+                NetbootService.log.error("serve failed: \(String(describing: error), privacy: .public)")
                 reply(Self.nsError(error))
             }
         }
@@ -196,6 +196,6 @@ final class HelperEndpoint: NSObject, ProvisionerHelperProtocol, Sendable {
     }
 
     private static func nsError(_ error: any Error) -> NSError {
-        (error as? HelperError ?? .writeFailed("\(error)")).nsError
+        (error as? NetbootError ?? .writeFailed("\(error)")).nsError
     }
 }

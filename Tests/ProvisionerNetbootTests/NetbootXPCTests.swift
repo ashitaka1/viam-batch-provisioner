@@ -2,8 +2,8 @@ import Foundation
 import NIOCore
 import NIOPosix
 import os
-import ProvisionerHelperCore
-import ProvisionerHelperXPC
+import ProvisionerNetbootCore
+import ProvisionerNetbootXPC
 import Testing
 @testable import ProvisionerPXE
 
@@ -46,10 +46,10 @@ private final class OfferCollector: ChannelInboundHandler, @unchecked Sendable {
     }
 }
 
-/// A helper service behind an anonymous listener on lo0 with free ports, and a client connected to it.
+/// A netboot daemon service behind an anonymous listener on lo0 with free ports, and a client connected to it.
 private final class Rig: @unchecked Sendable {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    let service: HelperService
+    let service: NetbootService
     let listener: NSXPCListener
     let ports: [Int]
     let sender: any Channel
@@ -70,7 +70,7 @@ private final class Rig: @unchecked Sendable {
             .bind(host: "127.0.0.1", port: 0).get()
         let offerDestination = sender.localAddress!
         let configureCount = configureCount
-        service = HelperService(root: root, acceptPeer: acceptPeer) { interface, bootFilename, root in
+        service = NetbootService(root: root, acceptPeer: acceptPeer) { interface, bootFilename, root in
             configureCount.withLock { $0 += 1 }
             var configuration = PXEConfiguration(interface: interface, tftpRoot: root)
             configuration.bootFilename = bootFilename
@@ -83,16 +83,16 @@ private final class Rig: @unchecked Sendable {
         listener.resume()
     }
 
-    func client() -> HelperClient {
+    func client() -> NetbootClient {
         let endpoint = listener.endpoint
-        return HelperClient { NSXPCConnection(listenerEndpoint: endpoint) }
+        return NetbootClient { NSXPCConnection(listenerEndpoint: endpoint) }
     }
 
     func sendDiscover(mac: [UInt8]) async throws {
         try await sender.writeAndFlush(AddressedEnvelope(remoteAddress: SocketAddress(ipAddress: "127.0.0.1", port: ports[0]), data: discover(mac: mac)))
     }
 
-    /// The boot file named in the next offer the helper sends.
+    /// The boot file named in the next offer the netboot daemon sends.
     func nextOfferedBootFile() async -> Outcome<String> {
         await first(of: collector.offers).map(\.file)
     }
@@ -153,7 +153,7 @@ private func first<Element: Sendable & Equatable>(
     }
 }
 
-@Suite(.serialized) struct HelperXPCTests {
+@Suite(.serialized) struct NetbootXPCTests {
     @Test func servesAndSendsOffersToEveryPeer() async throws {
         try await withRig { rig in
             let server = rig.client()
@@ -165,7 +165,7 @@ private func first<Element: Sendable & Equatable>(
             #expect(try await watcher.servingInterface() == "lo0")
             try await rig.sendDiscover(mac: [2, 0, 0, 0, 0, 0x2A])
 
-            let expected = HelperEvent.offered(mac: "02:00:00:00:00:2a", architecture: 7, uuid: nil)
+            let expected = NetbootEvent.offered(mac: "02:00:00:00:00:2a", architecture: 7, uuid: nil)
             #expect(await first(of: server.events) == .element(expected))
             #expect(await first(of: watcher.events) == .element(expected))
         }
@@ -249,7 +249,7 @@ private func first<Element: Sendable & Equatable>(
             do {
                 try await client.serve(interface: "nosuch9", bootFilename: "grubx64.efi")
                 Issue.record("served on a missing interface")
-            } catch let HelperError.serveFailed(detail) {
+            } catch let NetbootError.serveFailed(detail) {
                 #expect(detail.contains("nosuch9"), "\(detail)")
             }
             #expect(try await client.servingInterface() == nil)
@@ -263,7 +263,7 @@ private func first<Element: Sendable & Equatable>(
             try await client.writeFile("grub/grub.cfg", contents: Data("set timeout=5\n".utf8))
             #expect(try Data(contentsOf: rig.root.appendingPathComponent("grub/grub.cfg")) == Data("set timeout=5\n".utf8))
 
-            await #expect(throws: HelperError.invalidPath("../outside")) {
+            await #expect(throws: NetbootError.invalidPath("../outside")) {
                 try await client.writeFile("../outside", contents: Data())
             }
             try await client.removeFile("grub/grub.cfg")
@@ -276,7 +276,7 @@ private func first<Element: Sendable & Equatable>(
             let client = rig.client()
             defer { client.invalidate() }
             await #expect { try await client.writeFile("grub/grub.cfg", contents: Data("x".utf8)) } throws: { error in
-                if case HelperError.connection = error { true } else { false }
+                if case NetbootError.connection = error { true } else { false }
             }
             #expect(!FileManager.default.fileExists(atPath: rig.root.appendingPathComponent("grub/grub.cfg").path))
         }
@@ -287,7 +287,7 @@ private func first<Element: Sendable & Equatable>(
             let client = rig.client()
             client.invalidate()
             #expect(await first(of: client.events) == .finished)
-            await #expect(throws: HelperError.invalidated) { _ = try await client.servingInterface() }
+            await #expect(throws: NetbootError.invalidated) { _ = try await client.servingInterface() }
         }
     }
 }

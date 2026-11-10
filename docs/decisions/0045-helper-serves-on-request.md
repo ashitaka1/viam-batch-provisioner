@@ -6,6 +6,8 @@ Date: 2026-11-05
 
 Accepted
 
+The code now calls the helper the netboot daemon: `ProvisionerNetboot`, `ProvisionerNetbootCore`, `ProvisionerNetbootXPC`, `provisioner-netbootctl`, `just netboot`, and the launchd label `com.bringingfire.viam-provisioner.netboot`.
+
 ## Context
 
 `ProvisionerHelper` runs as root from boot (decision 30) and hosts ProvisionerPXE. Its peer, `ProvisionerServer`, knows the serving interface and boot file from its settings and writes the TFTP root's per-MAC files (#107). launchd restarts either daemon on its own.

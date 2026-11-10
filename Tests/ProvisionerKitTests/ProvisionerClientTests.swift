@@ -185,14 +185,14 @@ private struct RefusingTransport: ClientTransport {
     #expect(status.services == .init(http: .up))
 }
 
-@Test func statusWithHelper() async throws {
+@Test func statusWithNetboot() async throws {
     let transport = ScriptedTransport(json: 200, #"""
         {"api_version":"v1","server_name":"lab-mac","time":"2026-10-04T04:08:29+00:00",
-         "services":{"http":"up","helper":"down"},"last_event_id":0}
+         "services":{"http":"up","netboot":"down"},"last_event_id":0}
         """#)
     let status = try await ProvisionerClient(baseURL: base, transport: transport).status()
 
-    #expect(status.services.helper == .down)
+    #expect(status.services.netboot == .down)
 }
 
 @Test func htmlBadGatewayIsUnexpected() async {

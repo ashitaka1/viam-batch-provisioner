@@ -14,7 +14,7 @@ struct ViamProvisionerApp: App {
 
     init() {
         ImportEnvironmentCommand.runIfRequested()
-        HelperDaemonCommand.runIfRequested()
+        NetbootDaemonCommand.runIfRequested()
         let session = ViamSession()
         let tokens = session.tokens
         let baseURL = session.baseURL

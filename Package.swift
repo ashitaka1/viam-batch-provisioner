@@ -7,9 +7,9 @@ let package = Package(
     products: [
         .library(name: "ProvisionerPXE", targets: ["ProvisionerPXE"]),
         .executable(name: "provisioner-pxe", targets: ["provisioner-pxe"]),
-        .library(name: "ProvisionerHelperXPC", targets: ["ProvisionerHelperXPC"]),
-        .executable(name: "ProvisionerHelper", targets: ["ProvisionerHelper"]),
-        .executable(name: "provisioner-helperctl", targets: ["provisioner-helperctl"]),
+        .library(name: "ProvisionerNetbootXPC", targets: ["ProvisionerNetbootXPC"]),
+        .executable(name: "ProvisionerNetboot", targets: ["ProvisionerNetboot"]),
+        .executable(name: "provisioner-netbootctl", targets: ["provisioner-netbootctl"]),
         .library(name: "ProvisionerAPI", targets: ["ProvisionerAPI"]),
         .library(name: "ProvisionerKit", targets: ["ProvisionerKit"]),
         .library(name: "ViamAPI", targets: ["ViamAPI"]),
@@ -53,24 +53,24 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
             ]
         ),
-        .target(name: "ProvisionerHelperXPC"),
+        .target(name: "ProvisionerNetbootXPC"),
         .target(
-            name: "ProvisionerHelperCore",
-            dependencies: ["ProvisionerHelperXPC", "ProvisionerPXE"]
+            name: "ProvisionerNetbootCore",
+            dependencies: ["ProvisionerNetbootXPC", "ProvisionerPXE"]
         ),
         .executableTarget(
-            name: "ProvisionerHelper",
-            dependencies: ["ProvisionerHelperCore", "ProvisionerHelperXPC"]
+            name: "ProvisionerNetboot",
+            dependencies: ["ProvisionerNetbootCore", "ProvisionerNetbootXPC"]
         ),
         .executableTarget(
-            name: "provisioner-helperctl",
-            dependencies: ["ProvisionerHelperXPC"]
+            name: "provisioner-netbootctl",
+            dependencies: ["ProvisionerNetbootXPC"]
         ),
         .testTarget(
-            name: "ProvisionerHelperTests",
+            name: "ProvisionerNetbootTests",
             dependencies: [
-                "ProvisionerHelperCore",
-                "ProvisionerHelperXPC",
+                "ProvisionerNetbootCore",
+                "ProvisionerNetbootXPC",
                 "ProvisionerPXE",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
@@ -156,7 +156,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "_NIOFileSystem", package: "swift-nio"),
-                .target(name: "ProvisionerHelperXPC", condition: .when(platforms: [.macOS])),
+                .target(name: "ProvisionerNetbootXPC", condition: .when(platforms: [.macOS])),
             ],
             plugins: [
                 .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),
@@ -172,7 +172,7 @@ let package = Package(
                 "ProvisionerServer",
                 "ProvisionerAPI",
                 "ProvisionerKit",
-                .target(name: "ProvisionerHelperXPC", condition: .when(platforms: [.macOS])),
+                .target(name: "ProvisionerNetbootXPC", condition: .when(platforms: [.macOS])),
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "HummingbirdTesting", package: "hummingbird"),
                 .product(name: "Logging", package: "swift-log"),

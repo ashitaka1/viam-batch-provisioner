@@ -22,13 +22,13 @@ import Testing
     #expect(configuration.advertiseAddress == nil)
 }
 
-@Test func helperFlagTakesNoValue() throws {
-    #if canImport(ProvisionerHelperXPC)
-    #expect(try ServerConfiguration.parse(["--files", "/x", "--helper"]).linksHelper)
-    #expect(try ServerConfiguration.parse(["--helper", "--files", "/x"]).linksHelper)
-    #expect(try !ServerConfiguration.parse(["--files", "/x"]).linksHelper)
+@Test func netbootFlagTakesNoValue() throws {
+    #if canImport(ProvisionerNetbootXPC)
+    #expect(try ServerConfiguration.parse(["--files", "/x", "--netboot"]).linksNetboot)
+    #expect(try ServerConfiguration.parse(["--netboot", "--files", "/x"]).linksNetboot)
+    #expect(try !ServerConfiguration.parse(["--files", "/x"]).linksNetboot)
     #else
-    #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(["--files", "/x", "--helper"]) }
+    #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(["--files", "/x", "--netboot"]) }
     #endif
 }
 

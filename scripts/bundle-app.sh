@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the macOS app and assembles build/Viam Provisioner.app with the
-# ProvisionerHelper launch daemon inside, signs it and registers its URL scheme.
-# Also builds and signs build/provisioner-helperctl, which drives the helper. Signs with
+# ProvisionerNetboot launch daemon inside, signs it and registers its URL scheme.
+# Also builds and signs build/provisioner-netbootctl, which drives the netboot daemon. Signs with
 # CODESIGN_IDENTITY from the environment, else from config/signing.env, else ad hoc.
 set -euo pipefail
 
@@ -22,22 +22,22 @@ else
 fi
 
 cd "$ROOT"
-for product in ViamProvisioner ProvisionerHelper provisioner-helperctl; do
+for product in ViamProvisioner ProvisionerNetboot provisioner-netbootctl; do
     swift build -c release --product "$product"
 done
 BIN=$(swift build -c release --show-bin-path)
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons"
-cp "$BIN/ViamProvisioner" "$BIN/ProvisionerHelper" "$APP/Contents/MacOS/"
+cp "$BIN/ViamProvisioner" "$BIN/ProvisionerNetboot" "$APP/Contents/MacOS/"
 cp App/Info.plist "$APP/Contents/Info.plist"
 cp App/LaunchDaemons/*.plist "$APP/Contents/Library/LaunchDaemons/"
-cp "$BIN/provisioner-helperctl" "$ROOT/build/provisioner-helperctl"
+cp "$BIN/provisioner-netbootctl" "$ROOT/build/provisioner-netbootctl"
 
-# The helper accepts peers by team, or, ad hoc, by these identifiers (PeerRequirement).
+# The netboot daemon accepts peers by team, or, ad hoc, by these identifiers (PeerRequirement).
 SIGN=(codesign --force --options runtime --sign "${CODESIGN_IDENTITY:--}")
-"${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.helper "$APP/Contents/MacOS/ProvisionerHelper"
-"${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.helperctl "$ROOT/build/provisioner-helperctl"
+"${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.netboot "$APP/Contents/MacOS/ProvisionerNetboot"
+"${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.netbootctl "$ROOT/build/provisioner-netbootctl"
 codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
 echo "$APP"

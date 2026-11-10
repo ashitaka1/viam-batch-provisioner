@@ -1,9 +1,9 @@
-#if canImport(ProvisionerHelperXPC)
+#if canImport(ProvisionerNetbootXPC)
 import Logging
-import ProvisionerHelperXPC
+import ProvisionerNetbootXPC
 
 extension PXEObservation {
-    init?(_ event: HelperEvent) {
+    init?(_ event: NetbootEvent) {
         switch event {
         case .offered(let mac, _, _): self = .offered(mac: mac)
         case .fileSent(let filename, _, let mac, _): self = .fileSent(filename: filename, mac: mac)
@@ -11,11 +11,11 @@ extension PXEObservation {
     }
 }
 
-/// Records every event the helper sends while registering with it every `retry`,
-/// so a client whose connection was invalidated, by a helper that was replaced or
+/// Records every event the netboot daemon sends while registering with it every `retry`,
+/// so a client whose connection was invalidated, by a netboot daemon that was replaced or
 /// registered again, connects afresh. Returns when `client.events` finishes, which
 /// `client.invalidate()` does, or when cancelled.
-func linkHelper(_ client: HelperClient, to provisioner: Provisioner, logger: Logger,
+func linkNetbootDaemon(_ client: NetbootClient, to provisioner: Provisioner, logger: Logger,
                 retry: Duration = .seconds(30)) async {
     await withDiscardingTaskGroup { group in
         group.addTask { await keepRegistered(client, logger: logger, every: retry) }
@@ -26,30 +26,30 @@ func linkHelper(_ client: HelperClient, to provisioner: Provisioner, logger: Log
     }
 }
 
-private func keepRegistered(_ client: HelperClient, logger: Logger, every retry: Duration) async {
+private func keepRegistered(_ client: NetbootClient, logger: Logger, every retry: Duration) async {
     var failing = false
     while !Task.isCancelled {
         do {
             _ = try await client.servingInterface()
-            if failing { logger.info("registered with the helper") }
+            if failing { logger.info("registered with the netboot daemon") }
             failing = false
-        } catch HelperError.invalidated {
+        } catch NetbootError.invalidated {
             return
         } catch {
-            logger.warning("registering with the helper failed, retrying in \(retry): \(error)")
+            logger.warning("registering with the netboot daemon failed, retrying in \(retry): \(error)")
             failing = true
         }
         do { try await Task.sleep(for: retry) } catch { return }
     }
 }
 
-/// Starts `linkHelper` when the configuration asks for it. The returned closure
+/// Starts `linkNetbootDaemon` when the configuration asks for it. The returned closure
 /// cancels the link, invalidates its client and waits for it to end.
-func startHelperLink(_ configuration: ServerConfiguration, provisioner: Provisioner,
+func startNetbootLink(_ configuration: ServerConfiguration, provisioner: Provisioner,
                      logger: Logger) -> @Sendable () async -> Void {
-    guard configuration.linksHelper else { return {} }
-    let client = HelperClient()
-    let link = Task { await linkHelper(client, to: provisioner, logger: logger) }
+    guard configuration.linksNetboot else { return {} }
+    let client = NetbootClient()
+    let link = Task { await linkNetbootDaemon(client, to: provisioner, logger: logger) }
     return {
         link.cancel()
         client.invalidate()
@@ -59,7 +59,7 @@ func startHelperLink(_ configuration: ServerConfiguration, provisioner: Provisio
 #else
 import Logging
 
-func startHelperLink(_ configuration: ServerConfiguration, provisioner: Provisioner,
+func startNetbootLink(_ configuration: ServerConfiguration, provisioner: Provisioner,
                      logger: Logger) -> @Sendable () async -> Void {
     {}
 }

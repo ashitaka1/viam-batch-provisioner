@@ -1,16 +1,16 @@
 import Foundation
 
-public enum HelperError: Error, Hashable, Sendable {
+public enum NetbootError: Error, Hashable, Sendable {
     /// The path is absolute, empty, or has an empty, `.` or `..` component.
     case invalidPath(String)
     case serveFailed(String)
     case writeFailed(String)
-    /// The XPC connection failed: the helper isn't registered or approved, or refused this process.
+    /// The XPC connection failed: the netboot daemon isn't registered or approved, or refused this process.
     case connection(String)
     /// The client was invalidated; it makes no more calls.
     case invalidated
 
-    public static let domain = "com.bringingfire.viam-provisioner.helper"
+    public static let domain = "com.bringingfire.viam-provisioner.netboot"
     private static let detailKey = "detail"
 
     public var nsError: NSError {
