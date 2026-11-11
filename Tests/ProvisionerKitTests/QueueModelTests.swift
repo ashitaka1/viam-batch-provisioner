@@ -67,11 +67,18 @@ private final class FakeQueueSource: QueueSource {
             return $0.snapshot
         }.get()
     }
-    /// Stays open, sending nothing.
+    /// Stays open, sending what `send` gives it.
     func eventFrames(after id: Int) async throws -> AsyncThrowingStream<ServerSentEvent, any Error> {
         let (stream, continuation) = AsyncThrowingStream.makeStream(of: ServerSentEvent.self)
         state.withLock { $0.openStreams.append(continuation) }
         return stream
+    }
+
+    var openStreams: Int { state.withLock { $0.openStreams.count } }
+
+    /// Sends the frame on every open event stream.
+    func send(_ frame: ServerSentEvent) {
+        state.withLock { $0.openStreams }.forEach { $0.yield(frame) }
     }
 }
 
@@ -282,6 +289,25 @@ struct QueueModelTests {
         #expect(model.entries.map(\.name) == ["m1"])
         running.cancel()
         await running.value
+    }
+
+    @Test func runPostsANotificationForEachInstallThatEnds() async {
+        let source = FakeQueueSource()
+        source.set(entry("m1", .installed))
+        source.set(entry("m2", .failed))
+        let poster = RecordingPoster()
+        let model = QueueModel(serverName: "bench", source: source, notifier: InstallNotifier(poster: poster))
+        let running = Task { await model.run() }
+        defer { running.cancel() }
+        _ = await poll { source.openStreams == 1 }
+
+        let stamp = "2026-10-04T04:08:29+00:00"
+        source.send(ServerSentEvent(id: "1", event: "install-started", data: #"{"id":1,"type":"install-started","timestamp":"\#(stamp)","name":"m1"}"#))
+        source.send(ServerSentEvent(id: "2", event: "install-complete", data: #"{"id":2,"type":"install-complete","timestamp":"\#(stamp)","name":"m1","duration_seconds":600}"#))
+        source.send(ServerSentEvent(id: "3", event: "install-failed", data: #"{"id":3,"type":"install-failed","timestamp":"\#(stamp)","name":"m2","stage":"late-commands","reason":"no activity","source":"timeout"}"#))
+
+        _ = await poll { poster.titles.count == 2 }
+        #expect(poster.titles == ["m1 installed", "m2 failed"])
     }
 
     @Test func failedRefreshKeepsTheEntries() async {

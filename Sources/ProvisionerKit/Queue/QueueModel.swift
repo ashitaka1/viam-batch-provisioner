@@ -41,17 +41,21 @@ public final class QueueModel {
     private(set) var handledUpdates = 0
 
     private let source: any QueueSource
+    private let notifier: InstallNotifier?
     private let refreshInterval: Duration
     private let sleep: @Sendable (Duration) async throws -> Void
     /// The last queued piece of work; each waits for the one before.
     private var tail: Task<Void, Never>?
 
     /// The queue is read again every `refreshInterval`, since queueing
-    /// machines and changes outside the API emit no event.
-    public init(serverName: String, source: any QueueSource, refreshInterval: Duration = .seconds(15),
+    /// machines and changes outside the API emit no event. `notifier`
+    /// handles each update after the model does.
+    public init(serverName: String, source: any QueueSource, notifier: InstallNotifier? = nil,
+                refreshInterval: Duration = .seconds(15),
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.serverName = serverName
         self.source = source
+        self.notifier = notifier
         self.refreshInterval = refreshInterval
         self.sleep = sleep
     }
@@ -98,6 +102,7 @@ public final class QueueModel {
         for await update in updates {
             await serially { await self.handle(update) }
             handledUpdates += 1
+            await notifier?.handle(update)
         }
     }
 

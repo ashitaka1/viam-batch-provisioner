@@ -79,7 +79,8 @@ struct MainWindow: View {
                 online = nil
                 return
             }
-            let model = QueueModel(serverName: server.name, source: ProvisionerClient(baseURL: server.baseURL))
+            let model = QueueModel(serverName: server.name, source: ProvisionerClient(baseURL: server.baseURL),
+                                   notifier: InstallNotifier(poster: UserNotificationPoster()))
             let monitor = OnlineMonitor(serverURL: server.baseURL, history: history, fleet: { [keys] in keys.fleet(org: $0, location: $1) })
             queue = model
             online = monitor
