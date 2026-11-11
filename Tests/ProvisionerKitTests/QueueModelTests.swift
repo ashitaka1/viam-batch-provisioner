@@ -299,15 +299,19 @@ struct QueueModelTests {
         let model = QueueModel(serverName: "bench", source: source, notifier: InstallNotifier(poster: poster))
         let running = Task { await model.run() }
         defer { running.cancel() }
-        _ = await poll { source.openStreams == 1 }
+        #expect(await poll { source.openStreams == 1 }, "the model never opened the event stream")
 
         let stamp = "2026-10-04T04:08:29+00:00"
         source.send(ServerSentEvent(id: "1", event: "install-started", data: #"{"id":1,"type":"install-started","timestamp":"\#(stamp)","name":"m1"}"#))
         source.send(ServerSentEvent(id: "2", event: "install-complete", data: #"{"id":2,"type":"install-complete","timestamp":"\#(stamp)","name":"m1","duration_seconds":600}"#))
         source.send(ServerSentEvent(id: "3", event: "install-failed", data: #"{"id":3,"type":"install-failed","timestamp":"\#(stamp)","name":"m2","stage":"late-commands","reason":"no activity","source":"timeout"}"#))
 
-        _ = await poll { poster.titles.count == 2 }
-        #expect(poster.titles == ["m1 installed", "m2 failed"])
+        // Updates are handled in order, so once m3's post lands every earlier post has too.
+        source.set(entry("m3", .installed))
+        source.send(ServerSentEvent(id: "4", event: "install-complete", data: #"{"id":4,"type":"install-complete","timestamp":"\#(stamp)","name":"m3","duration_seconds":60}"#))
+
+        _ = await poll { poster.titles.contains("m3 installed") }
+        #expect(poster.titles == ["m1 installed", "m2 failed", "m3 installed"])
     }
 
     @Test func failedRefreshKeepsTheEntries() async {
