@@ -49,7 +49,7 @@ public final class QueueModel {
 
     /// The queue is read again every `refreshInterval`, since queueing
     /// machines and changes outside the API emit no event. `notifier`
-    /// handles each update after the model does.
+    /// receives every update from the feed.
     public init(serverName: String, source: any QueueSource, notifier: InstallNotifier? = nil,
                 refreshInterval: Duration = .seconds(15),
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
@@ -99,10 +99,14 @@ public final class QueueModel {
             for await state in states { self?.connection = Connection(state) }
         }
         defer { watching.cancel() }
+        // The notifier takes updates in order on its own task, so a slow post never holds up the queue.
+        let (toNotifier, notifierInput) = AsyncStream.makeStream(of: QueueUpdate.self)
+        if let notifier { Task { await notifier.run(toNotifier) } }
+        defer { notifierInput.finish() }
         for await update in updates {
+            if notifier != nil { notifierInput.yield(update) }
             await serially { await self.handle(update) }
             handledUpdates += 1
-            await notifier?.handle(update)
         }
     }
 

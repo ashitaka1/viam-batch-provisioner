@@ -82,6 +82,39 @@ private final class FakeQueueSource: QueueSource {
     }
 }
 
+/// Holds every post until `release`.
+private final class HeldPoster: NotificationPoster {
+    private struct State {
+        var waiting: [CheckedContinuation<Void, Never>] = []
+        var released = false
+        var posted = 0
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    var held: Int { state.withLock { $0.waiting.count } }
+    var posted: Int { state.withLock { $0.posted } }
+
+    func release() {
+        state.withLock {
+            $0.released = true
+            defer { $0.waiting = [] }
+            return $0.waiting
+        }.forEach { $0.resume() }
+    }
+
+    func post(_ notification: InstallNotification) async throws {
+        await withCheckedContinuation { c in
+            let go = state.withLock {
+                if !$0.released { $0.waiting.append(c) }
+                return $0.released
+            }
+            if go { c.resume() }
+        }
+        state.withLock { $0.posted += 1 }
+    }
+}
+
 private func notFound(_ name: String) -> ProvisionerError {
     .server(status: 404, code: "not-found", message: "no \(name)", details: [])
 }
@@ -103,9 +136,9 @@ private final class Harness {
     private let states: AsyncStream<FeedState>.Continuation
     private let running: Task<Void, Never>
 
-    init() {
+    init(notifier: InstallNotifier? = nil) {
         let source = source
-        model = QueueModel(serverName: "bench", source: source)
+        model = QueueModel(serverName: "bench", source: source, notifier: notifier)
         let (updateStream, updates) = AsyncStream.makeStream(of: QueueUpdate.self)
         let (stateStream, states) = AsyncStream.makeStream(of: FeedState.self)
         self.updates = updates
@@ -310,8 +343,21 @@ struct QueueModelTests {
         source.set(entry("m3", .installed))
         source.send(ServerSentEvent(id: "4", event: "install-complete", data: #"{"id":4,"type":"install-complete","timestamp":"\#(stamp)","name":"m3","duration_seconds":60}"#))
 
-        _ = await poll { poster.titles.contains("m3 installed") }
+        #expect(await poll { poster.titles.contains("m3 installed") }, "m3's notification was never posted")
         #expect(poster.titles == ["m1 installed", "m2 failed", "m3 installed"])
+    }
+
+    @Test func aPostInProgressDoesNotHoldUpTheQueue() async {
+        let poster = HeldPoster()
+        let h = Harness(notifier: InstallNotifier(poster: poster))
+        h.yield(.event(event(11, "m1", .installComplete(duration: 60)), inSnapshot: true))
+        _ = await poll { poster.held == 1 }
+
+        await h.send(.snapshot([entry("m1", .installed)]))
+        #expect(h.names() == ["m1"])
+
+        poster.release()
+        #expect(await poll { poster.posted == 1 }, "the held post never finished")
     }
 
     @Test func failedRefreshKeepsTheEntries() async {

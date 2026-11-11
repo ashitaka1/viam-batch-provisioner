@@ -14,6 +14,7 @@ struct ViamProvisionerApp: App {
     init() {
         ImportEnvironmentCommand.runIfRequested()
         NetbootDaemonCommand.runIfRequested()
+        UserNotificationPoster.prepare()
         let keys = ViamKeys.app()
         _keys = State(initialValue: keys)
         _environments = State(initialValue: EnvironmentsModel(
@@ -36,7 +37,6 @@ struct ViamProvisionerApp: App {
                         await keys.importKeys(fromFile: path)
                     }
                 }
-                .task { await UserNotificationPoster.prepare() }
                 .onChange(of: keys.keys) {
                     // What one set of keys reached says nothing about the next.
                     environments.forgetLocations()
