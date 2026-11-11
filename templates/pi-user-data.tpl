@@ -76,7 +76,7 @@ write_files:
           curl -fsSL -o /opt/viam/bin/viam-agent \
               https://storage.googleapis.com/packages.viam.com/apps/viam-agent/viam-agent-stable-aarch64
           chmod 755 /opt/viam/bin/viam-agent
-          printf '[Unit]\nDescription=Viam Agent\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=exec\nExecStart=/opt/viam/bin/viam-agent --config /etc/viam.json\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/viam-agent.service
+          printf '[Unit]\nDescription=Viam Agent\nAfter=network-online.target\nWants=network-online.target\nStartLimitIntervalSec=0\n\n[Service]\nType=exec\nUser=root\nExecStart=/opt/viam/bin/viam-agent --config /etc/viam.json\nRestart=always\nRestartSec=5\nTimeoutSec=240\nKillMode=mixed\nFinalKillSignal=SIGKILL\n\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/viam-agent.service
           systemctl daemon-reload
           if [ -f /etc/viam.json ]; then
               systemctl enable --now viam-agent.service

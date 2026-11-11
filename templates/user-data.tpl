@@ -244,12 +244,17 @@ ${PACKAGES}
       Description=Viam Agent
       After=network-online.target
       Wants=network-online.target
+      StartLimitIntervalSec=0
 
       [Service]
       Type=exec
+      User=root
       ExecStart=/opt/viam/bin/viam-agent --config /etc/viam.json
-      Restart=on-failure
+      Restart=always
       RestartSec=5
+      TimeoutSec=240
+      KillMode=mixed
+      FinalKillSignal=SIGKILL
 
       [Install]
       WantedBy=multi-user.target

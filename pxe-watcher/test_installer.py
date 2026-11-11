@@ -7,11 +7,13 @@ HTTP. Here it runs under /bin/sh with a stub curl that records what it was
 asked to send.
 """
 
+import configparser
 import json
 import os
 import re
 import shutil
 import subprocess
+import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -219,6 +221,63 @@ class RenderedUserDataTest(unittest.TestCase):
         self.assertEqual(set(names), exported, "build-config.sh exports and substitutes different variables")
         for name in exported:
             self.assertNotIn("${" + name + "}", rendered, f"${{{name}}} was left unsubstituted")
+
+
+PI_TEMPLATE = REPO / "templates" / "pi-user-data.tpl"
+
+# viam-agent's own unit (viamrobotics/agent viam-agent.service). viam-agent exits 0 when it
+# restarts itself, so only Restart=always brings it back; without User=, systemd leaves HOME
+# unset and viam-server builds relative module paths, which it refuses to run.
+UPSTREAM_SETTINGS = {
+    ("Unit", "StartLimitIntervalSec"): "0",
+    ("Service", "User"): "root",
+    ("Service", "Restart"): "always",
+    ("Service", "TimeoutSec"): "240",
+    ("Service", "KillMode"): "mixed",
+    ("Service", "FinalKillSignal"): "SIGKILL",
+}
+
+
+def parse_unit(unit_text):
+    # strict=False takes the last of duplicate keys, as systemd does.
+    parser = configparser.ConfigParser(strict=False, interpolation=None)
+    parser.optionxform = str
+    parser.read_string(unit_text)
+    return {section: dict(parser[section]) for section in parser.sections()}
+
+
+def x86_agent_unit():
+    """The unit as the late-command writes it: YAML strips the block's indent before sh runs the heredoc."""
+    late_command = re.search(r"\n    - \|\n(      cat > /target/etc/systemd/system/viam-agent\.service <<'UNIT'\n.*?\n      UNIT)\n",
+                             TEMPLATE.read_text(), re.DOTALL)
+    if late_command is None:
+        raise AssertionError(f"no viam-agent unit heredoc in {TEMPLATE.name}")
+    script = textwrap.dedent(late_command.group(1))
+    return re.fullmatch(r"cat > \S+ <<'UNIT'\n(.*)\nUNIT", script, re.DOTALL).group(1)
+
+
+def pi_agent_unit():
+    match = re.search(r"printf '(\[Unit\][^']*)' > /etc/systemd/system/viam-agent\.service", PI_TEMPLATE.read_text())
+    if match is None:
+        raise AssertionError(f"no viam-agent unit printf in {PI_TEMPLATE.name}")
+    return subprocess.run(["sh", "-c", 'printf "$1"', "sh", match.group(1)],
+                          capture_output=True, text=True, check=True).stdout
+
+
+class AgentUnitTest(unittest.TestCase):
+    def assert_has_upstream_settings(self, label, unit):
+        for (section, key), expected in UPSTREAM_SETTINGS.items():
+            with self.subTest(template=label, key=f"{section}.{key}"):
+                self.assertEqual(unit.get(section, {}).get(key), expected, f"{label}: [{section}] {key}")
+
+    def test_the_x86_unit_has_the_upstream_restart_and_user_settings(self):
+        self.assert_has_upstream_settings("x86", parse_unit(x86_agent_unit()))
+
+    def test_the_pi_unit_has_the_upstream_restart_and_user_settings(self):
+        self.assert_has_upstream_settings("pi", parse_unit(pi_agent_unit()))
+
+    def test_the_x86_and_pi_units_are_the_same(self):
+        self.assertEqual(parse_unit(x86_agent_unit()), parse_unit(pi_agent_unit()))
 
 
 if __name__ == "__main__":
