@@ -109,7 +109,7 @@ struct MainWindow: View {
             Button("Delete", role: .destructive) { if let environment = deleting { delete(environment) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Its WiFi password and keys are removed from this Mac. Machines already queued with it aren't affected.")
+            Text(deleting?.deletionNote ?? "")
         }
         .alert("Something went wrong", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK") {}
