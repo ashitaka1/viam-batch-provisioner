@@ -4,7 +4,7 @@ Date: 2026-11-04
 
 ## Status
 
-Accepted. The design is open in #123.
+Accepted; amended by 49, which has the app hold its own keys. #123 holds the design.
 
 ## Context
 
@@ -24,13 +24,16 @@ So an API-key CLI login looks signed in to the app (#103 is about how it is labe
 
 ## Decision
 
-The Mac app signs in with a Viam API key, alongside the CLI's user login, and acts with that key's permissions alone.
+The Mac app signs in with Viam API keys scoped to an organization or a location, and acts with a key's permissions alone. It has no user login until its own OAuth sign-in. Decision 49 says where the keys come from and where they are kept: the app holds them itself, pasted in, in the login keychain.
 
-How the app takes the key, where it keeps it, how it authenticates Viam calls with it, and what it shows when the key can't list organizations or reach a location are left to the design.
+The app exchanges a key for a token through `AuthService/Authenticate` and holds the token in memory only, re-authenticating when its `exp` is within a minute or once on UNAUTHENTICATED.
+
+Each key's scope is worked out when it is added and stored with it. Viam doesn't tell a key its own grant, and an organization key in a one-location organization sees what that location's key sees (decision 49), so the operator says whether the key is an organization's or a location's. An organization key holds the one organization it lists; a location key holds the one location it lists. When a key lists several, the operator gives the ID, and the key must read it with `GetLocation`, or with `GetOrganization` and `ListLocations`.
+
+Organization and location pickers list the stored keys' scopes. An organization key's locations come from `ListLocations`; with only location keys in an organization, its locations are theirs. An environment uses the key that covers its location, preferring a location key, and an environment no key covers reads "Not reachable with this key".
 
 ## Consequences
 
-- The key's grant bounds what the app can do: an organization key reaches one organization, a location key one location.
-- A QA guest must be able to supply the key without the sign-in UI, for example from a file or the environment, so `macos-qa-vm` can start the app signed in.
-- Until this lands, the app signs in only as a user, and a QA run of it holds a token for every organization that user belongs to.
-- Viam calls already take their token from a `BearerTokenProvider` (decision 43); an API key is a credential the provider abstraction has to accommodate.
+- A key's grant bounds what the app can do with it: an organization key reaches one organization, a location key one location.
+- A QA guest supplies its keys in a file named by `VIAM_PROVISIONER_KEYS_FILE` (decision 49), so a QA run holds only keys for the QA organization.
+- Viam calls take their token from a `BearerTokenProvider` (decision 43); `APIKeyTokenSource` is the app's.

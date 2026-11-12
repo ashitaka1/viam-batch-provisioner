@@ -20,7 +20,7 @@ private func monitor(
     try history.save(BatchRecord(
         id: UUID(), date: t0, environmentName: "Lab", mode: .full, orgName: "Acme", locationName: "Bench",
         serverName: "bench", serverURL: url, machines: names, problems: [], orgID: orgID, locationID: locationID))
-    return OnlineMonitor(serverURL: server, history: history, fleet: { _ in fleet }, now: { t0 }, sleep: sleep)
+    return OnlineMonitor(serverURL: server, history: history, fleet: { _, _ in fleet }, now: { t0 }, sleep: sleep)
 }
 
 /// A server whose queue is `entries`.
@@ -39,6 +39,27 @@ private struct StopSleeping: Error {}
 
 @MainActor
 struct OnlineMonitorTests {
+    @Test func eachPlaceIsAskedOfTheFleetForItsOrgAndLocation() async throws {
+        let fleet = FakeFleet(existing: ["m-1"], online: ["m-1"])
+        let file = FileManager.default.temporaryDirectory.appending(path: "online-\(UUID().uuidString)/batches.json")
+        let history = BatchHistory(file: file)
+        for (location, name) in [("loc-none", "m-0"), ("loc-1", "m-1")] {
+            try history.save(BatchRecord(
+                id: UUID(), date: t0, environmentName: "Lab", mode: .full, orgName: "Acme", locationName: location,
+                serverName: "bench", serverURL: server, machines: [name], problems: [], orgID: "o1", locationID: location))
+        }
+        var asked: [String] = []
+        let monitor = OnlineMonitor(serverURL: server, history: history, fleet: { org, location in
+            asked.append("\(org)/\(location)")
+            return location == "loc-1" ? fleet : nil
+        }, now: { t0 })
+
+        await monitor.check([entry("m-0"), entry("m-1")])
+
+        #expect(Set(asked) == ["o1/loc-none", "o1/loc-1"])
+        #expect(monitor.onlineAt == ["m-1": t0], "a place no key reaches stopped the round")
+    }
+
     @Test func onlineMachineIsMarked() async throws {
         let fleet = FakeFleet(existing: ["m-1", "m-2"], online: ["m-1"])
         let monitor = try monitor(names: ["m-1", "m-2"], fleet: fleet)

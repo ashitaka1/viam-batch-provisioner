@@ -63,7 +63,7 @@ Serving continues after `serve` exits. Its log: `log stream --predicate 'subsyst
 
 The app's GUI and the Keychain tests run in a disposable guest through `qa-vm` (ashitaka1/macos-qa-vm); the `dev-tools:macos-app-qa` skill drives the GUI. What a guest needs lives on the host:
 
-- `~/.config/qa-vm/secrets/viam/.viam`: a `viam` CLI login for the app, made once with `HOME=~/.config/qa-vm/secrets/viam viam login`. Its refresh token works once, so every run hands the refreshed login back, and only one guest uses it at a time.
+- `~/.config/qa-vm/secrets/viam-batch-provisioner/keys.json`: the app's Viam API keys, a JSON array of `{"key_id", "key", "organization_id" | "location_id"}` from keys granted on the QA organization or its locations. Each entry gives `organization_id` for an organization key or `location_id` for a location key, which says the key's kind; an entry with neither is reported and skipped. At launch the app adds each entry not already in the guest's Keychain through the same check as a pasted key, and lists any entry that fails in Settings → API Keys by its key ID. Any number of guests share the file and nothing comes back from a run.
 - `~/.config/qa-vm/secrets/viam-batch-provisioner/environments/`: copies of `config/environments/`, which `sync --ref` leaves out because they're gitignored. Copy them again when an environment changes.
 - The public key each environment's `SSH_PUBLIC_KEY_FILE` names, such as `~/.ssh/id_tcos_hosts.pub`.
 
@@ -72,18 +72,17 @@ A session, from the main checkout:
 ```bash
 vm=$(qa-vm up)
 qa-vm sync --ref <branch> $vm ~/eng/viam-batch-provisioner
-qa-vm inject $vm ~/.config/qa-vm/secrets/viam/.viam .viam
+qa-vm inject $vm ~/.config/qa-vm/secrets/viam-batch-provisioner/keys.json keys.json
 qa-vm inject $vm ~/.config/qa-vm/secrets/viam-batch-provisioner/environments src/viam-batch-provisioner/config/environments
 qa-vm inject $vm ~/.ssh/id_tcos_hosts.pub .ssh/id_tcos_hosts.pub
 # … build, import, drive the app …
-qa-vm collect $vm .viam ~/.config/qa-vm/secrets/viam/.viam
 qa-vm down $vm
 ```
 
-The guest has no `just`: run a recipe's commands from the `justfile`, such as `./scripts/bundle-app.sh` then the app binary with `--import-environment config/environments/<env>.env`. Commands that use the Keychain unlock it first in the same `ssh` command: `security unlock-keychain -p admin ~/Library/Keychains/login.keychain-db && …`. Headless tests run in one command:
+The guest has no `just`: run a recipe's commands from the `justfile`, such as `./scripts/bundle-app.sh` then the app binary with `--import-environment config/environments/<env>.env`. The app reads its keys file from `VIAM_PROVISIONER_KEYS_FILE`; pass it when opening the app: `open --env VIAM_PROVISIONER_KEYS_FILE=$HOME/keys.json "build/Viam Provisioner.app"`. A variable set with `launchctl setenv` over `qa-vm ssh` doesn't reach the app. Commands that use the Keychain unlock it first in the same `ssh` command: `security unlock-keychain -p admin ~/Library/Keychains/login.keychain-db && …`. Headless tests run in one command:
 
 ```bash
-qa-vm run --ref <branch> --unlock-keychain --persist ~/.config/qa-vm/secrets/viam/.viam:.viam ~/eng/viam-batch-provisioner -- 'swift test'
+qa-vm run --ref <branch> --unlock-keychain ~/eng/viam-batch-provisioner -- 'swift test'
 ```
 
 ## Run pieces alone

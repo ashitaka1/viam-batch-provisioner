@@ -5,8 +5,7 @@ import SwiftUI
 /// text fields on Return or leaving the field, pickers at once. Invalid values
 /// are saved too; the problems they cause block provisioning, not editing.
 struct EnvironmentEditor: View {
-    let session: ViamSession
-    let organizations: OrganizationsModel
+    let keys: ViamKeys
     let environments: EnvironmentsModel
     /// The environment as stored.
     let environment: ProvisionerKit.Environment
@@ -16,14 +15,13 @@ struct EnvironmentEditor: View {
     /// Fields whose "required" problems show; others show only once committed.
     @State private var visited: Set<EnvironmentField> = []
     @State private var settingPassword = false
+    @State private var addingKey = false
     @State private var failure: String?
     @FocusState private var focused: EnvironmentField?
     @SwiftUI.Environment(\.undoManager) private var undoManager
 
-    init(session: ViamSession, organizations: OrganizationsModel, environments: EnvironmentsModel,
-         environment: ProvisionerKit.Environment) {
-        self.session = session
-        self.organizations = organizations
+    init(keys: ViamKeys, environments: EnvironmentsModel, environment: ProvisionerKit.Environment) {
+        self.keys = keys
         self.environments = environments
         self.environment = environment
         _draft = State(initialValue: environment)
@@ -82,9 +80,11 @@ struct EnvironmentEditor: View {
                 draft.hasTailscaleKey = stored.hasTailscaleKey
             }
         }
-        .task(id: "\(draft.orgID ?? "")|\(draft.provisionMode.rawValue)|\(environments.orgIsAvailable(draft))") {
+        // The keys are part of the ID: a key added or removed forgets the loaded locations.
+        .task(id: "\(draft.orgID ?? "")|\(draft.provisionMode.rawValue)|\(keys.keys.map(\.keyID))") {
             if draft.provisionMode == .full, let orgID = draft.orgID { await environments.loadLocations(org: orgID) }
         }
+        .sheet(isPresented: $addingKey) { AddKeyForm(keys: keys) }
         .sheet(isPresented: $settingPassword) {
             PasswordSheet { password in
                 try environments.setPassword(password, id: environment.id)
@@ -122,19 +122,22 @@ struct EnvironmentEditor: View {
     private var viamSection: some View {
         Section("Viam") {
             field(.org) {
-                if organizations.rows.isEmpty && draft.orgID == nil {
+                if organizationRows.isEmpty && draft.orgID == nil {
                     LabeledContent("Organization") {
-                        Text(isSignedIn ? "Your Viam account has no organizations." : "Sign in to Viam to choose one.")
-                            .foregroundStyle(.secondary)
+                        Text("Add a Viam API key to choose one.").foregroundStyle(.secondary)
                     }
+                } else if let only = onlyChoice(organizationRows, selected: draft.orgID) {
+                    LabeledContent("Organization", value: only.name)
+                        .onAppear { if draft.orgID == nil { orgBinding.wrappedValue = only.id } }
                 } else {
                     Picker("Organization", selection: orgBinding) {
                         if draft.orgID == nil { Text("Choose…").tag(String?.none) }
-                        ForEach(organizations.rows) { org in
+                        ForEach(organizationRows) { org in
                             Text(org.name).tag(Optional(org.id))
                         }
                         if let orgID = draft.orgID, !environments.orgIsAvailable(draft) {
-                            Text("\(draft.orgName ?? orgID) (unavailable)").tag(Optional(orgID))
+                            Text("\(draft.orgName ?? orgID) (\(EnvironmentsModel.notReachable.lowercased()))")
+                                .tag(Optional(orgID))
                         }
                     }
                     .focused($focused, equals: .org)
@@ -157,12 +160,19 @@ struct EnvironmentEditor: View {
                 Text("Loading locations…").foregroundStyle(.secondary)
             }
         case (let orgID?, .loaded(let locations)):
-            Picker("Location", selection: locationBinding(locations)) {
-                if draft.locationID == nil { Text("Choose…").tag(String?.none) }
-                if let locationID = draft.locationID, !locations.contains(where: { $0.id == locationID }) {
-                    Text("\(draft.locationName ?? locationID) (missing)").tag(Optional(locationID))
+            Group {
+                if let only = onlyChoice(locations, selected: draft.locationID) {
+                    LabeledContent("Location", value: only.name)
+                } else {
+                    Picker("Location", selection: locationBinding(locations)) {
+                        if draft.locationID == nil { Text("Choose…").tag(String?.none) }
+                        if let locationID = draft.locationID, !locations.contains(where: { $0.id == locationID }) {
+                            Text("\(draft.locationName ?? locationID) (\(environments.isUnreachableWithKey(draft) ? EnvironmentsModel.notReachable.lowercased() : "missing"))")
+                                .tag(Optional(locationID))
+                        }
+                        ForEach(locations) { Text($0.name).tag(Optional($0.id)) }
+                    }
                 }
-                ForEach(locations) { Text($0.name).tag(Optional($0.id)) }
             }
             .onAppear {
                 if draft.locationID == nil, locations.count == 1 {
@@ -307,12 +317,12 @@ struct EnvironmentEditor: View {
     @ViewBuilder private var orgBanner: some View {
         if environment.provisionMode == .full, let orgID = environment.orgID {
             let orgName = environment.orgName ?? orgID
-            if !isSignedIn {
-                Banner(message: "Sign in to Viam to use \(orgName).") {
-                    SignInButton(session: session)
+            if keys.loaded && !keys.isSignedIn {
+                Banner(message: "Add a Viam API key to use \(orgName).") {
+                    AddKeyButton(adding: $addingKey)
                 }
-            } else if organizations.state == .loaded, !environments.orgIsAvailable(environment) {
-                Banner(message: "Your Viam account can't see \(orgName).") {
+            } else if keys.loaded, !environments.orgIsAvailable(environment) {
+                Banner(message: "\(orgName) is \(EnvironmentsModel.notReachable.lowercased()).") {
                     Button("Choose Another Organization") {
                         visited.insert(.org)
                         focused = .org
@@ -414,7 +424,7 @@ struct EnvironmentEditor: View {
             visited.insert(.org)
             guard orgID != draft.orgID else { return }
             draft.orgID = orgID
-            draft.orgName = organizations.rows.first { $0.id == orgID }?.name
+            draft.orgName = organizationRows.first { $0.id == orgID }?.name
             draft.locationID = nil
             draft.locationName = nil
             commit()
@@ -436,8 +446,15 @@ struct EnvironmentEditor: View {
         .map { (code: $0, name: Locale.current.localizedString(forRegionCode: $0) ?? $0) }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
-    private var isSignedIn: Bool {
-        if case .signedIn = session.state { true } else { false }
+    private var organizationRows: [ViamOrganization] {
+        if case .known(let orgs) = keys.orgs { orgs } else { [] }
+    }
+
+    /// The one choice there is, shown as a label in place of a picker, unless a
+    /// stored value outside it is selected.
+    private func onlyChoice<Choice: Identifiable>(_ choices: [Choice], selected: Choice.ID?) -> Choice? {
+        guard choices.count == 1, selected == nil || selected == choices[0].id else { return nil }
+        return choices[0]
     }
 }
 

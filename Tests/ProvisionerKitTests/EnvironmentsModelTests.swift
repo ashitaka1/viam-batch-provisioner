@@ -23,12 +23,13 @@ private final class Harness {
     let store: FileEnvironmentStore
     let fleet = FakeFleet()
     var orgs: AccountOrgs = .known([ViamOrganization(id: "org-1", name: "Acme")])
+    /// Each fleet asked for, as `org/location`, `-` for no location.
     let fleetOrgs = Locked<[String]>([])
     var files: [String: String] = [:]
     lazy var model = EnvironmentsModel(
         store: store, orgs: { [unowned self] in orgs },
-        fleet: { [fleet, fleetOrgs] orgID in
-            fleetOrgs.withLock { $0.append(orgID) }
+        fleet: { [fleet, fleetOrgs] orgID, locationID in
+            fleetOrgs.withLock { $0.append("\(orgID)/\(locationID ?? "-")") }
             return fleet
         },
         readFile: { [unowned self] path in files[path] }, home: "/Users/test")
@@ -161,7 +162,7 @@ private final class Harness {
         shop.wifiSSID = "shop"
         try h.model.update(shop)
         try h.model.setSecret(.wifiPassword, "short", id: shop.id)
-        let again = EnvironmentsModel(store: h.store, orgs: { .known([]) }, fleet: { _ in FakeFleet() })
+        let again = EnvironmentsModel(store: h.store, orgs: { .known([]) }, fleet: { _, _ in FakeFleet() })
         again.load()
         let env = try #require(again.environments.first)
         #expect(again.problems(for: env).contains { $0.message == "WiFi passwords are 8 to 63 characters." })
@@ -225,7 +226,7 @@ private final class Harness {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("env-model-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = FileEnvironmentStore(file: file, vault: vault)
-        let model = EnvironmentsModel(store: store, orgs: { .known([]) }, fleet: { _ in FakeFleet() })
+        let model = EnvironmentsModel(store: store, orgs: { .known([]) }, fleet: { _, _ in FakeFleet() })
         let shop = try model.create(name: "Shop")
         vault.failing = true
         #expect(throws: (any Error).self) { try model.delete(id: shop.id) }
@@ -246,24 +247,24 @@ private final class Harness {
         #expect(h.model.problems(for: shop).contains(EnvironmentProblem(field: .location, message: "\"Lab B\" no longer exists in Acme.")))
 
         h.orgs = .known([ViamOrganization(id: "org-2", name: "Beta")])
-        #expect(h.model.problems(for: shop).contains(EnvironmentProblem(field: .org, message: "Your Viam account can't see Acme.")))
+        #expect(h.model.problems(for: shop).contains(EnvironmentProblem(field: .org, message: "Not reachable with this key")))
         #expect(!h.model.orgIsAvailable(shop))
         #expect(h.model.locations(org: "org-1") == .unavailable)
     }
 
-    @Test func signedOutEnvironmentAsksToSignIn() throws {
+    @Test func environmentWithoutKeysAsksForOne() throws {
         let h = Harness()
         let shop = try h.model.create(name: "Shop")
         h.orgs = .signedOut
         #expect(h.model.problems(for: shop).filter { $0.field == .org }
-            == [EnvironmentProblem(field: .org, message: "Sign in to Viam to use Acme.")])
+            == [EnvironmentProblem(field: .org, message: "Add a Viam API key to use Acme.")])
         #expect(!h.model.orgIsAvailable(shop))
     }
 
     @Test func locationsUseTheOrgsFleet() async throws {
         let h = Harness()
         await h.model.loadLocations(org: "org-1")
-        #expect(h.fleetOrgs.withLock { $0 } == ["org-1"])
+        #expect(h.fleetOrgs.withLock { $0 } == ["org-1/-"])
     }
 
     @Test func orgHealthIgnoredOutsideFullMode() throws {
@@ -320,7 +321,7 @@ private final class Harness {
         #expect(!h.model.problems(for: shop).contains { $0.field == .org }, "problems: \(h.model.problems(for: shop))")
     }
 
-    @Test func orgTheAccountCantSeeDoesNotCallViam() async throws {
+    @Test func orgNoKeyReachesDoesNotCallViam() async throws {
         let h = Harness()
         h.orgs = .known([ViamOrganization(id: "org-2", name: "Beta")])
         await h.model.loadLocations(org: "org-1")
@@ -346,14 +347,14 @@ private final class Harness {
     @Test func loadReadsStoredEnvironments() throws {
         let h = Harness()
         _ = try h.model.create(name: "Shop")
-        let again = EnvironmentsModel(store: h.store, orgs: { .known([]) }, fleet: { _ in FakeFleet() })
+        let again = EnvironmentsModel(store: h.store, orgs: { .known([]) }, fleet: { _, _ in FakeFleet() })
         again.load()
         #expect(again.environments.map(\.name) == ["Shop"])
         #expect(again.loadError == nil)
     }
 
     @Test func loadErrorReported() {
-        let model = EnvironmentsModel(store: ThrowingStore(), orgs: { .known([]) }, fleet: { _ in FakeFleet() })
+        let model = EnvironmentsModel(store: ThrowingStore(), orgs: { .known([]) }, fleet: { _, _ in FakeFleet() })
         model.load()
         #expect(model.environments.isEmpty)
         #expect(model.loadError == "Couldn't read the environments in /tmp/environments.json: bad")
@@ -371,7 +372,7 @@ private final class Harness {
 
         #expect(settings.config.passwordHash.hasPrefix("$6$"))
         #expect(settings.fleet != nil)
-        #expect(h.fleetOrgs.withLock { $0 } == ["org-1"])
+        #expect(h.fleetOrgs.withLock { $0.last } == "org-1/loc-1", "the fleet is the environment's location's")
     }
 
     @Test func provisioningSettingsOutsideFullModeNeedNoOrg() throws {
@@ -396,7 +397,7 @@ private final class Harness {
             try h.model.provisioningSettings(id: shop.id)
         } throws: { error in
             guard case EnvironmentError.invalid(let problems) = error else { return false }
-            return problems.contains(EnvironmentProblem(field: .org, message: "Sign in to Viam to use Acme."))
+            return problems.contains(EnvironmentProblem(field: .org, message: "Add a Viam API key to use Acme."))
                 && problems.contains { $0.field == .password }
         }
     }

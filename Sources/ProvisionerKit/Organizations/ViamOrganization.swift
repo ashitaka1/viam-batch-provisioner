@@ -1,4 +1,4 @@
-/// A Viam organization the signed-in account can see.
+/// A Viam organization a stored key reaches.
 public struct ViamOrganization: Sendable, Equatable, Identifiable {
     public let id: String
     public let name: String
@@ -9,14 +9,11 @@ public struct ViamOrganization: Sendable, Equatable, Identifiable {
     }
 }
 
-public protocol OrganizationLister: Sendable {
-    func organizations() async throws(FleetError) -> [ViamOrganization]
-}
-
-/// What the app knows of the signed-in account's organizations.
+/// What the app knows of the organizations its keys reach.
 public enum AccountOrgs: Sendable, Equatable {
+    /// No key is stored.
     case signedOut
-    /// Signed in, but the list is loading or couldn't be read.
+    /// The keys haven't been read yet.
     case unknown
     case known([ViamOrganization])
 }

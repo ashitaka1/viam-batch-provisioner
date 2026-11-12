@@ -15,7 +15,7 @@ Decision 43 has the Mac app act as the `viam` CLI's login, and decision 44 adds 
 The app keeps its own Viam API keys in the login keychain, and never runs the `viam` CLI or reads `~/.viam/`.
 
 - Any number of keys, each scoped to an organization or a location. The Keychain account is the key ID, and the item records the key's scope.
-- A key gets in by pasting its ID and secret. The app checks it with Viam and works out its scope before saving it; a key that fails is not stored.
+- A key gets in by pasting its ID and secret and saying whether it is an organization's or a location's. The app checks it with Viam and works out its scope before saving it; a key that fails is not stored.
 - Signed in means at least one stored key. The app has no user login until its own OAuth sign-in.
 - Environments name no key. The app uses a stored key whose scope covers the environment's location, preferring a location key.
 - QA guests load keys from a JSON file whose path is in `VIAM_PROVISIONER_KEYS_FILE`, each entry through the paste path.
@@ -27,6 +27,19 @@ The app keeps its own Viam API keys in the login keychain, and never runs the `v
 - A key the app creates after OAuth, and any other way a key arrives, use the same storage.
 - Decision 43's CLI lookup, `viam login` and `print-access-token` leave the app. Its `BearerTokenProvider` stays, with the API-key provider as the app's implementation.
 - Decision 40's key handoff waits for the iPhone milestone, with iCloud Keychain sync (#175).
+
+## Checks against Viam
+
+Run on 2026-11-11 with an organization key and a location key in the QA organization, which had two locations:
+
+| Call | Organization key | Location key |
+|---|---|---|
+| `ListOrganizations` | the organization | the organization |
+| `GetOrganization` | the organization | the organization |
+| `ListLocations` | both locations | its own location only |
+| `GetLocation` | either location | its own location |
+
+`ListOrganizationMembers`, `ListKeys` and `ListFragments` answer both keys alike. With one location in the organization, the two keys get identical answers to every call, so a key's scope can't be worked out from the key alone. The paste form asks whether the key is an organization's or a location's; a location key's location is the one it lists, and an optional ID settles a key that lists several. A wrong choice of Organization goes unnoticed until Viam refuses a call (#193).
 
 ## Alternatives
 

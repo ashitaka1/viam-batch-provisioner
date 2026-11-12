@@ -147,12 +147,21 @@ func environmentKey() -> (id: String, key: String)? {
     return (keyID, key)
 }
 
+/// The Viam app the CLI is logged in to, from `base_url` in its cached config.
+func cliBaseURL() -> URL? {
+    let path = "\(NSHomeDirectory())/.viam/cached_cli_config.json"
+    guard let data = FileManager.default.contents(atPath: path),
+          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    return (object["base_url"] as? String).flatMap(URL.init(string:))
+}
+
 func probeAuth() async -> ProbeAuth {
     if let key = environmentKey() { return .key(id: key.id, key: key.key) }
     guard let executable = await ViamCLI.locate() else {
         fail("install the viam CLI (https://docs.viam.com/cli/), or set VIAM_API_KEY_ID and VIAM_API_KEY")
     }
     let cli = ViamCLI(run: ViamCLI.processRunner(executable: executable))
+    let baseURL = cliBaseURL() ?? ViamAppClient.defaultBaseURL
     let tokens = CLITokenSource(cli: { cli })
     do {
         _ = try await tokens.token(refresh: false)
@@ -161,7 +170,7 @@ func probeAuth() async -> ProbeAuth {
     } catch {
         fail("the viam CLI couldn't give its login: \(error)")
     }
-    return .login(tokens, baseURL: CLIConfig.baseURL() ?? ViamAppClient.defaultBaseURL)
+    return .login(tokens, baseURL: baseURL)
 }
 
 /// Deletes an org API key; the viam CLI can create keys but not delete them.

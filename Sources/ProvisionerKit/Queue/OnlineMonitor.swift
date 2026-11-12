@@ -12,12 +12,14 @@ public final class OnlineMonitor {
 
     private let serverURL: URL
     private let history: BatchHistory
-    private let fleet: @Sendable (String) -> any ViamFleet
+    private let fleet: @MainActor (_ orgID: String, _ locationID: String) -> (any ViamFleet)?
     private let interval: Duration
     private let now: @Sendable () -> Date
     private let sleep: @Sendable (Duration) async throws -> Void
+    /// Locations already logged as reached by no key, so each is logged once.
+    @ObservationIgnored private var unreachedLogged: Set<String> = []
 
-    public init(serverURL: URL, history: BatchHistory, fleet: @escaping @Sendable (String) -> any ViamFleet,
+    public init(serverURL: URL, history: BatchHistory, fleet: @escaping @MainActor (_ orgID: String, _ locationID: String) -> (any ViamFleet)?,
                 interval: Duration = .seconds(30), now: @escaping @Sendable () -> Date = Date.init,
                 sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.serverURL = serverURL
@@ -45,8 +47,14 @@ public final class OnlineMonitor {
         }
 
         for (place, names) in byPlace {
+            guard let fleet = fleet(place.orgID, place.locationID) else {
+                if unreachedLogged.insert(place.locationID).inserted {
+                    Self.log.error("No stored API key reaches location \(place.locationID, privacy: .public)")
+                }
+                continue
+            }
             do {
-                let machines = try await fleet(place.orgID).machines(location: place.locationID)
+                let machines = try await fleet.machines(location: place.locationID)
                 let seen = now()
                 for machine in machines where machine.online && names.contains(machine.name) && onlineAt[machine.name] == nil {
                     onlineAt[machine.name] = seen

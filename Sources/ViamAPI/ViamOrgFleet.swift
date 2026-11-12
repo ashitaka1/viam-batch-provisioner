@@ -1,7 +1,7 @@
 public import Foundation
 public import ProvisionerKit
 
-/// The Viam calls machine creation needs, in one org, as the signed-in user.
+/// The Viam calls machine creation needs, in one org, with a bearer token or an API key.
 public struct ViamOrgFleet: ViamFleet {
     private let orgID: String
     private let client: ViamAppClient
@@ -44,19 +44,6 @@ public struct ViamOrgFleet: ViamFleet {
     }
 }
 
-/// The organizations the signed-in user can see.
-public struct ViamOrganizationLister: OrganizationLister {
-    private let client: ViamAppClient
-
-    public init(tokens: any BearerTokenProvider, baseURL: URL = ViamAppClient.defaultBaseURL, session: URLSession = .shared) {
-        client = ViamAppClient(tokens: tokens, baseURL: baseURL, session: session)
-    }
-
-    public func organizations() async throws(FleetError) -> [ViamOrganization] {
-        try await fleetCall { try await client.organizations() }
-    }
-}
-
 /// Sorts Viam's errors by what a caller can conclude from them. Viam's message is
 /// kept as is, so a name it refuses is explained in its own words.
 func fleetCall<T>(_ call: () async throws -> T) async throws(FleetError) -> T {
@@ -76,12 +63,10 @@ func fleetCall<T>(_ call: () async throws -> T) async throws(FleetError) -> T {
         case .malformedResponse:
             throw .unreachable(error.description)
         }
+    } catch is APIKeyRefused {
+        throw .rejected("Viam rejected the API key. Remove it in Settings and add a valid one.")
     } catch ViamCLIError.notLoggedIn {
-        throw .rejected("Sign in to Viam.")
-    } catch ViamCLIError.notInstalled {
-        throw .rejected("Install the viam CLI.")
-    } catch ViamCLIError.tokenUnavailable {
-        throw .unreachable("The viam CLI couldn't give the app its login.")
+        throw .rejected("Sign in with the viam CLI.")
     } catch ViamCLIError.failed(let stderr) {
         throw .unreachable(stderr)
     } catch {

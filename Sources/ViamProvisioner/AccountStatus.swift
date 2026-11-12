@@ -1,83 +1,57 @@
 import ProvisionerKit
 import SwiftUI
 
-/// The toolbar's sign-in status, which is also the way to sign in or out.
+/// The toolbar's sign-in status: the keys the app holds, and the way to add one.
 struct AccountStatus: View {
-    let session: ViamSession
-    @State private var confirmingSignOut = false
+    let keys: ViamKeys
+    @State private var adding = false
 
     var body: some View {
         Group {
-            switch session.state {
-            case .checking:
+            if !keys.loaded {
                 ProgressView().controlSize(.small)
-            case .cliMissing:
-                Link(destination: SignInView.installURL) {
-                    Label("viam CLI not installed", systemImage: "circle.fill").foregroundStyle(.orange)
-                        .labelStyle(.titleAndIcon)
-                }
-            case .signedOut:
-                SignInButton(session: session)
-            case .failed:
-                Button {
-                    Task { await session.load() }
-                } label: {
-                    Label {
-                        Text("Viam: Try Again")
-                    } icon: {
-                        Image(systemName: "circle.fill").foregroundStyle(.orange)
-                    }
-                    .labelStyle(.titleAndIcon)
-                }
-            case .signingIn(let code):
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text(code.map { "Signing in… code \($0)" } ?? "Signing in…")
-                    Button("Cancel") { session.cancelSignIn() }
-                }
-            case .signedIn(let account):
+            } else if keys.isSignedIn {
                 Menu {
-                    Button("Sign Out…") { confirmingSignOut = true }
+                    Button("Add API Key…") { adding = true }
+                    SettingsLink { Text("Manage API Keys…") }
                 } label: {
                     Label {
-                        Text(account.map { "Signed in as \($0)" } ?? "Signed in to Viam")
+                        Text(title)
                     } icon: {
-                        Image(systemName: "circle.fill").foregroundStyle(.green)
+                        Image(systemName: "circle.fill").foregroundStyle(keys.rejected.isEmpty ? .green : .orange)
                     }
                     .labelStyle(.titleAndIcon)
                 }
                 .menuIndicator(.visible)
                 .fixedSize()
+            } else {
+                AddKeyButton(adding: $adding)
             }
         }
         .help(help)
-        .confirmationDialog("Sign out of Viam?", isPresented: $confirmingSignOut) {
-            Button("Sign Out", role: .destructive) { Task { await session.signOut() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This also signs you out of the viam CLI in Terminal.")
-        }
+        .sheet(isPresented: $adding) { AddKeyForm(keys: keys) }
+    }
+
+    private var title: String {
+        keys.keys.count == 1 ? keys.keys[0].scope.label : "\(keys.keys.count) API keys"
     }
 
     private var help: String {
-        switch session.state {
-        case .failed(let message): message
-        case .cliMissing: "The app signs in through the viam CLI. Click to see how to install it."
-        default: ""
-        }
+        if !keys.rejected.isEmpty { return "Viam rejected a stored key. Remove it in Settings." }
+        return keys.keys.map { "\($0.scope.label) (\($0.shortID))" }.joined(separator: "\n")
     }
 }
 
-/// Runs `viam login`, which opens the browser.
-struct SignInButton: View {
-    let session: ViamSession
+/// Opens the form for pasting a key.
+struct AddKeyButton: View {
+    @Binding var adding: Bool
 
     var body: some View {
         Button {
-            Task { await session.signIn() }
+            adding = true
         } label: {
             Label {
-                Text("Sign in to Viam")
+                Text("Add Viam API Key…")
             } icon: {
                 Image(systemName: "circle.fill").foregroundStyle(.secondary)
             }

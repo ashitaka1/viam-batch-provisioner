@@ -62,3 +62,11 @@ enum NetbootDaemonCommand {
         exit(1)
     }
 }
+
+final class Locked<Value: Sendable>: @unchecked Sendable {
+    private var value: Value
+    private let lock = NSLock()
+    init(_ value: Value) { self.value = value }
+    func set(_ value: Value) { lock.withLock { self.value = value } }
+    func get() -> Value { lock.withLock { value } }
+}

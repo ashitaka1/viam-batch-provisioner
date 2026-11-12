@@ -4,12 +4,10 @@ import SwiftUI
 /// The main window: the queue, the batch history and the environments in the
 /// sidebar; the selected one in the detail pane.
 struct MainWindow: View {
-    let session: ViamSession
-    let organizations: OrganizationsModel
+    let keys: ViamKeys
     let environments: EnvironmentsModel
     let servers: ServerSelection
     let history: BatchHistory
-    let fleet: @Sendable (String) -> any ViamFleet
 
     @SceneStorage("sidebarSelection") private var selectedItem: String?
     @State private var queue: QueueModel?
@@ -46,9 +44,9 @@ struct MainWindow: View {
                     Banner(message: error) {
                         Button("Try Again") { environments.load() }
                     }
-                } else if case .failed(let error) = organizations.state {
+                } else if let error = keys.loadError {
                     Banner(message: error) {
-                        Button("Try Again") { Task { await organizations.load() } }
+                        Button("Try Again") { keys.load() }
                     }
                 }
                 detail.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,12 +56,15 @@ struct MainWindow: View {
         .toolbar {
             if let environment = selected {
                 ToolbarItem(placement: .primaryAction) {
+                    let unreachable = environments.isUnreachableWithKey(environment)
                     Button { provisioning = environment } label: { Label("Provision…", systemImage: "play.fill") }
-                        .help("Provision a batch of machines from \(environment.name)")
+                        .disabled(unreachable)
+                        .help(unreachable ? "\(environment.name) is \(EnvironmentsModel.notReachable.lowercased())."
+                                          : "Provision a batch of machines from \(environment.name)")
                 }
             }
             ToolbarItem(placement: .primaryAction) { ServerPicker(servers: servers, queue: queue) }
-            ToolbarItem(placement: .primaryAction) { AccountStatus(session: session) }
+            ToolbarItem(placement: .primaryAction) { AccountStatus(keys: keys) }
         }
         .task {
             // Browsing fails until Local Network access is granted; keep trying.
@@ -79,7 +80,7 @@ struct MainWindow: View {
                 return
             }
             let model = QueueModel(serverName: server.name, source: ProvisionerClient(baseURL: server.baseURL))
-            let monitor = OnlineMonitor(serverURL: server.baseURL, history: history, fleet: fleet)
+            let monitor = OnlineMonitor(serverURL: server.baseURL, history: history, fleet: { [keys] in keys.fleet(org: $0, location: $1) })
             queue = model
             online = monitor
             async let watching: Void = monitor.run(model)
@@ -128,12 +129,12 @@ struct MainWindow: View {
         } else if sidebarSelection.wrappedValue == .history {
             HistoryView(history: history, queue: queue, onlineAt: online?.onlineAt ?? [:])
         } else if let environment = selected {
-            EnvironmentEditor(session: session, organizations: organizations, environments: environments, environment: environment)
+            EnvironmentEditor(keys: keys, environments: environments, environment: environment)
                 .id(environment.id)
         } else if environments.environments.isEmpty && environments.loadError == nil {
-            if !isSignedIn {
+            if keys.loaded && !keys.isSignedIn {
                 VStack(spacing: 0) {
-                    SignInView(session: session)
+                    SignInView(keys: keys)
                     Button("Create an environment without Viam") { create(mode: .osOnly) }
                         .buttonStyle(.link)
                 }
@@ -149,10 +150,6 @@ struct MainWindow: View {
         } else {
             ContentUnavailableView("Select an Environment", systemImage: "square.stack.3d.up")
         }
-    }
-
-    private var isSignedIn: Bool {
-        if case .signedIn = session.state { true } else { false }
     }
 
     private func create(mode: ProvisionMode = .full) {

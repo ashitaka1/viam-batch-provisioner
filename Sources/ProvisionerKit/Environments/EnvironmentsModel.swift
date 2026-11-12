@@ -11,7 +11,7 @@ public final class EnvironmentsModel {
         case rejected(String)
         /// Viam couldn't be reached, or answered with an error.
         case unreachable(String)
-        /// Signed out, the account's orgs are unknown, or it can't see this one.
+        /// Signed out, the orgs are unknown, or no key reaches this one.
         case unavailable
     }
 
@@ -20,23 +20,36 @@ public final class EnvironmentsModel {
     /// Why the stored environments couldn't be read, when they couldn't.
     public private(set) var loadError: String?
     private var locationStates: [String: LocationsState] = [:]
+    /// Orgs whose loaded locations are the location keys' grants, not Viam's list.
+    private var grantedOnly: Set<String> = []
     /// Environments whose stored WiFi password isn't a WPA passphrase, found when
     /// it was set or loaded, so problems never read the Keychain.
     private var badWifiPasswords: Set<UUID> = []
 
     private let store: any EnvironmentStore
     private let orgs: @MainActor () -> AccountOrgs
-    private let fleet: @Sendable (_ orgID: String) -> any ViamFleet
+    private let fleet: @MainActor (_ orgID: String, _ locationID: String?) -> (any ViamFleet)?
+    private let grantedLocations: @MainActor (_ orgID: String) -> [ViamLocation]?
+    private let reaches: (@MainActor (_ orgID: String, _ locationID: String) -> Bool)?
     private let readFile: @MainActor (String) -> String?
     private let home: String
 
+    /// `fleet` makes Viam's calls with the stored key that covers the org and
+    /// location, nil when none does (decision 49). `grantedLocations` are the
+    /// org's locations the keys are granted when no key holds the whole org,
+    /// nil when one does. `reaches` says whether `fleet` would return one, without
+    /// making it, for checks that run while views render.
     public init(store: any EnvironmentStore, orgs: @escaping @MainActor () -> AccountOrgs,
-                fleet: @escaping @Sendable (_ orgID: String) -> any ViamFleet,
+                fleet: @escaping @MainActor (_ orgID: String, _ locationID: String?) -> (any ViamFleet)?,
+                grantedLocations: @escaping @MainActor (_ orgID: String) -> [ViamLocation]? = { _ in nil },
+                reaches: (@MainActor (_ orgID: String, _ locationID: String) -> Bool)? = nil,
                 readFile: @escaping @MainActor (String) -> String? = { try? String(contentsOfFile: $0, encoding: .utf8) },
                 home: String = NSHomeDirectory()) {
         self.store = store
         self.orgs = orgs
         self.fleet = fleet
+        self.grantedLocations = grantedLocations
+        self.reaches = reaches
         self.readFile = readFile
         self.home = home
     }
@@ -158,7 +171,7 @@ public final class EnvironmentsModel {
 
     public struct ProvisioningSettings: Sendable {
         public var config: EnvironmentConfig
-        /// The environment's org, in full mode.
+        /// The calls into the environment's org and location, in full mode.
         public var fleet: (any ViamFleet)?
     }
 
@@ -176,7 +189,7 @@ public final class EnvironmentsModel {
             config = nil
         }
         guard let config, problems.isEmpty else { throw EnvironmentError.invalid(problems) }
-        let fleet = environment.provisionMode == .full ? environment.orgID.map { self.fleet($0) } : nil
+        let fleet = environment.provisionMode == .full ? environment.orgID.flatMap { self.fleet($0, environment.locationID) } : nil
         return ProvisioningSettings(config: config, fleet: fleet)
     }
 
@@ -194,7 +207,7 @@ public final class EnvironmentsModel {
         let orgs: [ViamOrganization]
         switch self.orgs() {
         case .signedOut:
-            problems.append(EnvironmentProblem(field: .org, message: "Sign in to Viam to use \(orgName)."))
+            problems.append(EnvironmentProblem(field: .org, message: "Add a Viam API key to use \(orgName)."))
             return problems
         case .unknown:
             return problems
@@ -202,15 +215,42 @@ public final class EnvironmentsModel {
             orgs = known
         }
         guard orgs.contains(where: { $0.id == orgID }) else {
-            problems.append(EnvironmentProblem(field: .org, message: "Your Viam account can't see \(orgName)."))
+            problems.append(EnvironmentProblem(field: .org, message: Self.notReachable))
             return problems
         }
-        if let locationID = environment.locationID, !locationID.isEmpty,
-           case .loaded(let locations) = locationStates[orgID], !locations.contains(where: { $0.id == locationID }) {
-            let locationName = environment.locationName ?? locationID
-            problems.append(EnvironmentProblem(field: .location, message: "\"\(locationName)\" no longer exists in \(orgName)."))
+        if let locationID = environment.locationID, !locationID.isEmpty {
+            if !isReached(orgID, locationID) {
+                problems.append(EnvironmentProblem(field: .location, message: Self.notReachable))
+            } else if case .loaded(let locations) = locationStates[orgID], !grantedOnly.contains(orgID),
+                      !locations.contains(where: { $0.id == locationID }) {
+                let locationName = environment.locationName ?? locationID
+                problems.append(EnvironmentProblem(field: .location, message: "\"\(locationName)\" no longer exists in \(orgName)."))
+            }
         }
         return problems
+    }
+
+    public static let notReachable = "Not reachable with this key"
+
+    /// The stored keys leave out the environment's org or location. Its stored
+    /// org and location are kept.
+    public func isUnreachableWithKey(_ environment: Environment) -> Bool {
+        guard environment.provisionMode == .full, let orgID = environment.orgID, !orgID.isEmpty,
+              case .known(let orgs) = orgs() else { return false }
+        guard orgs.contains(where: { $0.id == orgID }) else { return true }
+        guard let locationID = environment.locationID, !locationID.isEmpty else { return false }
+        return !isReached(orgID, locationID)
+    }
+
+    private func isReached(_ orgID: String, _ locationID: String) -> Bool {
+        reaches?(orgID, locationID) ?? (fleet(orgID, locationID) != nil)
+    }
+
+    /// Forgets every org's locations, when the keys change: what one key reached
+    /// says nothing about the next.
+    public func forgetLocations() {
+        locationStates = [:]
+        grantedOnly = []
     }
 
     public func orgIsAvailable(_ environment: Environment) -> Bool {
@@ -243,9 +283,19 @@ public final class EnvironmentsModel {
 
     private func fetchLocations(org orgID: String) async {
         guard isAvailable(orgID) else { return }
+        if let granted = grantedLocations(orgID) {
+            locationStates[orgID] = .loaded(granted)
+            grantedOnly.insert(orgID)
+            return
+        }
+        grantedOnly.remove(orgID)
+        guard let fleet = fleet(orgID, nil) else {
+            locationStates[orgID] = .unavailable
+            return
+        }
         locationStates[orgID] = .loading
         do {
-            locationStates[orgID] = .loaded(try await fleet(orgID).locations())
+            locationStates[orgID] = .loaded(try await fleet.locations())
         } catch {
             switch error {
             case .rejected(let message): locationStates[orgID] = .rejected(message)

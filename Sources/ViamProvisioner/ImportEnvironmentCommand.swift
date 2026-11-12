@@ -1,6 +1,5 @@
 import Foundation
 import ProvisionerKit
-import ViamAPI
 
 /// `ViamProvisioner --import-environment <path>`: the developer import behind
 /// `just import-env`. It runs in the app's own process, so the Keychain items
@@ -20,7 +19,7 @@ enum ImportEnvironmentCommand {
             }
             print("Imported \(environment.name) into the app.")
             if environment.provisionMode == .full, environment.orgName == nil {
-                print("Sign in to Viam in the app to use its organization \(environment.orgID ?? "(none)").")
+                print("Add a Viam API key in the app to use its organization \(environment.orgID ?? "(none)").")
             }
             exit(0)
         } catch {
@@ -28,33 +27,13 @@ enum ImportEnvironmentCommand {
         }
     }
 
-    /// The org's name as the viam CLI's login sees it; nil when signed out or not visible.
+    /// The org's name as a stored API key records it; nil when no key reaches the org.
     private static func orgName(_ orgID: String) -> String? {
-        let result = Locked<String?>(nil)
-        let done = DispatchSemaphore(value: 0)
-        Task.detached {
-            defer { done.signal() }
-            guard let executable = await ViamCLI.locate() else { return }
-            let cli = ViamCLI(run: ViamCLI.processRunner(executable: executable))
-            let lister = ViamOrganizationLister(
-                tokens: CLITokenSource(cli: { cli }), baseURL: CLIConfig.baseURL() ?? ViamAppClient.defaultBaseURL)
-            let name = (try? await lister.organizations())?.first { $0.id == orgID }?.name
-            result.set(name)
-        }
-        done.wait()
-        return result.get()
+        (try? KeychainAPIKeyStore().all())?.keys.first { $0.scope.orgID == orgID }?.scope.orgName
     }
 
     private static func fail(_ message: String) -> Never {
         FileHandle.standardError.write(Data((message + "\n").utf8))
         exit(1)
     }
-}
-
-final class Locked<Value: Sendable>: @unchecked Sendable {
-    private var value: Value
-    private let lock = NSLock()
-    init(_ value: Value) { self.value = value }
-    func set(_ value: Value) { lock.withLock { self.value = value } }
-    func get() -> Value { lock.withLock { value } }
 }

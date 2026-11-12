@@ -23,12 +23,3 @@ public struct OrgCredential: Codable, Sendable, Equatable, Identifiable, CustomS
     public var description: String { "OrgCredential(org: \(orgName) \(orgID), key: \(keyName) \(keyID))" }
     public var debugDescription: String { description }
 }
-
-/// Holds one credential per org ID. Saving an org already present replaces it.
-public protocol OrgCredentialStore: Sendable {
-    /// Sorted by org name.
-    func all() throws -> [OrgCredential]
-    func save(_ credential: OrgCredential) throws
-    /// Removing an org that isn't stored does nothing.
-    func remove(orgID: String) throws
-}

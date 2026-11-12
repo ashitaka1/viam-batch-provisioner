@@ -131,14 +131,6 @@ func detectsLoggedOut(fixtureName: String) async throws {
     #expect(runner.calls == [["login"], ["logout"]])
 }
 
-@Test func baseURLFromConfig() throws {
-    let file = FileManager.default.temporaryDirectory.appending(path: "cli-config-\(UUID().uuidString).json")
-    try Data(#"{"base_url":"https://app.viam.com:443","auth":{"access_token":"x"}}"#.utf8).write(to: file)
-    defer { try? FileManager.default.removeItem(at: file) }
-    #expect(CLIConfig.baseURL(path: file.path)?.absoluteString == "https://app.viam.com:443")
-    #expect(CLIConfig.baseURL(path: file.path + ".missing") == nil)
-}
-
 // MARK: - Locating the binary
 
 @Test func locatePrefersHomebrew() async {

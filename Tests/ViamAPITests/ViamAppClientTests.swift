@@ -68,9 +68,7 @@ func otherStatusesAreNotRetried(code: Int) async {
 }
 
 @Test(arguments: [
-    (ViamCLIError.notLoggedIn, FleetError.rejected("Sign in to Viam.")),
-    (.notInstalled, .rejected("Install the viam CLI.")),
-    (.tokenUnavailable, .unreachable("The viam CLI couldn't give the app its login.")),
+    (ViamCLIError.notLoggedIn, FleetError.rejected("Sign in with the viam CLI.")),
     (.failed("Error: boom"), .unreachable("Error: boom")),
 ])
 func providerFailureReachesTheCallerWithoutARequest(failure: ViamCLIError, expected: FleetError) async {
@@ -81,6 +79,15 @@ func providerFailureReachesTheCallerWithoutARequest(failure: ViamCLIError, expec
     }, session: session)
     await #expect(throws: expected) { _ = try await fleet.locations() }
     #expect(seen.withLock { $0.isEmpty }, "a request went out without a token")
+}
+
+@Test func refusedKeyIsRejected() async {
+    let fleet = ViamOrgFleet(orgID: "o1", tokens: ScriptedTokens(failing: APIKeyRefused()), baseURL: StubProtocol.register { _, _ in
+        ok(Viam_App_V1_ListLocationsResponse())
+    }, session: session)
+    await #expect(throws: FleetError.rejected("Viam rejected the API key. Remove it in Settings and add a valid one.")) {
+        _ = try await fleet.locations()
+    }
 }
 
 /// An error from outside Viam and its CLI leaves the outcome unknown.
@@ -102,9 +109,43 @@ func providerFailureReachesTheCallerWithoutARequest(failure: ViamCLIError, expec
     #expect(seen.withLock { $0.map(\.path) } == ["/viam.app.v1.AppService/ListOrganizations"])
 }
 
-@Test func listerMapsRefusalToRejected() async {
-    let lister = ViamOrganizationLister(tokens: ScriptedTokens(["t1"]), baseURL: StubProtocol.register { _, _ in
-        trailerStatus(7, "no access")
-    }, session: session)
-    await #expect(throws: FleetError.rejected("no access")) { _ = try await lister.organizations() }
+// MARK: - API-key sign-in
+
+@Test func authenticateSendsTheKeyAsAnAPIKeyEntity() async throws {
+    let body = Locked<Data?>(nil)
+    let base = StubProtocol.register { request, data in
+        #expect(request.url!.path == "/proto.rpc.v1.AuthService/Authenticate")
+        body.withLock { $0 = data }
+        return ok(authenticated(token: "access-1"))
+    }
+    #expect(try await ViamAppClient.authenticate(keyID: "kid", key: "kval", baseURL: base, session: session) == "access-1")
+    let request = try unframe(Proto_Rpc_V1_AuthenticateRequest.self, try #require(body.withLock { $0 }))
+    #expect(request.entity == "kid")
+    #expect(request.credentials.type == "api-key")
+    #expect(request.credentials.payload == "kval")
+}
+
+@Test(arguments: [3, 5, 7, 16])
+func refusedKeyIsAPIKeyRefused(code: Int) async {
+    let base = StubProtocol.register { _, _ in trailerStatus(code, "bad key") }
+    await #expect(throws: APIKeyRefused()) {
+        _ = try await ViamAppClient.authenticate(keyID: "kid", key: "kval", baseURL: base, session: session)
+    }
+}
+
+/// Viam failing to answer says nothing about the key, so the session isn't signed out.
+@Test func unavailableViamIsNotARefusal() async {
+    let base = StubProtocol.register { _, _ in trailerStatus(14, "unavailable") }
+    await #expect(throws: ViamError.self) {
+        _ = try await ViamAppClient.authenticate(keyID: "kid", key: "kval", baseURL: base, session: session)
+    }
+}
+
+@Test func baseURLComesFromTheAppsDefaults() throws {
+    let defaults = try #require(UserDefaults(suiteName: "test.viam-provisioner.\(UUID().uuidString)"))
+    #expect(ViamAppClient.baseURL(defaults: defaults).absoluteString == "https://app.viam.com")
+    defaults.set("https://app.viam.dev", forKey: "ViamBaseURL")
+    #expect(ViamAppClient.baseURL(defaults: defaults).absoluteString == "https://app.viam.dev")
+    defaults.set("not a url", forKey: "ViamBaseURL")
+    #expect(ViamAppClient.baseURL(defaults: defaults).absoluteString == "https://app.viam.com")
 }
