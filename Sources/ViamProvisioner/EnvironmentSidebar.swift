@@ -97,6 +97,7 @@ struct EnvironmentRow: View {
     @State private var draft = ""
     @State private var note: String?
     @FocusState private var fieldFocused: Bool
+    @SwiftUI.Environment(\.backgroundProminence) private var backgroundProminence
 
     var body: some View {
         HStack {
@@ -114,10 +115,8 @@ struct EnvironmentRow: View {
                 } else {
                     Text(environment.name)
                 }
-                if let note {
-                    Text(note).font(.caption).foregroundStyle(.orange)
-                } else if unreachable {
-                    Text(EnvironmentsModel.notReachable).font(.caption).foregroundStyle(.orange)
+                if let warning = note ?? (unreachable ? EnvironmentsModel.notReachable : nil) {
+                    Text(warning).font(.caption).foregroundStyle(warningStyle).fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
@@ -125,11 +124,16 @@ struct EnvironmentRow: View {
             Spacer()
             if let problem = problems.first {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(warningStyle)
                     .help(problem.message)
                     .accessibilityLabel(problem.message)
             }
         }
+    }
+
+    /// Orange, except on a selected row, where the accent fill leaves it unreadable.
+    private var warningStyle: AnyShapeStyle {
+        backgroundProminence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(.orange)
     }
 
     private var subtitle: String {
