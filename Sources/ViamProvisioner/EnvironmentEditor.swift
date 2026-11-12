@@ -206,8 +206,10 @@ struct EnvironmentEditor: View {
                     if draft.environment.hasPassword {
                         Text("Password set").foregroundStyle(.secondary)
                         Button("Change…") { settingPassword = true }
+                            .accessibilityLabel("Change Password")
                     } else {
                         Button("Set Password…") { settingPassword = true }
+                            .accessibilityLabel("Set Password")
                     }
                 }
             }
