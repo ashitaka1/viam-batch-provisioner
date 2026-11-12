@@ -206,7 +206,7 @@ struct Banner<Actions: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text(message).fixedSize(horizontal: false, vertical: true)
+            Text(message)
             Spacer()
             actions
         }

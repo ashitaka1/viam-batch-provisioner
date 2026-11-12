@@ -19,6 +19,7 @@ struct HistoryView: View {
             if history.records.isEmpty {
                 ContentUnavailableView("No Batches", systemImage: "clock",
                                        description: Text("Batches provisioned from this Mac appear here."))
+                    .frame(maxHeight: .infinity)
             } else {
                 HSplitView {
                     List(history.records, selection: $selection) { record in

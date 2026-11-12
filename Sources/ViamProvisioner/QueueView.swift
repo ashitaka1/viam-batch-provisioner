@@ -26,20 +26,7 @@ struct QueueView: View {
     }
 
     private func content(_ queue: QueueModel) -> some View {
-        VStack(spacing: 0) {
-            if case .waiting(_, let message) = queue.connection {
-                Banner(message: "\(queue.serverName): \(message) Reconnecting automatically.") {}
-            }
-            CountsBar(counts: queue.counts, total: queue.entries.count)
-            Divider()
-            if queue.entries.isEmpty {
-                ContentUnavailableView(
-                    queue.connection == .live ? "The Queue Is Empty" : "Connecting…", systemImage: "tray",
-                    description: Text(queue.connection == .live ? "Provision a batch from an environment." : queue.serverName))
-            } else {
-                QueueTable(entries: queue.entries, onlineAt: onlineAt, selection: $selection, remove: { removing = $0 })
-            }
-        }
+        QueueColumn(queue: queue, onlineAt: onlineAt, selection: $selection, remove: { removing = $0 })
         .onChange(of: selection) { _, name in if name != nil { showingDetail = true } }
         .inspector(isPresented: $showingDetail) {
             Group {
@@ -83,6 +70,32 @@ struct QueueView: View {
             Button("OK") {}
         } message: {
             Text(failure ?? "")
+        }
+    }
+}
+
+/// The connection banner, the counts and the machines.
+struct QueueColumn: View {
+    let queue: QueueModel
+    let onlineAt: [String: Date]
+    @Binding var selection: String?
+    let remove: (String) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if case .waiting(_, let message) = queue.connection {
+                Banner(message: "\(queue.serverName): \(message) Reconnecting automatically.") {}
+            }
+            CountsBar(counts: queue.counts, total: queue.entries.count)
+            Divider()
+            if queue.entries.isEmpty {
+                ContentUnavailableView(
+                    queue.connection == .live ? "The Queue Is Empty" : "Connecting…", systemImage: "tray",
+                    description: Text(queue.connection == .live ? "Provision a batch from an environment." : queue.serverName))
+                .frame(maxHeight: .infinity)
+            } else {
+                QueueTable(entries: queue.entries, onlineAt: onlineAt, selection: $selection, remove: remove)
+            }
         }
     }
 }

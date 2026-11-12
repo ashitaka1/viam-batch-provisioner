@@ -128,6 +128,10 @@ let package = Package(
             name: "ViamProvisioner",
             dependencies: ["ProvisionerKit", "ViamAPI"]
         ),
+        .testTarget(
+            name: "ViamProvisionerTests",
+            dependencies: ["ViamProvisioner"]
+        ),
         .executableTarget(
             name: "provisioner-handoff",
             dependencies: ["ProvisionerKeyHandoffHost", "ProvisionerKit"]

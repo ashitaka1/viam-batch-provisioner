@@ -80,6 +80,7 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 | `Sources/provisioner-server/` | Executable wrapper around `ServerMain` |
 | `Tests/ProvisionerServerTests/` | Store, journal, report and fan-out tests against temp directories; REST, SSE and restart tests against a live server through ProvisionerKit's client and feed |
 | `Tests/ProvisionerKitTests/` | Domain mapping, client, feed, browser, queue, run and history tests; `Support/` holds a scripted transport, a fake feed source, a fake fleet and `poll` |
+| `Tests/ViamProvisionerTests/` | The app's layout tests: sizes its views report through `NSHostingController.sizeThatFits`. The window's minimum size is its content's size at a zero proposal, and the detail pane centres content that doesn't fill it |
 
 ## Data model
 
