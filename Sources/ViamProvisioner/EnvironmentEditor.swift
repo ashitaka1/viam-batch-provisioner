@@ -9,22 +9,28 @@ struct EnvironmentEditor: View {
     let environments: EnvironmentsModel
     /// The environment as stored.
     let environment: ProvisionerKit.Environment
+    /// The window presents the password and add-key sheets. Attached to this
+    /// editor, which is replaced per environment, a sheet stays closed after
+    /// its flag is set until something else updates the editor.
+    let setPassword: () -> Void
+    let addKey: () -> Void
 
     @State private var draft: EnvironmentDraft
     /// Identifies this editor's unsaved edit to `environments`.
     @State private var editorID = UUID()
     /// Fields whose "required" problems show; others show only once committed.
     @State private var visited: Set<EnvironmentField> = []
-    @State private var settingPassword = false
-    @State private var addingKey = false
     @State private var failure: String?
     @FocusState private var focused: EnvironmentField?
     @SwiftUI.Environment(\.undoManager) private var undoManager
 
-    init(keys: ViamKeys, environments: EnvironmentsModel, environment: ProvisionerKit.Environment) {
+    init(keys: ViamKeys, environments: EnvironmentsModel, environment: ProvisionerKit.Environment,
+         setPassword: @escaping () -> Void, addKey: @escaping () -> Void) {
         self.keys = keys
         self.environments = environments
         self.environment = environment
+        self.setPassword = setPassword
+        self.addKey = addKey
         _draft = State(initialValue: EnvironmentDraft(environment))
     }
 
@@ -79,13 +85,6 @@ struct EnvironmentEditor: View {
         // The keys are part of the ID: a key added or removed forgets the loaded locations.
         .task(id: "\(draft.environment.orgID ?? "")|\(draft.environment.provisionMode.rawValue)|\(keys.keys.map(\.keyID))") {
             if draft.environment.provisionMode == .full, let orgID = draft.environment.orgID { await environments.loadLocations(org: orgID) }
-        }
-        .sheet(isPresented: $addingKey) { AddKeyForm(keys: keys) }
-        .sheet(isPresented: $settingPassword) {
-            PasswordSheet { password in
-                try environments.setPassword(password, id: environment.id)
-                visited.insert(.password)
-            }
         }
         .alert("Couldn't save", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK") {}
@@ -205,10 +204,10 @@ struct EnvironmentEditor: View {
                 LabeledContent("Password") {
                     if draft.environment.hasPassword {
                         Text("Password set").foregroundStyle(.secondary)
-                        Button("Change…") { settingPassword = true }
+                        Button("Change…", action: setPassword)
                             .accessibilityLabel("Change Password")
                     } else {
-                        Button("Set Password…") { settingPassword = true }
+                        Button("Set Password…", action: setPassword)
                             .accessibilityLabel("Set Password")
                     }
                 }
@@ -317,7 +316,7 @@ struct EnvironmentEditor: View {
             let orgName = environment.orgName ?? orgID
             if keys.loaded && !keys.isSignedIn {
                 Banner(message: "Add a Viam API key to use \(orgName).") {
-                    AddKeyButton(adding: $addingKey)
+                    AddKeyButton(adding: Binding(get: { false }, set: { if $0 { addKey() } }))
                 }
             } else if keys.loaded, !environments.orgIsAvailable(environment) {
                 Banner(message: "\(orgName) is \(EnvironmentsModel.notReachable.lowercased()).") {

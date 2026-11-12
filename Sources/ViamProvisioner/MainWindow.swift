@@ -13,6 +13,8 @@ struct MainWindow: View {
     @State private var queue: QueueModel?
     @State private var online: OnlineMonitor?
     @State private var provisioning: ProvisionerKit.Environment?
+    @State private var settingPassword: ProvisionerKit.Environment?
+    @State private var addingKey = false
     @State private var renamingID: UUID?
     @State private var deleting: ProvisionerKit.Environment?
     @State private var failure: String?
@@ -90,6 +92,10 @@ struct MainWindow: View {
             await model.run()
             await watching
         }
+        .sheet(item: $settingPassword) { environment in
+            PasswordSheet { try environments.setPassword($0, id: environment.id) }
+        }
+        .sheet(isPresented: $addingKey) { AddKeyForm(keys: keys) }
         .sheet(item: $provisioning) { environment in
             ProvisionSheet(environment: environment, environments: environments, servers: servers, history: history,
                            refreshQueue: { server in
@@ -132,7 +138,8 @@ struct MainWindow: View {
         } else if sidebarSelection.wrappedValue == .history {
             HistoryView(history: history, queue: queue, onlineAt: online?.onlineAt ?? [:])
         } else if let environment = selected {
-            EnvironmentEditor(keys: keys, environments: environments, environment: environment)
+            EnvironmentEditor(keys: keys, environments: environments, environment: environment,
+                              setPassword: { settingPassword = environment }, addKey: { addingKey = true })
                 .id(environment.id)
         } else if environments.environments.isEmpty && environments.loadError == nil {
             if keys.loaded && !keys.isSignedIn {
