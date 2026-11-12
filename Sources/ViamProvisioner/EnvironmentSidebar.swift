@@ -124,7 +124,7 @@ struct EnvironmentRow: View {
             }
             // A sidebar row keeps the height it was first given, so a note in it can't wrap.
             .popover(isPresented: Binding(get: { note != nil }, set: { if !$0 { note = nil } }), arrowEdge: .trailing) {
-                Text(note ?? "").fixedSize(horizontal: false, vertical: true).frame(width: 240).padding()
+                Text(note ?? "").frame(width: 240, alignment: .leading).fixedSize(horizontal: false, vertical: true).padding()
             }
             Spacer()
             if let problem = problems.first {
