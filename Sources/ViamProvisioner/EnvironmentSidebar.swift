@@ -55,6 +55,7 @@ struct EnvironmentSidebar: View {
                     EnvironmentRow(
                         environment: environment, problems: environments.problems(for: environment),
                         unreachable: environments.isUnreachableWithKey(environment),
+                        selected: selection == .environment(environment.id),
                         renaming: Binding(get: { renamingID == environment.id }, set: { if !$0 { renamingID = nil } }),
                         rename: { try environments.rename(id: environment.id, to: $0) })
                         .tag(SidebarItem.environment(environment.id))
@@ -91,13 +92,13 @@ struct EnvironmentRow: View {
     let problems: [EnvironmentProblem]
     /// Out of the signed-in API key's reach.
     var unreachable = false
+    var selected = false
     @Binding var renaming: Bool
     let rename: (String) throws -> Void
 
     @State private var draft = ""
     @State private var note: String?
     @FocusState private var fieldFocused: Bool
-    @SwiftUI.Environment(\.backgroundProminence) private var backgroundProminence
 
     var body: some View {
         HStack {
@@ -115,11 +116,15 @@ struct EnvironmentRow: View {
                 } else {
                     Text(environment.name)
                 }
-                if let warning = note ?? (unreachable ? EnvironmentsModel.notReachable : nil) {
-                    Text(warning).font(.caption).foregroundStyle(warningStyle).fixedSize(horizontal: false, vertical: true)
+                if unreachable {
+                    Text(EnvironmentsModel.notReachable).font(.caption).foregroundStyle(warningStyle)
                 } else {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            // A sidebar row keeps the height it was first given, so a note in it can't wrap.
+            .popover(isPresented: Binding(get: { note != nil }, set: { if !$0 { note = nil } }), arrowEdge: .trailing) {
+                Text(note ?? "").fixedSize(horizontal: false, vertical: true).frame(width: 240).padding()
             }
             Spacer()
             if let problem = problems.first {
@@ -131,9 +136,9 @@ struct EnvironmentRow: View {
         }
     }
 
-    /// Orange, except on a selected row, where the accent fill leaves it unreadable.
+    /// Orange, except on the selected row, where the accent fill leaves it unreadable.
     private var warningStyle: AnyShapeStyle {
-        backgroundProminence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(.orange)
+        selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.orange)
     }
 
     private var subtitle: String {
