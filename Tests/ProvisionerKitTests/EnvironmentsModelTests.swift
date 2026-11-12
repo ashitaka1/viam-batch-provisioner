@@ -26,12 +26,14 @@ private final class Harness {
     /// Each fleet asked for, as `org/location`, `-` for no location.
     let fleetOrgs = Locked<[String]>([])
     var files: [String: String] = [:]
+    var granted: [ViamLocation]?
     lazy var model = EnvironmentsModel(
         store: store, orgs: { [unowned self] in orgs },
         fleet: { [fleet, fleetOrgs] orgID, locationID in
             fleetOrgs.withLock { $0.append("\(orgID)/\(locationID ?? "-")") }
             return fleet
         },
+        grantedLocations: { [unowned self] _ in granted },
         readFile: { [unowned self] path in files[path] }, home: "/Users/test")
 
     init() { store = FileEnvironmentStore(file: file, vault: InMemorySecretsVault()) }
@@ -392,15 +394,49 @@ private final class Harness {
 
         #expect(try h.stored(shop.id).locationName == "Bench")
         #expect(try h.stored(lab.id).locationName == nil)
-        #expect(h.model.environments.first { $0.id == shop.id }?.locationName == "Bench")
+        #expect(h.model.environments.first { $0.id == shop.id }?.locationName == "Bench", "the model's list reflects the store")
     }
 
-    @Test func namingLocationsLeavesNamedAndUnreachableEnvironmentsUnfetched() async throws {
+    @Test func namingLocationsKeepsTheSecrets() async throws {
         let h = Harness()
         var shop = try h.model.create(name: "Shop")
         shop.locationID = "loc-1"
-        shop.locationName = "Bench"
+        shop.wifiSSID = "shop"
         try h.model.update(shop)
+        try h.model.setPassword("hunter22", id: shop.id)
+        try h.model.setSecret(.wifiPassword, "wifipass1", id: shop.id)
+        try h.model.setSecret(.tailscaleAuthKey, "tskey-1", id: shop.id)
+
+        await h.model.nameLocations()
+
+        #expect(try h.stored(shop.id).locationName == "Bench")
+        let secrets = try h.store.secrets(id: shop.id)
+        #expect(secrets.passwordHash != nil && secrets.wifiPassword == "wifipass1" && secrets.tailscaleAuthKey == "tskey-1")
+        #expect(try h.stored(shop.id).hasPassword)
+    }
+
+    @Test func namingLocationsSkipsEnvironmentsWithNothingToName() async throws {
+        let h = Harness()
+        var named = try h.model.create(name: "Named")
+        named.locationID = "loc-1"
+        named.locationName = "Bench"
+        try h.model.update(named)
+        var agent = try h.model.create(name: "Agent", mode: .agent)
+        agent.orgID = "org-1"
+        agent.locationID = "loc-1"
+        try h.model.update(agent)
+        var empty = try h.model.create(name: "Empty")
+        empty.locationID = ""
+        try h.model.update(empty)
+        _ = try h.model.create(name: "Unset")
+
+        await h.model.nameLocations()
+
+        #expect(h.fleetOrgs.withLock { $0 } == [])
+    }
+
+    @Test func namingLocationsSkipsOrgsNoKeyReaches() async throws {
+        let h = Harness()
         var other = try h.model.create(name: "Other")
         other.orgID = "org-2"
         other.locationID = "loc-9"
@@ -408,7 +444,7 @@ private final class Harness {
 
         await h.model.nameLocations()
 
-        #expect(await h.fleet.locationsCalls == 0)
+        #expect(h.fleetOrgs.withLock { $0 } == [])
     }
 
     @Test func loadingLocationsRenamesAStaleLocationName() async throws {
@@ -421,6 +457,45 @@ private final class Harness {
         await h.model.loadLocations(org: "org-1")
 
         #expect(try h.stored(shop.id).locationName == "Bench")
+    }
+
+    @Test func grantedLocationsNameTheirEnvironments() async throws {
+        let h = Harness()
+        h.granted = [ViamLocation(id: "loc-1", name: "Granted Bench")]
+        var shop = try h.model.create(name: "Shop")
+        shop.locationID = "loc-1"
+        try h.model.update(shop)
+
+        await h.model.nameLocations()
+
+        #expect(try h.stored(shop.id).locationName == "Granted Bench")
+        #expect(await h.fleet.locationsCalls == 0)
+    }
+
+    @Test func failedLoadLeavesLocationNames() async throws {
+        let h = Harness()
+        await h.fleet.setLocations(.failure(.rejected("bad key")))
+        var shop = try h.model.create(name: "Shop")
+        shop.locationID = "loc-1"
+        shop.locationName = "Old Bench"
+        try h.model.update(shop)
+
+        await h.model.loadLocations(org: "org-1")
+
+        #expect(try h.stored(shop.id).locationName == "Old Bench")
+    }
+
+    @Test func loadingLocationsNamesOnlyThatOrgsEnvironments() async throws {
+        let h = Harness()
+        var other = try h.model.create(name: "Other")
+        other.orgID = "org-2"
+        other.locationID = "loc-1"
+        other.locationName = "Their Bench"
+        try h.model.update(other)
+
+        await h.model.loadLocations(org: "org-1")
+
+        #expect(try h.stored(other.id).locationName == "Their Bench")
     }
 
     @Test func usageListsFullModeEnvironmentsOfTheOrg() throws {
