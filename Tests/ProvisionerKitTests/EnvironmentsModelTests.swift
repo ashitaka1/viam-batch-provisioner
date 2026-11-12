@@ -472,6 +472,31 @@ private final class Harness {
         #expect(await h.fleet.locationsCalls == 0)
     }
 
+    @Test func grantedLocationsLeaveAStoredName() async throws {
+        let h = Harness()
+        h.granted = [ViamLocation(id: "loc-1", name: "Name When The Key Was Added")]
+        var shop = try h.model.create(name: "Shop")
+        shop.locationID = "loc-1"
+        shop.locationName = "Bench"
+        try h.model.update(shop)
+
+        await h.model.loadLocations(org: "org-1")
+
+        #expect(try h.stored(shop.id).locationName == "Bench")
+    }
+
+    @Test func grantedLocationKnownOnlyByIDNamesNothing() async throws {
+        let h = Harness()
+        h.granted = [ViamLocation(id: "loc-1", name: "loc-1")]
+        var shop = try h.model.create(name: "Shop")
+        shop.locationID = "loc-1"
+        try h.model.update(shop)
+
+        await h.model.nameLocations()
+
+        #expect(try h.stored(shop.id).locationName == nil)
+    }
+
     @Test func failedLoadLeavesLocationNames() async throws {
         let h = Harness()
         await h.fleet.setLocations(.failure(.rejected("bad key")))

@@ -319,7 +319,9 @@ public final class EnvironmentsModel {
         if let granted = grantedLocations(orgID) {
             locationStates[orgID] = .loaded(granted)
             grantedOnly.insert(orgID)
-            storeLocationNames(granted, org: orgID)
+            // A key's grant holds the location's name from when the key was
+            // added, or its ID when it has none, so it only fills a missing name.
+            storeLocationNames(granted.filter { $0.name != $0.id }, org: orgID, replacing: false)
             return
         }
         grantedOnly.remove(orgID)
@@ -331,7 +333,7 @@ public final class EnvironmentsModel {
         do {
             let locations = try await fleet.locations()
             locationStates[orgID] = .loaded(locations)
-            storeLocationNames(locations, org: orgID)
+            storeLocationNames(locations, org: orgID, replacing: true)
         } catch {
             switch error {
             case .rejected(let message): locationStates[orgID] = .rejected(message)
@@ -340,11 +342,12 @@ public final class EnvironmentsModel {
         }
     }
 
-    /// Saves the current name of each of the org's environments' locations. A
-    /// save that fails leaves the name as it was; the editor saves it again.
-    private func storeLocationNames(_ locations: [ViamLocation], org orgID: String) {
+    /// Saves the name of each of the org's environments' locations: every
+    /// changed name when `replacing`, else only missing ones. A save that fails
+    /// leaves the name as it was; the editor saves it again.
+    private func storeLocationNames(_ locations: [ViamLocation], org orgID: String, replacing: Bool) {
         var changed = false
-        for var environment in environments where environment.orgID == orgID {
+        for var environment in environments where environment.orgID == orgID && (replacing || environment.locationName == nil) {
             guard let location = locations.first(where: { $0.id == environment.locationID }),
                   environment.locationName != location.name else { continue }
             environment.locationName = location.name
