@@ -3,6 +3,8 @@
 # ProvisionerNetboot launch daemon inside, signs it and registers its URL scheme.
 # Also builds and signs build/provisioner-netbootctl, which drives the netboot daemon. Signs with
 # CODESIGN_IDENTITY from the environment, else from config/signing.env, else ad hoc.
+# Reuses the existing bundle, still validly signed, when its inputs, the identity's certificate
+# and the toolchain match the last build's.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -20,6 +22,21 @@ else
     echo "  An ad-hoc signature changes with every build, so the Keychain asks for the login" >&2
     echo "  password again for each environment's secrets. 'just set-signing-identity' records one." >&2
 fi
+
+source "$ROOT/scripts/lib/app-fingerprint.sh"
+STAMP="$ROOT/build/.app-fingerprint"
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+FINGERPRINT=$(app_fingerprint "$ROOT" "${CODESIGN_IDENTITY:-}" \
+    "$(signing_certificate "${CODESIGN_IDENTITY:-}")" "$(swift --version 2>/dev/null)")
+if [[ "$(cat "$STAMP" 2>/dev/null)" == "$FINGERPRINT" ]] \
+    && codesign --verify --strict "$APP" 2>/dev/null \
+    && codesign --verify "$ROOT/build/provisioner-netbootctl" 2>/dev/null; then
+    echo "No change since the last build; reusing the bundle." >&2
+    "$LSREGISTER" -f "$APP"
+    echo "$APP"
+    exit 0
+fi
+rm -f "$STAMP"
 
 cd "$ROOT"
 for product in ViamProvisioner ProvisionerNetboot provisioner-netbootctl; do
@@ -39,5 +56,6 @@ SIGN=(codesign --force --options runtime --sign "${CODESIGN_IDENTITY:--}")
 "${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.netboot "$APP/Contents/MacOS/ProvisionerNetboot"
 "${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.netbootctl "$ROOT/build/provisioner-netbootctl"
 codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP"
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
+"$LSREGISTER" -f "$APP"
+echo "$FINGERPRINT" > "$STAMP"
 echo "$APP"
