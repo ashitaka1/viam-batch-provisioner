@@ -98,6 +98,7 @@ struct EnvironmentRow: View {
 
     @State private var draft = ""
     @State private var note: String?
+    @State private var clearingNote: Task<Void, Never>?
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -158,8 +159,9 @@ struct EnvironmentRow: View {
             note = nil
         } catch EnvironmentError.invalid(let problems) {
             note = problems.first?.message
-            Task {
-                try? await Task.sleep(for: .seconds(4))
+            clearingNote?.cancel()
+            clearingNote = Task {
+                guard (try? await Task.sleep(for: .seconds(4))) != nil else { return }
                 note = nil
             }
         } catch {
