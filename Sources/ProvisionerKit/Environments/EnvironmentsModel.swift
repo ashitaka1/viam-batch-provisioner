@@ -25,6 +25,9 @@ public final class EnvironmentsModel {
     /// Environments whose stored WiFi password isn't a WPA passphrase, found when
     /// it was set or loaded, so problems never read the Keychain.
     private var badWifiPasswords: Set<UUID> = []
+    /// Each open editor's unsaved edit and the environment it edits, by editor;
+    /// saving one updates the store.
+    @ObservationIgnored private var pendingEdits: [UUID: (environment: UUID, commit: @MainActor () -> Void)] = [:]
 
     private let store: any EnvironmentStore
     private let orgs: @MainActor () -> AccountOrgs
@@ -88,9 +91,27 @@ public final class EnvironmentsModel {
         return try stored(environment.id)
     }
 
+    /// Registers how `editor` saves its unsaved edit to `environment`, or clears it with nil.
+    public func setPendingEdit(for editor: UUID, environment: UUID, _ commit: (@MainActor () -> Void)?) {
+        pendingEdits[editor] = commit.map { (environment, $0) }
+    }
+
+    /// Saves the unsaved edits open editors hold for one environment, so what's
+    /// read next is what was typed.
+    public func commitPendingEdits(environment id: UUID) {
+        for edit in pendingEdits.values where edit.environment == id { edit.commit() }
+    }
+
+    /// The environment as stored once open editors' unsaved edits to it are saved.
+    public func saved(id: UUID) -> Environment? {
+        commitPendingEdits(environment: id)
+        return environments.first { $0.id == id }
+    }
+
     /// A copy named "<name> copy", secrets included.
     @discardableResult
     public func duplicate(id: UUID) throws -> Environment {
+        commitPendingEdits(environment: id)
         var copy = try stored(id)
         copy.id = UUID()
         copy.name = unusedName("\(copy.name) copy")

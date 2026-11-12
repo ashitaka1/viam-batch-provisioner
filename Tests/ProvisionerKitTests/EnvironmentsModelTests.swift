@@ -90,6 +90,48 @@ private final class Harness {
         #expect(try h.model.duplicate(id: shop.id).name == "Shop copy 2")
     }
 
+    /// Registers an edit that saves `shop` with `prefix`.
+    private func pendPrefix(_ prefix: String, on shop: Environment, _ h: Harness) {
+        h.model.setPendingEdit(for: UUID(), environment: shop.id) { [model = h.model] in
+            var edited = shop
+            edited.namePrefix = prefix
+            #expect(throws: Never.self) { try model.update(edited) }
+        }
+    }
+
+    @Test func duplicateSavesAPendingEditFirst() throws {
+        let h = Harness()
+        let shop = try h.model.create(name: "Shop")
+        pendPrefix("tcos-test", on: shop, h)
+        #expect(try h.model.duplicate(id: shop.id).namePrefix == "tcos-test")
+    }
+
+    @Test func savedReturnsTheStoredCopyAfterAPendingEdit() throws {
+        let h = Harness()
+        let shop = try h.model.create(name: "Shop")
+        pendPrefix("tcos-test", on: shop, h)
+        #expect(h.model.saved(id: shop.id)?.namePrefix == "tcos-test")
+        #expect(h.model.saved(id: UUID()) == nil)
+    }
+
+    @Test func pendingEditsRunOnlyForTheirEnvironmentUntilCleared() throws {
+        let h = Harness()
+        let shop = UUID(), lab = UUID()
+        let first = UUID(), second = UUID()
+        var commits: [String] = []
+        h.model.setPendingEdit(for: first, environment: shop) { commits.append("first") }
+        h.model.setPendingEdit(for: second, environment: shop) { commits.append("second") }
+        h.model.setPendingEdit(for: UUID(), environment: lab) { commits.append("lab") }
+        h.model.commitPendingEdits(environment: shop)
+        #expect(Set(commits) == ["first", "second"])
+        #expect(commits.count == 2)
+
+        commits = []
+        h.model.setPendingEdit(for: first, environment: shop, nil)
+        h.model.commitPendingEdits(environment: shop)
+        #expect(commits == ["second"])
+    }
+
     @Test func updateKeepsTheSecrets() throws {
         let h = Harness()
         var shop = try h.model.create(name: "Shop")

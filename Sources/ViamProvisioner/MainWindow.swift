@@ -57,7 +57,9 @@ struct MainWindow: View {
             if let environment = selected {
                 ToolbarItem(placement: .primaryAction) {
                     let unreachable = environments.isUnreachableWithKey(environment)
-                    Button { provisioning = environment } label: { Label("Provision…", systemImage: "play.fill") }
+                    Button { provisioning = environments.saved(id: environment.id) } label: {
+                        Label("Provision…", systemImage: "play.fill")
+                    }
                         .disabled(unreachable)
                         .help(unreachable ? "\(environment.name) is \(EnvironmentsModel.notReachable.lowercased())."
                                           : "Provision a batch of machines from \(environment.name)")

@@ -10,8 +10,9 @@ struct EnvironmentEditor: View {
     /// The environment as stored.
     let environment: ProvisionerKit.Environment
 
-    @State private var draft: ProvisionerKit.Environment
-    @State private var packagesText: String
+    @State private var draft: EnvironmentDraft
+    /// Identifies this editor's unsaved edit to `environments`.
+    @State private var editorID = UUID()
     /// Fields whose "required" problems show; others show only once committed.
     @State private var visited: Set<EnvironmentField> = []
     @State private var settingPassword = false
@@ -24,8 +25,7 @@ struct EnvironmentEditor: View {
         self.keys = keys
         self.environments = environments
         self.environment = environment
-        _draft = State(initialValue: environment)
-        _packagesText = State(initialValue: environment.packages.joined(separator: "\n"))
+        _draft = State(initialValue: EnvironmentDraft(environment))
     }
 
     private var committedProblems: [EnvironmentProblem] { environments.problems(for: environment) }
@@ -48,7 +48,7 @@ struct EnvironmentEditor: View {
                         }
                     }
                     provisioningSection
-                    if draft.provisionMode == .full { viamSection }
+                    if draft.environment.provisionMode == .full { viamSection }
                     accountSection
                     networkSection
                     robotNetworkSection
@@ -59,8 +59,13 @@ struct EnvironmentEditor: View {
         }
         .onDisappear {
             // Selecting another environment, ⌘N or closing the window ends the
-            // editor without a focus change; a deleted environment isn't saved back.
-            if environments.environments.contains(where: { $0.id == environment.id }) { commit() }
+            // editor without a focus change.
+            commit()
+            environments.setPendingEdit(for: editorID, environment: environment.id, nil)
+        }
+        .onAppear {
+            // Provision and Duplicate save an edit still in a field.
+            environments.setPendingEdit(for: editorID, environment: environment.id) { commit() }
         }
         .onChange(of: focused) { previous, _ in
             if let previous {
@@ -68,21 +73,12 @@ struct EnvironmentEditor: View {
                 commit()
             }
         }
-        .onChange(of: environment) { _, stored in
-            // Undo, a rename in the sidebar or a secret change replaced the stored copy.
-            if focused == nil {
-                draft = stored
-                packagesText = stored.packages.joined(separator: "\n")
-            } else {
-                draft.name = stored.name
-                draft.hasPassword = stored.hasPassword
-                draft.hasWifiPassword = stored.hasWifiPassword
-                draft.hasTailscaleKey = stored.hasTailscaleKey
-            }
+        .onChange(of: environment) { old, stored in
+            draft.storedChanged(from: old, to: stored)
         }
         // The keys are part of the ID: a key added or removed forgets the loaded locations.
-        .task(id: "\(draft.orgID ?? "")|\(draft.provisionMode.rawValue)|\(keys.keys.map(\.keyID))") {
-            if draft.provisionMode == .full, let orgID = draft.orgID { await environments.loadLocations(org: orgID) }
+        .task(id: "\(draft.environment.orgID ?? "")|\(draft.environment.provisionMode.rawValue)|\(keys.keys.map(\.keyID))") {
+            if draft.environment.provisionMode == .full, let orgID = draft.environment.orgID { await environments.loadLocations(org: orgID) }
         }
         .sheet(isPresented: $addingKey) { AddKeyForm(keys: keys) }
         .sheet(isPresented: $settingPassword) {
@@ -110,11 +106,11 @@ struct EnvironmentEditor: View {
             .pickerStyle(.segmented)
             .id(EnvironmentField.provisionMode)
             field(.namePrefix) {
-                TextField("Name prefix", text: $draft.namePrefix).focused($focused, equals: .namePrefix).onSubmit(commit)
+                TextField("Name prefix", text: $draft.environment.namePrefix).focused($focused, equals: .namePrefix).onSubmit(commit)
             }
         } footer: {
-            let prefix = draft.namePrefix.isEmpty ? "<prefix>" : draft.namePrefix
-            Text("Machines are named \(prefix)-1, \(prefix)-2, …" + (draft.provisionMode == .full ? " and created in Viam." : " (hostnames only)."))
+            let prefix = draft.environment.namePrefix.isEmpty ? "<prefix>" : draft.environment.namePrefix
+            Text("Machines are named \(prefix)-1, \(prefix)-2, …" + (draft.environment.provisionMode == .full ? " and created in Viam." : " (hostnames only)."))
                 .foregroundStyle(.secondary)
         }
     }
@@ -122,21 +118,21 @@ struct EnvironmentEditor: View {
     private var viamSection: some View {
         Section("Viam") {
             field(.org) {
-                if organizationRows.isEmpty && draft.orgID == nil {
+                if organizationRows.isEmpty && draft.environment.orgID == nil {
                     LabeledContent("Organization") {
                         Text("Add a Viam API key to choose one.").foregroundStyle(.secondary)
                     }
-                } else if let only = onlyChoice(organizationRows, selected: draft.orgID) {
+                } else if let only = onlyChoice(organizationRows, selected: draft.environment.orgID) {
                     LabeledContent("Organization", value: only.name)
-                        .onAppear { if draft.orgID == nil { orgBinding.wrappedValue = only.id } }
+                        .onAppear { if draft.environment.orgID == nil { orgBinding.wrappedValue = only.id } }
                 } else {
                     Picker("Organization", selection: orgBinding) {
-                        if draft.orgID == nil { Text("Choose…").tag(String?.none) }
+                        if draft.environment.orgID == nil { Text("Choose…").tag(String?.none) }
                         ForEach(organizationRows) { org in
                             Text(org.name).tag(Optional(org.id))
                         }
-                        if let orgID = draft.orgID, !environments.orgIsAvailable(draft) {
-                            Text("\(draft.orgName ?? orgID) (\(EnvironmentsModel.notReachable.lowercased()))")
+                        if let orgID = draft.environment.orgID, !environments.orgIsAvailable(draft.environment) {
+                            Text("\(draft.environment.orgName ?? orgID) (\(EnvironmentsModel.notReachable.lowercased()))")
                                 .tag(Optional(orgID))
                         }
                     }
@@ -148,26 +144,26 @@ struct EnvironmentEditor: View {
     }
 
     @ViewBuilder private var locationRow: some View {
-        let state = draft.orgID.map { environments.locations(org: $0) } ?? .idle
-        switch (draft.orgID, state) {
+        let state = draft.environment.orgID.map { environments.locations(org: $0) } ?? .idle
+        switch (draft.environment.orgID, state) {
         case (nil, _):
             Picker("Location", selection: .constant(String?.none)) { Text("Choose an organization first").tag(String?.none) }
                 .disabled(true)
         case (_, .loading), (_, .idle):
             LabeledContent("Location") {
-                if let name = draft.locationName { Text(name) }
+                if let name = draft.environment.locationName { Text(name) }
                 ProgressView().controlSize(.small)
                 Text("Loading locations…").foregroundStyle(.secondary)
             }
         case (let orgID?, .loaded(let locations)):
             Group {
-                if let only = onlyChoice(locations, selected: draft.locationID) {
+                if let only = onlyChoice(locations, selected: draft.environment.locationID) {
                     LabeledContent("Location", value: only.name)
                 } else {
                     Picker("Location", selection: locationBinding(locations)) {
-                        if draft.locationID == nil { Text("Choose…").tag(String?.none) }
-                        if let locationID = draft.locationID, !locations.contains(where: { $0.id == locationID }) {
-                            Text("\(draft.locationName ?? locationID) (\(environments.isUnreachableWithKey(draft) ? EnvironmentsModel.notReachable.lowercased() : "missing"))")
+                        if draft.environment.locationID == nil { Text("Choose…").tag(String?.none) }
+                        if let locationID = draft.environment.locationID, !locations.contains(where: { $0.id == locationID }) {
+                            Text("\(draft.environment.locationName ?? locationID) (\(environments.isUnreachableWithKey(draft.environment) ? EnvironmentsModel.notReachable.lowercased() : "missing"))")
                                 .tag(Optional(locationID))
                         }
                         ForEach(locations) { Text($0.name).tag(Optional($0.id)) }
@@ -175,27 +171,27 @@ struct EnvironmentEditor: View {
                 }
             }
             .onAppear {
-                if draft.locationID == nil, locations.count == 1 {
+                if draft.environment.locationID == nil, locations.count == 1 {
                     // Select automatically when the org has exactly one location.
-                    draft.locationID = locations[0].id
-                    draft.locationName = locations[0].name
+                    draft.environment.locationID = locations[0].id
+                    draft.environment.locationName = locations[0].name
                     commit()
-                } else if let location = locations.first(where: { $0.id == draft.locationID }), draft.locationName != location.name {
+                } else if let location = locations.first(where: { $0.id == draft.environment.locationID }), draft.environment.locationName != location.name {
                     // An import stores the ID only; keep the name for the sidebar and offline use.
-                    draft.locationName = location.name
+                    draft.environment.locationName = location.name
                     commit()
                 }
             }
             .id(orgID)
         case (let orgID?, .rejected(let message)), (let orgID?, .unreachable(let message)):
             LabeledContent("Location") {
-                Text(draft.locationName.map { "\($0) (saved)" } ?? "None").foregroundStyle(.secondary)
+                Text(draft.environment.locationName.map { "\($0) (saved)" } ?? "None").foregroundStyle(.secondary)
                 Button("Try Again") { Task { await environments.reloadLocations(org: orgID) } }
             }
             .help(message)
         case (_, .unavailable):
             LabeledContent("Location") {
-                Text(draft.locationName.map { "\($0) (saved)" } ?? "None").foregroundStyle(.secondary)
+                Text(draft.environment.locationName.map { "\($0) (saved)" } ?? "None").foregroundStyle(.secondary)
             }
         }
     }
@@ -203,11 +199,11 @@ struct EnvironmentEditor: View {
     private var accountSection: some View {
         Section {
             field(.username) {
-                TextField("Username", text: $draft.username).focused($focused, equals: .username).onSubmit(commit)
+                TextField("Username", text: $draft.environment.username).focused($focused, equals: .username).onSubmit(commit)
             }
             field(.password) {
                 LabeledContent("Password") {
-                    if draft.hasPassword {
+                    if draft.environment.hasPassword {
                         Text("Password set").foregroundStyle(.secondary)
                         Button("Change…") { settingPassword = true }
                     } else {
@@ -216,8 +212,8 @@ struct EnvironmentEditor: View {
                 }
             }
             field(.sshPublicKey) {
-                SSHKeyRow(key: draft.sshPublicKey) { text in
-                    draft.sshPublicKey = text
+                SSHKeyRow(key: draft.environment.sshPublicKey) { text in
+                    draft.environment.sshPublicKey = text
                     visited.insert(.sshPublicKey)
                     commit()
                 }
@@ -230,8 +226,8 @@ struct EnvironmentEditor: View {
     private var networkSection: some View {
         Section {
             field(.timezone) {
-                TimeZoneRow(timezone: draft.timezone) { zone in
-                    draft.timezone = zone
+                TimeZoneRow(timezone: draft.environment.timezone) { zone in
+                    draft.environment.timezone = zone
                     commit()
                 }
             }
@@ -241,23 +237,23 @@ struct EnvironmentEditor: View {
                     .onSubmit(commit)
             }
             field(.wifiPassword) {
-                SecretField(title: "WiFi password", isSet: draft.hasWifiPassword,
-                            disabled: (draft.wifiSSID ?? "").isEmpty && !draft.hasWifiPassword,
+                SecretField(title: "WiFi password", isSet: draft.environment.hasWifiPassword,
+                            disabled: (draft.environment.wifiSSID ?? "").isEmpty && !draft.environment.hasWifiPassword,
                             reveal: { try environments.revealSecret(.wifiPassword, id: environment.id) },
                             save: { try environments.setSecret(.wifiPassword, $0, id: environment.id) })
             }
-            if !(draft.wifiSSID ?? "").isEmpty && !draft.hasWifiPassword {
+            if !(draft.environment.wifiSSID ?? "").isEmpty && !draft.environment.hasWifiPassword {
                 Text("No password: machines join it as an open network.").font(.caption).foregroundStyle(.secondary)
             }
             Picker("Country", selection: binding(\.wifiCountry)) {
-                if let code = draft.wifiCountry, !Self.regions.contains(where: { $0.code == code }) {
+                if let code = draft.environment.wifiCountry, !Self.regions.contains(where: { $0.code == code }) {
                     Text(code).tag(Optional(code))
                 }
                 ForEach(Self.regions, id: \.code) { region in
                     Text("\(region.name) (\(region.code))").tag(Optional(region.code))
                 }
             }
-            .disabled((draft.wifiSSID ?? "").isEmpty)
+            .disabled((draft.environment.wifiSSID ?? "").isEmpty)
             .id(EnvironmentField.wifiCountry)
         } header: {
             SectionHeader(title: "Network", serverIgnores: true)
@@ -268,21 +264,21 @@ struct EnvironmentEditor: View {
         Section {
             Toggle("Robot network", isOn: binding(\.robotNetEnabled))
             field(.robotNetAddress) {
-                TextField("Address", text: $draft.robotNetAddress, prompt: Text(RobotNetwork.defaultAddress))
+                TextField("Address", text: $draft.environment.robotNetAddress, prompt: Text(RobotNetwork.defaultAddress))
                     .focused($focused, equals: .robotNetAddress)
                     .onSubmit(commit)
             }
-            .disabled(!draft.robotNetEnabled)
+            .disabled(!draft.environment.robotNetEnabled)
             field(.robotNetPort) {
                 TextField("Port", text: optional(\.robotNetPort), prompt: Text("Any other enp* port"))
                     .focused($focused, equals: .robotNetPort)
                     .onSubmit(commit)
             }
-            .disabled(!draft.robotNetEnabled)
+            .disabled(!draft.environment.robotNetEnabled)
         } header: {
             SectionHeader(title: "Robot Network", serverIgnores: true)
         } footer: {
-            Text(draft.robotNetEnabled
+            Text(draft.environment.robotNetEnabled
                  ? "The port gets this static address, and every other wired port DHCP. With no port, the first enp* port other than the one cabled at install gets it."
                  : "Machines get no robot network.")
                 .foregroundStyle(.secondary)
@@ -294,14 +290,14 @@ struct EnvironmentEditor: View {
             field(.packages) {
                 VStack(alignment: .leading) {
                     Text("Packages")
-                    TextEditor(text: $packagesText)
+                    TextEditor(text: $draft.packagesText)
                         .font(.body.monospaced())
                         .frame(minHeight: 120)
                         .focused($focused, equals: .packages)
                 }
             }
             field(.tailscaleAuthKey) {
-                SecretField(title: "Tailscale key", isSet: draft.hasTailscaleKey, disabled: false,
+                SecretField(title: "Tailscale key", isSet: draft.environment.hasTailscaleKey, disabled: false,
                             reveal: { try environments.revealSecret(.tailscaleAuthKey, id: environment.id) },
                             save: { try environments.setSecret(.tailscaleAuthKey, $0, id: environment.id) })
             }
@@ -338,7 +334,7 @@ struct EnvironmentEditor: View {
     /// once it has been visited; any other shows once committed, and clears as
     /// soon as the draft fixes it.
     private func field<Content: View>(_ field: EnvironmentField, @ViewBuilder content: () -> Content) -> some View {
-        let draftProblems = draftValue().problems(otherNames: [])
+        let draftProblems = draft.value.problems(otherNames: [])
         let shown = committedProblems.filter { problem in
             problem.field == field
                 && (draftProblems.contains(problem) || !problem.field.isDraftChecked)
@@ -356,15 +352,6 @@ struct EnvironmentEditor: View {
         .id(field)
     }
 
-    /// The draft with the packages editor's text applied.
-    private func draftValue() -> ProvisionerKit.Environment {
-        var value = draft
-        value.packages = packagesText.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        return value
-    }
-
     private func isEmpty(_ field: EnvironmentField) -> Bool {
         switch field {
         case .org: environment.orgID == nil
@@ -377,13 +364,14 @@ struct EnvironmentEditor: View {
     }
 
     /// Saves the draft when it differs from what's stored, as one undoable step.
+    /// Reads the stored copy from `environments`: a pending edit runs from a copy
+    /// of this view, and a deleted environment isn't saved back.
     private func commit() {
-        let value = draftValue()
-        guard value != environment else { return }
-        let previous = environment
+        let value = draft.value
+        guard let previous = environments.environments.first(where: { $0.id == environment.id }),
+              value != previous else { return }
         do {
             try environments.update(value)
-            if value.packages != draft.packages { draft.packages = value.packages }
             Self.registerUndo(undoManager, model: environments, restoring: previous, name: "Edit \(previous.name)")
         } catch {
             failure = error.localizedDescription
@@ -407,35 +395,35 @@ struct EnvironmentEditor: View {
     }
 
     private func binding<Value: Equatable>(_ keyPath: WritableKeyPath<ProvisionerKit.Environment, Value>) -> Binding<Value> {
-        Binding(get: { draft[keyPath: keyPath] }, set: { value in
-            draft[keyPath: keyPath] = value
+        Binding(get: { draft.environment[keyPath: keyPath] }, set: { value in
+            draft.environment[keyPath: keyPath] = value
             commit()
         })
     }
 
     private func optional(_ keyPath: WritableKeyPath<ProvisionerKit.Environment, String?>) -> Binding<String> {
-        Binding(get: { draft[keyPath: keyPath] ?? "" }, set: { draft[keyPath: keyPath] = $0.isEmpty ? nil : $0 })
+        Binding(get: { draft.environment[keyPath: keyPath] ?? "" }, set: { draft.environment[keyPath: keyPath] = $0.isEmpty ? nil : $0 })
     }
 
 
     /// Changing the org clears the location, whose IDs belong to an org.
     private var orgBinding: Binding<String?> {
-        Binding(get: { draft.orgID }, set: { orgID in
+        Binding(get: { draft.environment.orgID }, set: { orgID in
             visited.insert(.org)
-            guard orgID != draft.orgID else { return }
-            draft.orgID = orgID
-            draft.orgName = organizationRows.first { $0.id == orgID }?.name
-            draft.locationID = nil
-            draft.locationName = nil
+            guard orgID != draft.environment.orgID else { return }
+            draft.environment.orgID = orgID
+            draft.environment.orgName = organizationRows.first { $0.id == orgID }?.name
+            draft.environment.locationID = nil
+            draft.environment.locationName = nil
             commit()
         })
     }
 
     private func locationBinding(_ locations: [ViamLocation]) -> Binding<String?> {
-        Binding(get: { draft.locationID }, set: { locationID in
+        Binding(get: { draft.environment.locationID }, set: { locationID in
             visited.insert(.location)
-            draft.locationID = locationID
-            draft.locationName = locations.first { $0.id == locationID }?.name
+            draft.environment.locationID = locationID
+            draft.environment.locationName = locations.first { $0.id == locationID }?.name
             commit()
         })
     }
