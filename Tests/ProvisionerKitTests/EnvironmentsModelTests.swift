@@ -379,6 +379,50 @@ private final class Harness {
         #expect(await h.fleet.locationsCalls == 0)
     }
 
+    @Test func namingLocationsStoresTheNamesOfLocationsKnownOnlyByID() async throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop")
+        shop.locationID = "loc-1"
+        try h.model.update(shop)
+        var lab = try h.model.create(name: "Lab")
+        lab.locationID = "gone"
+        try h.model.update(lab)
+
+        await h.model.nameLocations()
+
+        #expect(try h.stored(shop.id).locationName == "Bench")
+        #expect(try h.stored(lab.id).locationName == nil)
+        #expect(h.model.environments.first { $0.id == shop.id }?.locationName == "Bench")
+    }
+
+    @Test func namingLocationsLeavesNamedAndUnreachableEnvironmentsUnfetched() async throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop")
+        shop.locationID = "loc-1"
+        shop.locationName = "Bench"
+        try h.model.update(shop)
+        var other = try h.model.create(name: "Other")
+        other.orgID = "org-2"
+        other.locationID = "loc-9"
+        try h.model.update(other)
+
+        await h.model.nameLocations()
+
+        #expect(await h.fleet.locationsCalls == 0)
+    }
+
+    @Test func loadingLocationsRenamesAStaleLocationName() async throws {
+        let h = Harness()
+        var shop = try h.model.create(name: "Shop")
+        shop.locationID = "loc-1"
+        shop.locationName = "Old Bench"
+        try h.model.update(shop)
+
+        await h.model.loadLocations(org: "org-1")
+
+        #expect(try h.stored(shop.id).locationName == "Bench")
+    }
+
     @Test func usageListsFullModeEnvironmentsOfTheOrg() throws {
         let h = Harness()
         let shop = try h.model.create(name: "Shop")

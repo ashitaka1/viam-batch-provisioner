@@ -41,6 +41,7 @@ struct ViamProvisionerApp: App {
                     // What one set of keys reached says nothing about the next.
                     environments.forgetLocations()
                 }
+                .task(id: keys.orgs) { await environments.nameLocations() }
                 // The scheme stays registered for a later OAuth callback; key handoff links are ignored.
                 .onOpenURL { _ in NSApp.activate() }
         }
