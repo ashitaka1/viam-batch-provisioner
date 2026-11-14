@@ -55,6 +55,7 @@ struct EnvironmentSidebar: View {
                     EnvironmentRow(
                         environment: environment, problems: environments.problems(for: environment),
                         unreachable: environments.isUnreachableWithKey(environment),
+                        selected: selection == .environment(environment.id),
                         renaming: Binding(get: { renamingID == environment.id }, set: { if !$0 { renamingID = nil } }),
                         rename: { try environments.rename(id: environment.id, to: $0) })
                         .tag(SidebarItem.environment(environment.id))
@@ -91,11 +92,13 @@ struct EnvironmentRow: View {
     let problems: [EnvironmentProblem]
     /// Out of the signed-in API key's reach.
     var unreachable = false
+    var selected = false
     @Binding var renaming: Bool
     let rename: (String) throws -> Void
 
     @State private var draft = ""
     @State private var note: String?
+    @State private var clearingNote: Task<Void, Never>?
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -114,22 +117,29 @@ struct EnvironmentRow: View {
                 } else {
                     Text(environment.name)
                 }
-                if let note {
-                    Text(note).font(.caption).foregroundStyle(.orange)
-                } else if unreachable {
-                    Text(EnvironmentsModel.notReachable).font(.caption).foregroundStyle(.orange)
+                if unreachable {
+                    Text(EnvironmentsModel.notReachable).font(.caption).foregroundStyle(warningStyle)
                 } else {
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
             }
+            // A sidebar row keeps the height it was first given, so a note in it can't wrap.
+            .popover(isPresented: Binding(get: { note != nil }, set: { if !$0 { note = nil } }), arrowEdge: .trailing) {
+                Text(note ?? "").lineLimit(nil).frame(width: 240, alignment: .leading).fixedSize(horizontal: false, vertical: true).padding()
+            }
             Spacer()
             if let problem = problems.first {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(warningStyle)
                     .help(problem.message)
                     .accessibilityLabel(problem.message)
             }
         }
+    }
+
+    /// Orange, except on the selected row, where the accent fill leaves it unreadable.
+    private var warningStyle: AnyShapeStyle {
+        selected ? AnyShapeStyle(.primary) : AnyShapeStyle(.orange)
     }
 
     private var subtitle: String {
@@ -149,8 +159,9 @@ struct EnvironmentRow: View {
             note = nil
         } catch EnvironmentError.invalid(let problems) {
             note = problems.first?.message
-            Task {
-                try? await Task.sleep(for: .seconds(4))
+            clearingNote?.cancel()
+            clearingNote = Task {
+                guard (try? await Task.sleep(for: .seconds(4))) != nil else { return }
                 note = nil
             }
         } catch {

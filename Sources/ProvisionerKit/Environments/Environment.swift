@@ -130,3 +130,15 @@ public struct EnvironmentProblem: Sendable, Equatable {
 public enum EnvironmentError: Error, Sendable, Equatable {
     case invalid([EnvironmentProblem])
 }
+
+extension Environment {
+    /// The delete confirmation's message, naming the secrets deleting removes.
+    public var deletionNote: String {
+        let secrets = [(hasPassword, "account password"), (hasWifiPassword, "WiFi password"), (hasTailscaleKey, "Tailscale key")]
+            .filter(\.0).map(\.1)
+        let queued = "Machines already queued with it aren't affected."
+        guard let last = secrets.last else { return queued }
+        let names = secrets.count == 1 ? last : secrets.dropLast().joined(separator: ", ") + " and " + last
+        return "Its \(names) \(secrets.count == 1 ? "is" : "are") removed from this Mac. \(queued)"
+    }
+}

@@ -18,7 +18,7 @@ struct SectionHeader: View {
 
     var body: some View {
         HStack {
-            Text(title)
+            Text(title).accessibilityAddTraits(.isHeader)
             Spacer()
             if serverIgnores && !ServerSupport.rendersEnvironment {
                 Button { explaining = true } label: {
@@ -27,6 +27,8 @@ struct SectionHeader: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Server uses site.env")
+                .accessibilityHint("Explains which settings the running server ignores")
                 .popover(isPresented: $explaining) {
                     Text("""
                     The server running now builds installs from config/site.env on the server Mac, so it ignores these \
@@ -251,6 +253,7 @@ struct TimeZoneRow: View {
         LabeledContent("Time zone") {
             Text(timezone)
             Button("Change…") { picking = true }
+                .accessibilityLabel("Change Time Zone")
                 .popover(isPresented: $picking) {
                     VStack {
                         TextField("Search", text: $filter).textFieldStyle(.roundedBorder)
