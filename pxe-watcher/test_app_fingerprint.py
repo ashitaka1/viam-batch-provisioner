@@ -91,12 +91,13 @@ class AppFingerprintTest(unittest.TestCase):
 
 
 class BundleConfigurationTest(unittest.TestCase):
-    def configuration(self, value):
-        script = f'set -euo pipefail; source "{LIB}"; bundle_configuration "$1"'
-        return subprocess.run(["bash", "-c", script, "bash", value], capture_output=True, text=True, timeout=30)
+    def configuration(self, *value):
+        script = f'set -euo pipefail; source "{LIB}"; bundle_configuration "$@"'
+        return subprocess.run(["bash", "-c", script, "bash", *value], capture_output=True, text=True, timeout=30)
 
-    def test_unset_is_release(self):
+    def test_blank_or_missing_is_release(self):
         self.assertEqual(self.configuration("").stdout, "release\n")
+        self.assertEqual(self.configuration().stdout, "release\n")
 
     def test_debug_and_release_pass_through(self):
         for value in ("debug", "release"):

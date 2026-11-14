@@ -10,6 +10,8 @@ set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APP="$ROOT/build/Viam Provisioner.app"
+source "$ROOT/scripts/lib/app-fingerprint.sh"
+CONFIG=$(bundle_configuration "${BUNDLE_CONFIG:-}")
 
 # The identity belongs to this Mac, not to the active provisioning environment.
 SIGNING_CONFIG="$ROOT/config/signing.env"
@@ -24,8 +26,6 @@ else
     echo "  password again for each environment's secrets. 'just set-signing-identity' records one." >&2
 fi
 
-source "$ROOT/scripts/lib/app-fingerprint.sh"
-CONFIG=$(bundle_configuration "${BUNDLE_CONFIG:-}")
 STAMP="$ROOT/build/.app-fingerprint"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 FINGERPRINT=$(app_fingerprint "$ROOT" "${CODESIGN_IDENTITY:-}" \
