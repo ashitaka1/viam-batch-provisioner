@@ -3,8 +3,9 @@
 # ProvisionerNetboot launch daemon inside, signs it and registers its URL scheme.
 # Also builds and signs build/provisioner-netbootctl, which drives the netboot daemon. Signs with
 # CODESIGN_IDENTITY from the environment, else from config/signing.env, else ad hoc.
-# Reuses the existing bundle, still validly signed, when its inputs, the identity's certificate
-# and the toolchain match the last build's.
+# Builds with the configuration BUNDLE_CONFIG names, debug or release (the default). Reuses the
+# existing bundle, still validly signed, when its inputs, the identity's certificate, the toolchain
+# and the configuration match the last build's.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -24,10 +25,11 @@ else
 fi
 
 source "$ROOT/scripts/lib/app-fingerprint.sh"
+CONFIG=$(bundle_configuration "${BUNDLE_CONFIG:-}")
 STAMP="$ROOT/build/.app-fingerprint"
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 FINGERPRINT=$(app_fingerprint "$ROOT" "${CODESIGN_IDENTITY:-}" \
-    "$(signing_certificate "${CODESIGN_IDENTITY:-}")" "$(swift --version 2>/dev/null)")
+    "$(signing_certificate "${CODESIGN_IDENTITY:-}")" "$(swift --version 2>/dev/null)" "$CONFIG")
 if [[ "$(cat "$STAMP" 2>/dev/null)" == "$FINGERPRINT" ]] \
     && codesign --verify --strict "$APP" 2>/dev/null \
     && codesign --verify "$ROOT/build/provisioner-netbootctl" 2>/dev/null; then
@@ -39,10 +41,9 @@ fi
 rm -f "$STAMP"
 
 cd "$ROOT"
-for product in ViamProvisioner ProvisionerNetboot provisioner-netbootctl; do
-    swift build -c release --product "$product"
-done
-BIN=$(swift build -c release --show-bin-path)
+# swift build honours only the last --product, so one pass builds the whole package.
+swift build -c "$CONFIG"
+BIN=$(swift build -c "$CONFIG" --show-bin-path)
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons"

@@ -1,8 +1,8 @@
 # Sourced by scripts/bundle-app.sh. app_fingerprint ROOT [SETTING...] prints a hash of everything
 # the app bundle is built from: the package's sources and manifests, App/, the OpenAPI spec and
-# the bundling script, plus each SETTING (the signing identity, the toolchain version). Symlinks
-# are followed, so the specs that Sources/*/openapi.yaml point to count. Hidden and backup files
-# are left out; SwiftPM ignores them.
+# the bundling script, plus each SETTING (the signing identity, the toolchain version, the build
+# configuration). Symlinks are followed, so the specs that Sources/*/openapi.yaml point to count.
+# Hidden and backup files are left out; SwiftPM ignores them.
 app_fingerprint() {
     local root=$1
     shift
@@ -25,4 +25,12 @@ signing_certificate() {
     [[ -z $identity || $identity == - ]] && return 0
     security find-identity -v -p codesigning 2>/dev/null \
         | awk -v id="$identity" '$2 == id || index($0, "\"" id "\"") { print $2; exit }'
+}
+
+# Prints the SwiftPM configuration a BUNDLE_CONFIG value names: debug, or release when blank.
+bundle_configuration() {
+    case ${1:-release} in
+        debug | release) echo "${1:-release}" ;;
+        *) echo "BUNDLE_CONFIG must be debug or release, not '$1'." >&2; return 1 ;;
+    esac
 }

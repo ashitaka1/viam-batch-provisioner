@@ -67,6 +67,8 @@ class AppFingerprintTest(unittest.TestCase):
             "ad hoc": (("", "", "swift 6.4"), ("Developer ID A", "cert1", "swift 6.4")),
             "renewed certificate": (("Developer ID A", "cert1", "swift 6.4"), ("Developer ID A", "cert2", "swift 6.4")),
             "toolchain": (("Developer ID A", "cert1", "swift 6.4"), ("Developer ID A", "cert1", "swift 6.5")),
+            "configuration": (("Developer ID A", "cert1", "swift 6.4", "release"),
+                              ("Developer ID A", "cert1", "swift 6.4", "debug")),
             "setting boundary": (("ab", "c"), ("a", "bc")),
         }
         for name, (first, second) in cases.items():
@@ -86,6 +88,28 @@ class AppFingerprintTest(unittest.TestCase):
                 before = self.fingerprint()
                 self.write(junk, "junk")
                 self.assertEqual(self.fingerprint(), before, f"{junk} changed the fingerprint")
+
+
+class BundleConfigurationTest(unittest.TestCase):
+    def configuration(self, value):
+        script = f'set -euo pipefail; source "{LIB}"; bundle_configuration "$1"'
+        return subprocess.run(["bash", "-c", script, "bash", value], capture_output=True, text=True, timeout=30)
+
+    def test_unset_is_release(self):
+        self.assertEqual(self.configuration("").stdout, "release\n")
+
+    def test_debug_and_release_pass_through(self):
+        for value in ("debug", "release"):
+            with self.subTest(value):
+                self.assertEqual(self.configuration(value).stdout, f"{value}\n")
+
+    def test_any_other_value_fails(self):
+        for value in ("Debug", "relase", "debug release"):
+            with self.subTest(value):
+                result = self.configuration(value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn(value, result.stderr)
 
 
 if __name__ == "__main__":
