@@ -67,19 +67,26 @@ The app's GUI and the Keychain tests run in a disposable guest through `qa-vm` (
 - `~/.config/qa-vm/secrets/viam-batch-provisioner/environments/`: copies of `config/environments/`, which `sync --ref` leaves out because they're gitignored. Copy them again when an environment changes.
 - The public key each environment's `SSH_PUBLIC_KEY_FILE` names, such as `~/.ssh/id_tcos_hosts.pub`.
 
-A session, from the main checkout:
+A session starts from the repo's warm image, which holds a finished debug build of `main`. Rebuild it when `up --warm` refuses it or a guest build takes minutes:
 
 ```bash
-vm=$(qa-vm up)
+qa-vm warm --ref main --build 'BUNDLE_CONFIG=debug ./scripts/bundle-app.sh' ~/eng/viam-batch-provisioner
+```
+
+A session, from the main checkout, tests each branch in the same guest. `sync` deletes the injected files, so each branch injects them again:
+
+```bash
+vm=$(qa-vm up --warm viam-batch-provisioner)
 qa-vm sync --ref <branch> $vm ~/eng/viam-batch-provisioner
 qa-vm inject $vm ~/.config/qa-vm/secrets/viam-batch-provisioner/keys.json keys.json
 qa-vm inject $vm ~/.config/qa-vm/secrets/viam-batch-provisioner/environments src/viam-batch-provisioner/config/environments
 qa-vm inject $vm ~/.ssh/id_tcos_hosts.pub .ssh/id_tcos_hosts.pub
-# … build, import, drive the app …
+qa-vm ssh $vm 'cd ~/src/viam-batch-provisioner && BUNDLE_CONFIG=debug ./scripts/bundle-app.sh'
+# … import, drive the app; then the next branch from sync …
 qa-vm down $vm
 ```
 
-The guest has no `just`: run a recipe's commands from the `justfile`, such as `BUNDLE_CONFIG=debug ./scripts/bundle-app.sh` then the app binary with `--import-environment config/environments/<env>.env`. The app reads its keys file from `VIAM_PROVISIONER_KEYS_FILE`; pass it when opening the app: `open --env VIAM_PROVISIONER_KEYS_FILE=$HOME/keys.json "build/Viam Provisioner.app"`. A variable set with `launchctl setenv` over `qa-vm ssh` doesn't reach the app. Commands that use the Keychain unlock it first in the same `ssh` command: `security unlock-keychain -p admin ~/Library/Keychains/login.keychain-db && …`. Headless tests run in one command:
+The guest build uses the warm image's configuration; a release build there starts from nothing. The guest has no `just`: run a recipe's commands from the `justfile`. To import an environment, run the app binary with `--import-environment config/environments/<env>.env`. The app reads its keys file from `VIAM_PROVISIONER_KEYS_FILE`; pass it when opening the app: `open --env VIAM_PROVISIONER_KEYS_FILE=$HOME/keys.json "build/Viam Provisioner.app"`. A variable set with `launchctl setenv` over `qa-vm ssh` doesn't reach the app. Commands that use the Keychain unlock it first in the same `ssh` command: `security unlock-keychain -p admin ~/Library/Keychains/login.keychain-db && …`. Headless tests run in one command:
 
 ```bash
 qa-vm run --ref <branch> --unlock-keychain ~/eng/viam-batch-provisioner -- 'swift test'
