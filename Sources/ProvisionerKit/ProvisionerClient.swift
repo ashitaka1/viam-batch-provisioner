@@ -24,6 +24,14 @@ public struct ProvisionerClient: Sendable {
         self.init(baseURL: baseURL, transport: URLSessionTransport())
     }
 
+    /// A client whose requests give up after `requestTimeout` seconds without data.
+    public init(baseURL: URL, requestTimeout: TimeInterval) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = requestTimeout
+        self.init(baseURL: baseURL,
+                  transport: URLSessionTransport(configuration: .init(session: URLSession(configuration: configuration))))
+    }
+
     package init(baseURL: URL, transport: any ClientTransport) {
         client = Client(serverURL: baseURL, transport: transport)
     }

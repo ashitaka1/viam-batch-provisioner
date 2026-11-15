@@ -32,10 +32,18 @@ struct ServerSettings: View {
             }
         }
         .padding()
-        .onAppear { daemon.refresh() }
+        .task {
+            daemon.refresh()
+            // launchd restarts a server that crashes, so its registration alone doesn't say it's serving.
+            while !Task.isCancelled {
+                await daemon.check()
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             // Approval happens in System Settings, so the state can change while the app is in the background.
             daemon.refresh()
+            Task { await daemon.check() }
         }
         .confirmationDialog("Remove the server's queue, files and the _viamprovisioner account from this Mac?",
                             isPresented: $confirmingRemove) {
@@ -46,8 +54,17 @@ struct ServerSettings: View {
 
     @ViewBuilder private var status: some View {
         switch daemon.state {
+        case .on where daemon.cantStart:
+            EmptyView()
         case .on:
-            Label("Running at boot", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            switch daemon.serving {
+            case .answering:
+                Label("Running at boot", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            case .notAnswering:
+                Label(daemon.notAnsweringMessage ?? "", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            case nil:
+                Label("Checking the server…", systemImage: "clock").foregroundStyle(.secondary)
+            }
         case .needsApproval:
             VStack(alignment: .leading, spacing: 6) {
                 Label("Turn on Viam Provisioner under Background App Activity.", systemImage: "exclamationmark.circle.fill")

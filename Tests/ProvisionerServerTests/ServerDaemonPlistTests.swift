@@ -23,5 +23,6 @@ private func launchDaemonPlist(_ name: String) throws -> [String: Any] {
     let configuration = try ServerConfiguration.parse(arguments)
     #expect(configuration.dataDirectory.path == ServerAccount.dataDirectory.path)
     #expect(configuration.files.path == ServerAccount.filesDirectory.path)
+    #expect(configuration.port == ServerAccount.port)
 }
 #endif

@@ -15,7 +15,9 @@ enum ServerDaemonCommand {
             case "register": await daemon.setHosting(true)
             case "unregister": await daemon.setHosting(false)
             case "remove": await daemon.removeServerData()
-            case "status": daemon.refresh()
+            case "status":
+                daemon.refresh()
+                await daemon.check()
             default: fail("--server-daemon takes register, unregister, remove or status.")
             }
             finished = true
@@ -23,7 +25,8 @@ enum ServerDaemonCommand {
         // The task runs on the main actor, which the main run loop drains before the app starts.
         while !finished { RunLoop.main.run(mode: .default, before: .now.addingTimeInterval(0.1)) }
         let report = Self.report(state: daemon.state, note: daemon.note, conflict: daemon.conflict,
-                            cantStart: daemon.cantStart ? daemon.unreachableMessage : nil)
+                            cantStart: daemon.cantStart ? daemon.unreachableMessage : nil,
+                            notAnswering: daemon.notAnsweringMessage)
         for line in report.errors { FileHandle.standardError.write(Data((line + "\n").utf8)) }
         print(report.status)
         exit(report.exitCode)
@@ -36,9 +39,10 @@ enum ServerDaemonCommand {
     }
 
     /// What the command prints and its exit code: 1 when the last action failed, another account shares the
-    /// server account's ID, or hosting is on and the server can't start.
-    static func report(state: ServerDaemonState, note: String?, conflict: ServerAccount.IDConflict?, cantStart: String?) -> Report {
-        let errors = [note, conflict?.message, cantStart == note ? nil : cantStart].compactMap { $0 }
+    /// server account's ID, hosting is on and the server can't start, or the registered server isn't answering.
+    static func report(state: ServerDaemonState, note: String?, conflict: ServerAccount.IDConflict?, cantStart: String?,
+                       notAnswering: String? = nil) -> Report {
+        let errors = [note, conflict?.message, cantStart == note ? nil : cantStart, notAnswering].compactMap { $0 }
         return Report(errors: errors, status: "server daemon: \(describe(state))", exitCode: errors.isEmpty ? 0 : 1)
     }
 

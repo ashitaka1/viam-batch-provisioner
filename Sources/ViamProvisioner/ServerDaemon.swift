@@ -51,6 +51,13 @@ enum PrivilegedScriptError: Error, Equatable {
     /// Where `_viamprovisioner` can't reach the app's server binary, as of the last refresh; launchd can't start
     /// the daemon from such a copy of the app.
     private(set) var unreachablePath: URL?
+    /// Whether the server answers, as of the last check; nil while hosting is off or before the first check.
+    private(set) var serving: ServerServing?
+
+    var notAnsweringMessage: String? {
+        guard case .notAnswering(let reason) = serving else { return nil }
+        return ["The server isn't answering.", reason].compactMap { $0 }.joined(separator: " ")
+    }
 
     /// Hosting is on, but launchd can't start the server from this copy of the app.
     var cantStart: Bool {
@@ -70,17 +77,23 @@ enum PrivilegedScriptError: Error, Equatable {
     private let readUnreachablePath: @Sendable () -> URL?
     private let readConflict: @Sendable () -> ServerAccount.IDConflict?
     private let runPrivileged: @Sendable (String) async throws -> Void
+    private let askServer: @Sendable () async -> ServerAnswer
+    private let readJob: @Sendable () async -> LaunchdJob?
 
     init(service: any DaemonService, isBundled: @escaping @Sendable () -> Bool, isSetUp: @escaping @Sendable () -> Bool,
          unreachablePath: @escaping @Sendable () -> URL?,
          conflict: @escaping @Sendable () -> ServerAccount.IDConflict?,
-         runPrivileged: @escaping @Sendable (String) async throws -> Void) {
+         runPrivileged: @escaping @Sendable (String) async throws -> Void,
+         askServer: @escaping @Sendable () async -> ServerAnswer,
+         readJob: @escaping @Sendable () async -> LaunchdJob?) {
         self.service = service
         self.isBundled = isBundled
         self.isSetUp = isSetUp
         readUnreachablePath = unreachablePath
         readConflict = conflict
         self.runPrivileged = runPrivileged
+        self.askServer = askServer
+        self.readJob = readJob
         state = ServerDaemonState(service.status, bundled: isBundled())
         self.unreachablePath = unreachablePath()
         self.conflict = conflict()
@@ -90,6 +103,47 @@ enum PrivilegedScriptError: Error, Equatable {
         state = ServerDaemonState(service.status, bundled: isBundled())
         unreachablePath = readUnreachablePath()
         conflict = readConflict()
+        if state != .on { serving = nil }
+    }
+
+    private var checking = false
+
+    /// Rereads the daemon's registration, then asks a registered server for its status. When it doesn't answer,
+    /// the reason is what launchd recorded of its restarts and last exit, and whether another process holds the
+    /// port. The account's conflict and the app's reachability are left to `refresh()`, which runs dscl.
+    /// A check already under way makes this one return at once.
+    func check() async {
+        guard !checking else { return }
+        checking = true
+        defer { checking = false }
+        guard readServing() else { return }
+        let answer = await askServer()
+        let job = answer == .answering ? nil : await readJob()
+        // Hosting may have been turned off while the server was asked, or the view asking may have gone.
+        guard !Task.isCancelled, readServing() else { return }
+        switch answer {
+        case .answering:
+            serving = .answering
+        case .silent, .otherProcess, .failing:
+            let detail: String? = switch answer {
+            case .otherProcess: "Another process answers on port \(ServerAccount.port)."
+            case .failing(let message): "It answered: \(message)"
+            default: nil
+            }
+            let reason = [detail, job?.reason].compactMap { $0 }.joined(separator: " ")
+            serving = .notAnswering(reason: reason.isEmpty ? nil : reason)
+        }
+    }
+
+    /// Updates `state`; false, clearing `serving`, when there's no server to ask: hosting is off, or launchd
+    /// can't start it from this copy of the app, which `unreachableMessage` already says.
+    private func readServing() -> Bool {
+        state = ServerDaemonState(service.status, bundled: isBundled())
+        guard state == .on, !cantStart else {
+            serving = nil
+            return false
+        }
+        return true
     }
 
     /// On: creates the account and directory when they're missing, then registers the daemon.
@@ -162,7 +216,9 @@ extension ServerDaemon {
                          ServerAccount.unreachablePath(to: Bundle.main.bundleURL.appending(path: "Contents/MacOS/provisioner-server"))
                      },
                      conflict: { ServerAccount.currentConflict() },
-                     runPrivileged: runWithAdministratorPrivileges)
+                     runPrivileged: runWithAdministratorPrivileges,
+                     askServer: { await ServerAnswer.local() },
+                     readJob: { await LaunchdJob.server() })
     }
 
     /// The AppleScript that runs `script` as root after macOS asks for an administrator's password.

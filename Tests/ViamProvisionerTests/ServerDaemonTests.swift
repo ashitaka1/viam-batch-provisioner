@@ -53,12 +53,41 @@ private final class PathBox: @unchecked Sendable {
     var value: URL?
 }
 
+/// The server on the daemon's port, and launchd's record of its job.
+private final class FakeServer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _answer: ServerAnswer = .answering
+    private var _job: LaunchdJob?
+    private(set) var asked = 0
+    /// Runs while the server is being asked, before it answers.
+    var whileAsked: (@Sendable () -> Void)?
+
+    var answer: ServerAnswer {
+        get { lock.withLock { _answer } }
+        set { lock.withLock { _answer = newValue } }
+    }
+
+    var job: LaunchdJob? {
+        get { lock.withLock { _job } }
+        set { lock.withLock { _job = newValue } }
+    }
+
+    func ask() -> ServerAnswer {
+        whileAsked?()
+        return lock.withLock {
+            asked += 1
+            return _answer
+        }
+    }
+}
+
 private struct Rig {
     let journal = Journal()
     let daemon: FakeDaemon
     let model: ServerDaemon
     let conflict = ConflictBox()
     let unreachable = PathBox()
+    let server = FakeServer()
 
     @MainActor init(status: SMAppService.Status = .notRegistered, setUp: Bool = false, bundled: Bool = true,
                     unreachable: URL? = nil,
@@ -71,6 +100,7 @@ private struct Rig {
         daemon.unregisterError = unregisterError
         let conflict = conflict
         let unreachableBox = self.unreachable
+        let server = server
         unreachableBox.value = unreachable
         model = ServerDaemon(
             service: daemon,
@@ -85,7 +115,9 @@ private struct Rig {
                 default: Issue.record("ran a script other than create or remove")
                 }
                 if let scriptError { throw scriptError }
-            })
+            },
+            askServer: { server.ask() },
+            readJob: { server.job })
     }
 }
 
@@ -281,4 +313,121 @@ func administratorScriptReachesTheShellUnchanged(script: String) throws {
 @MainActor @Test func unreachableAppWithHostingOffIsNotAStartFailure() {
     let rig = Rig(unreachable: URL(filePath: "/Users/someone"))
     #expect(!rig.model.cantStart)
+}
+
+private let printedCrashLoop = """
+    system/com.bringingfire.viam-provisioner.server = {
+    \tactive count = 0
+    \tstate = spawn scheduled
+
+    \tresource coalition = {
+    \t\tstate = active
+    \t}
+    \truns = 14
+    \tpid = 0
+    \tlast exit code = 1
+    }
+    """
+
+@Test func launchdJobReadsRunsAndTheLastExit() {
+    #expect(LaunchdJob(launchctlPrint: printedCrashLoop) == LaunchdJob(runs: 14, lastExitCode: "1"))
+}
+
+@Test func launchdJobThatNeverExitedHasNoExitCode() {
+    let job = LaunchdJob(launchctlPrint: "\truns = 1\n\tlast exit code = (never exited)\n")
+    #expect(job.lastExitCode == nil)
+    #expect(job.reason == nil)
+}
+
+@Test func launchdReasonPrefersTheTerminatingSignal() {
+    // A killed job also records exit code 0, which alone would read as a clean exit.
+    let job = LaunchdJob(launchctlPrint: "\truns = 3\n\tlast exit code = 0\n\tlast terminating signal = Killed: 9\n")
+    #expect(job.lastSignal == "Killed: 9")
+    #expect(job.reason?.contains("Killed: 9") == true)
+    #expect(job.reason?.contains("code 0") == false)
+}
+
+@Test func refusedConnectionIsSilentAndAnyOtherReplyIsAnotherProcess() {
+    #expect(ServerAnswer(.transport(URLError(.cannotConnectToHost))) == .silent)
+    #expect(ServerAnswer(.unexpectedResponse(status: 404)) == .otherProcess)
+    #expect(ServerAnswer(.server(status: 503, code: "unavailable", message: "Data directory unreadable.", details: [])) == .failing("Data directory unreadable."))
+}
+
+@MainActor @Test func serverAnsweringWithItsErrorIsNotBlamedOnAnotherProcess() async {
+    let rig = Rig(status: .enabled, setUp: true)
+    rig.server.answer = .failing("Data directory unreadable.")
+    await rig.model.check()
+    #expect(rig.model.notAnsweringMessage == "The server isn't answering. It answered: Data directory unreadable.")
+}
+
+@MainActor @Test func serverIsNotAskedWhenLaunchdCantStartIt() async {
+    // The unreachable-app message already says why; a second warning would repeat it.
+    let rig = Rig(status: .enabled, setUp: true, unreachable: URL(filePath: "/Users/someone"))
+    await rig.model.check()
+    #expect(rig.server.asked == 0)
+    #expect(rig.model.serving == nil)
+}
+
+@MainActor @Test func registeredServerThatAnswersReadsRunning() async {
+    let rig = Rig(status: .enabled, setUp: true)
+    await rig.model.check()
+    #expect(rig.model.serving == .answering)
+    #expect(rig.model.notAnsweringMessage == nil)
+}
+
+@MainActor @Test func registeredServerThatDoesntAnswerSaysWhatLaunchdRecorded() async {
+    let rig = Rig(status: .enabled, setUp: true)
+    rig.server.answer = .silent
+    rig.server.job = LaunchdJob(runs: 14, lastExitCode: "1")
+    await rig.model.check()
+    #expect(rig.model.notAnsweringMessage == "The server isn't answering. launchd has started it 14 times; it last exited with code 1.")
+}
+
+@MainActor @Test func anotherProcessOnThePortIsNamed() async {
+    let rig = Rig(status: .enabled, setUp: true)
+    rig.server.answer = .otherProcess
+    rig.server.job = LaunchdJob(runs: 2, lastExitCode: "1")
+    await rig.model.check()
+    #expect(rig.model.notAnsweringMessage == "The server isn't answering. Another process answers on port 8234. launchd has started it 2 times; it last exited with code 1.")
+}
+
+@MainActor @Test func notAnsweringWithoutALaunchdRecordSaysOnlyThat() async {
+    let rig = Rig(status: .enabled, setUp: true)
+    rig.server.answer = .silent
+    await rig.model.check()
+    #expect(rig.model.notAnsweringMessage == "The server isn't answering.")
+}
+
+@MainActor @Test func serverThatAnswersAgainReadsRunningOnTheNextCheck() async {
+    let rig = Rig(status: .enabled, setUp: true)
+    rig.server.answer = .otherProcess
+    await rig.model.check()
+    #expect(rig.model.serving == .notAnswering(reason: "Another process answers on port 8234."))
+    rig.server.answer = .answering
+    await rig.model.check()
+    #expect(rig.model.serving == .answering)
+}
+
+@MainActor @Test func serverIsNotAskedWhileHostingIsOff() async {
+    let rig = Rig(status: .requiresApproval, setUp: true)
+    await rig.model.check()
+    #expect(rig.server.asked == 0)
+    #expect(rig.model.serving == nil)
+}
+
+@MainActor @Test func turningHostingOffClearsTheServersState() async {
+    let rig = Rig(status: .enabled, setUp: true)
+    rig.server.answer = .silent
+    await rig.model.check()
+    await rig.model.setHosting(false)
+    #expect(rig.model.serving == nil)
+}
+
+@MainActor @Test func hostingTurnedOffWhileTheServerIsAskedLeavesNoState() async {
+    let rig = Rig(status: .enabled, setUp: true)
+    rig.server.answer = .silent
+    let daemon = rig.daemon
+    rig.server.whileAsked = { daemon.set(.notRegistered) }
+    await rig.model.check()
+    #expect(rig.model.serving == nil)
 }

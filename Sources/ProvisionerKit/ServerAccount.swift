@@ -8,6 +8,8 @@ public enum ServerAccount {
     public static let serverDirectory = URL(filePath: "/Library/Application Support/Viam Provisioner/Server", directoryHint: .isDirectory)
     public static let dataDirectory = serverDirectory.appending(path: "data", directoryHint: .isDirectory)
     public static let filesDirectory = serverDirectory.appending(path: "files", directoryHint: .isDirectory)
+    /// The server's default port, which the daemon's plist leaves in place.
+    public static let port = 8234
     /// Apple allocates its own daemon accounts upward from 200, so the account takes the highest free ID here.
     static let idRange = 401...499
 

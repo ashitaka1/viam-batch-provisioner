@@ -32,3 +32,10 @@ func eachProblemIsPrintedAndExitsOne(note: String?, conflict: ServerAccount.IDCo
     #expect(ServerDaemonCommand.report(state: .missing, note: nil, conflict: nil, cantStart: nil).status == "server daemon: missing from the app bundle")
     #expect(ServerDaemonCommand.report(state: .needsApproval, note: nil, conflict: nil, cantStart: nil).status.hasPrefix("server daemon: registered; turn it on"))
 }
+
+@Test func statusFailsWhenTheRegisteredServerIsntAnswering() {
+    let report = ServerDaemonCommand.report(state: .on, note: nil, conflict: nil, cantStart: nil,
+                                            notAnswering: "The server isn't answering.")
+    #expect(report.errors == ["The server isn't answering."])
+    #expect(report.exitCode == 1)
+}
