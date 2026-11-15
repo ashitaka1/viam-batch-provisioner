@@ -48,6 +48,7 @@ A macOS host provisions x86 machines over the network and Raspberry Pis from SD 
 | `Sources/ProvisionerPXE/PXEServer.swift` | Binds the DHCP (67), PXE (4011) and TFTP (69) sockets on one interface and publishes an `offered` event per answered discover and a `fileSent` event per completed TFTP read on `events` |
 | `Sources/ProvisionerPXE/DHCP/` | BOOTP/DHCP codec and `ProxyDHCPResponder`, which answers PXE discovers with the boot server and filename (RFC 4578); `LeaseTable` holds the address each PXE client's DHCP request named, for `fileSent`'s MAC (`docs/decisions/0046-tftp-mac-from-dhcp-request.md`) |
 | `Sources/ProvisionerPXE/TFTP/` | TFTP codec (RFC 1350), option negotiation (RFC 2347-2349), `TFTPRoot` path confinement, per-transfer state machine and handlers |
+| `Sources/ProvisionerPXE/PortHolder.swift` | Names the process holding a UDP port for `PXEServerError.portInUse`; unprivileged, where root's sockets are hidden, a running `bootpd` stands in as port 67's likely holder |
 | `Sources/ProvisionerPXE/NetworkInterface.swift` | Looks up an interface's address, index and MTU by name (MTU from `/sys/class/net` on Linux) |
 | `Sources/ProvisionerPXE/InterfaceBinding.swift` | The platform shim that restricts a DHCP socket to the serving interface (`docs/decisions/0034-portable-server.md`) |
 | `Tests/ProvisionerPXETests/` | Unit tests per component; `PXEServerTests` drives a running server over loopback UDP |

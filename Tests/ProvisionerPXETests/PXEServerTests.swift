@@ -571,8 +571,8 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
         do {
             try await server.start()
             Issue.record("started with the TFTP port taken")
-        } catch let error as IOError {
-            #expect(error.errnoCode == EADDRINUSE, "\(error)")
+        } catch let PXEServerError.portInUse(port, _) {
+            #expect(port == configuration.tftpPort)
         }
         #expect(server.boundPorts == nil)
         try await client.send(pxeDiscover().encoded(), to: configuration.dhcpPort)
@@ -583,6 +583,29 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
         try await server.start()
         try await client.send(pxeDiscover().encoded(), to: configuration.dhcpPort)
         #expect(await client.receive() != nil, "no offer after retrying start")
+    }
+
+    @Test(arguments: ["dhcp", "pxe"])
+    func takenDHCPPortNamesItsHolder(listener: String) async throws {
+        let path = listener == "dhcp" ? \PXEConfiguration.dhcpPort : \.pxePort
+        let occupant = try await DatagramBootstrap(group: MultiThreadedEventLoopGroup.singleton).bind(host: "0.0.0.0", port: 0).get()
+        var configuration = PXEConfiguration(interface: "lo0", tftpRoot: FileManager.default.temporaryDirectory)
+        (configuration.dhcpPort, configuration.pxePort, configuration.tftpPort) = (0, 0, 0)
+        configuration[keyPath: path] = occupant.localAddress!.port!
+        let server = PXEServer(configuration: configuration)
+
+        do {
+            try await server.start()
+            Issue.record("started with port \(configuration[keyPath: path]) taken")
+        } catch let PXEServerError.portInUse(port, holder) {
+            #expect(port == configuration[keyPath: path])
+            #expect(holder?.pid == getpid())
+            #expect(holder?.confirmed == true)
+            let name = try #require(holder?.name)
+            #expect(!name.isEmpty && ProcessInfo.processInfo.processName.hasPrefix(name), "\(name)")
+        }
+        await server.stop()
+        try await occupant.close()
     }
 
     @Test func unknownInterface() async throws {

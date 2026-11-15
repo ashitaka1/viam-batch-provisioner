@@ -12,6 +12,28 @@ public enum PXEServerError: Error, Equatable {
     case alreadyStarted
     /// `start()` was called on a server that `stop()` has ended.
     case stopped
+    /// Another socket holds a listening port. `holder` is nil when the holding process can't be seen.
+    case portInUse(port: Int, holder: PortHolder?)
+}
+
+extension PXEServerError: CustomStringConvertible {
+    public var description: String {
+        switch self {
+        case let .interfaceNotFound(name): "no interface named \(name)"
+        case let .interfaceHasNoIPv4(name): "\(name) has no IPv4 address"
+        case .alreadyStarted: "the server is already started"
+        case .stopped: "the server is stopped"
+        case let .portInUse(port, holder?) where holder.name == "bootpd":
+            // macOS runs bootpd as the DHCP server for Virtualization.framework NAT networks.
+            (holder.confirmed
+                ? "UDP port \(port) is in use by bootpd (pid \(holder.pid)). "
+                : "UDP port \(port) is in use, most likely by bootpd (pid \(holder.pid)), which is running. ")
+                + "A Virtualization.framework VM with NAT networking is running, such as colima's vz driver or tart. "
+                + "Stop the VM; macOS restarts bootpd on each lease"
+        case let .portInUse(port, holder?): "UDP port \(port) is in use by \(holder.name) (pid \(holder.pid))"
+        case let .portInUse(port, nil): "UDP port \(port) is in use by a process that couldn't be named; run as root to name it"
+        }
+    }
 }
 
 /// The serving interface: its name and index for binding, and its first IPv4 address.

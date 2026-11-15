@@ -105,14 +105,16 @@ public final class PXEServer: Sendable {
                 let handler = DHCPHandler(
                     listener: listener, responder: responder, offerDestination: offerDestination,
                     leases: leases, report: { events.yield(.offered($0)) })
-                bound.append(try await bindDHCP(port: port, interface: interface, handler: handler))
+                bound.append(try await claiming(port) { try await bindDHCP(port: port, interface: interface, handler: handler) })
             }
-            bound.append(try await DatagramBootstrap(group: group)
-                .channelInitializer { channel in
-                    channel.eventLoop.makeCompletedFuture { try channel.pipeline.syncOperations.addHandler(listener) }
-                }
-                .bind(host: host, port: configuration.tftpPort)
-                .get())
+            bound.append(try await claiming(configuration.tftpPort) {
+                try await DatagramBootstrap(group: group)
+                    .channelInitializer { channel in
+                        channel.eventLoop.makeCompletedFuture { try channel.pipeline.syncOperations.addHandler(listener) }
+                    }
+                    .bind(host: host, port: configuration.tftpPort)
+                    .get()
+            })
         } catch {
             await Self.close(bound, listener)
             throw error
@@ -157,6 +159,15 @@ public final class PXEServer: Sendable {
             try? await channel.close()
         }
         await listener.closeTransfers()
+    }
+
+    /// Runs `bind`, turning its EADDRINUSE into `portInUse` with the holder's name.
+    private func claiming(_ port: Int, _ bind: () async throws -> any Channel) async throws -> any Channel {
+        do {
+            return try await bind()
+        } catch let error as IOError where error.errnoCode == EADDRINUSE {
+            throw PXEServerError.portInUse(port: port, holder: PortHolder.holding(udp: port))
+        }
     }
 
     /// Binds 0.0.0.0 restricted to the interface: on macOS a socket bound to a unicast

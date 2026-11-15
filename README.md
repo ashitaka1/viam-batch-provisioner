@@ -323,6 +323,7 @@ BIOS preparation for each x86 model: [docs/hardware.md](docs/hardware.md).
 - The Minisforum UM890 Pro's BIOS ignores the boot order the installer sets; set NVMe above Network in its Fixed Boot Order by hand ([#4](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)).
 - Server mode doesn't start after a restart on a Mac with FileVault on until someone unlocks the disk, by logging in at the Mac or over SSH. `sudo fdesetup authrestart` restarts once without the unlock. A Mac that hosts server mode unattended needs FileVault off.
 - The AAEON CEXD-INTRBL's BIOS also puts PXE back ahead of the disk, and its PXE ROM can take minutes to fetch GRUB. Set NVMe first and install through Save & Exit → Boot Override; a blank disk falls through to the network on its own ([#128](https://github.com/ashitaka1/viam-batch-provisioner/issues/128)).
+- PXE can't serve on a Mac running a VM on Virtualization.framework's NAT network, such as tart or colima with `--network-address`: macOS runs `bootpd` on UDP port 67 for it and restarts it on each lease. The PXE server's error names `bootpd`; stop the VM.
 
 Open issues: https://github.com/ashitaka1/viam-batch-provisioner/issues
 
