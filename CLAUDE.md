@@ -2,7 +2,7 @@
 
 Zero-touch provisioning for x86 Linux machines (PXE or USB stick) and Raspberry Pis (SD card) as Viam robotics hosts.
 
-Tracking: GitHub issues (ashitaka1/viam-batch-provisioner); project ashitaka1/8; auto-add ashitaka1/viam-batch-provisioner; owner ashitaka1; model 1
+Tracking: GitHub issues (ashitaka1/viam-batch-provisioner); project ashitaka1/8; auto-add ashitaka1/viam-batch-provisioner; owner ashitaka1; model 2
 
 - `README.md` — usage, configuration, provision modes, known issues
 - `CONTRIBUTING.md` — setup, test, running services alone, the Mac app in a QA guest, hardware validation
