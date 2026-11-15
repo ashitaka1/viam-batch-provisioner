@@ -4,7 +4,7 @@ Date: 2026-10-30
 
 ## Status
 
-Accepted
+Accepted; amended by 50: server mode is one daemon, `ProvisionerServer`, which hosts PXE itself
 
 ## Context
 

@@ -4,7 +4,7 @@ Date: 2026-11-05
 
 ## Status
 
-Accepted
+Superseded by 50
 
 The code now calls the helper the netboot daemon: `ProvisionerNetboot`, `ProvisionerNetbootCore`, `ProvisionerNetbootXPC`, `provisioner-netbootctl`, `just netboot`, and the launchd label `com.bringingfire.viam-provisioner.netboot`.
 
