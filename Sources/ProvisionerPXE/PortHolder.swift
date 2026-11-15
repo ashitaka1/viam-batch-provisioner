@@ -24,7 +24,7 @@ public struct PortHolder: Sendable, Equatable {
     }
 
     /// The pid of a process whose command name is `name`, from `sysctl`, which lists every user's processes.
-    static func running(named name: String) -> pid_t? {
+    static func running(named name: String) -> Int32? {
         #if canImport(Darwin)
         var mib = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0
