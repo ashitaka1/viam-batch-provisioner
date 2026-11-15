@@ -27,7 +27,9 @@ public enum ServerMain {
             let app = try buildApplication(configuration, provisioner: provisioner, logger: logger, pxeState: pxeState)
             logger.info("serving \(configuration.files.path) on \(configuration.bind):\(configuration.port), data in \(configuration.dataDirectory.path)")
             if pxe == nil { logger.info("serving no PXE: no --pxe-interface and no \(ServerConfiguration.settingsFile(in: configuration.dataDirectory).path)") }
-            let services: [any Service] = [app] + (pxe.map { [$0] } ?? [])
+            let advertisement = Advertisement(record: ServiceRecord(hostName: localHostName(), port: configuration.port),
+                                              publisher: platformPublisher(logger: logger), logger: logger)
+            let services: [any Service] = [app, advertisement] + (pxe.map { [$0] } ?? [])
             let group = ServiceGroup(configuration: .init(services: services, gracefulShutdownSignals: [.sigterm, .sigint],
                                                           logger: logger))
             try await group.run()
