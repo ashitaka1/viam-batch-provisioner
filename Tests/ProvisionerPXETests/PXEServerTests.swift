@@ -116,6 +116,14 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
 }
 
 @Suite struct PXEServerTests {
+    /// Bound to the interface's own address, port 69 needs root on macOS (decision 50).
+    @Test func tftpListenerBindsAnyAddress() async throws {
+        try await withHarness { harness in
+            let tftp = harness.server.listeningChannels.first { $0.localAddress?.port == harness.ports.tftp }
+            #expect(tftp?.localAddress?.ipAddress == "0.0.0.0")
+        }
+    }
+
     @Test func offersOverLoopback() async throws {
         try await withHarness { harness in
             try await harness.client.send(pxeDiscover().encoded(), to: harness.ports.dhcp)

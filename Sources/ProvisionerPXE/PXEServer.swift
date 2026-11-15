@@ -110,9 +110,11 @@ public final class PXEServer: Sendable {
             bound.append(try await claiming(configuration.tftpPort) {
                 try await DatagramBootstrap(group: group)
                     .channelInitializer { channel in
-                        channel.eventLoop.makeCompletedFuture { try channel.pipeline.syncOperations.addHandler(listener) }
+                        InterfaceBinding.restrict(channel, to: interface).flatMapThrowing {
+                            try channel.pipeline.syncOperations.addHandler(listener)
+                        }
                     }
-                    .bind(host: host, port: configuration.tftpPort)
+                    .bind(host: "0.0.0.0", port: configuration.tftpPort)
                     .get()
             })
         } catch {
@@ -171,7 +173,9 @@ public final class PXEServer: Sendable {
     }
 
     /// Binds 0.0.0.0 restricted to the interface: on macOS a socket bound to a unicast
-    /// address never receives the 255.255.255.255 discovers PXE firmware sends.
+    /// address never receives the 255.255.255.255 discovers PXE firmware sends. The TFTP
+    /// listener binds the same way because a non-root bind to a unicast address on a port
+    /// below 1024 fails with EACCES (decision 50).
     private func bindDHCP(port: Int, interface: NetworkInterface, handler: DHCPHandler) async throws -> any Channel {
         try await DatagramBootstrap(group: group)
             .channelOption(.socketOption(.so_reuseaddr), value: 1)

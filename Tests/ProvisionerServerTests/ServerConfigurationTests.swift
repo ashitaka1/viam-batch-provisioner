@@ -22,14 +22,59 @@ import Testing
     #expect(configuration.advertiseAddress == nil)
 }
 
-@Test func netbootFlagTakesNoValue() throws {
-    #if canImport(ProvisionerNetbootXPC)
-    #expect(try ServerConfiguration.parse(["--files", "/x", "--netboot"]).linksNetboot)
-    #expect(try ServerConfiguration.parse(["--netboot", "--files", "/x"]).linksNetboot)
-    #expect(try !ServerConfiguration.parse(["--files", "/x"]).linksNetboot)
-    #else
-    #expect(throws: ConfigurationError.self) { try ServerConfiguration.parse(["--files", "/x", "--netboot"]) }
-    #endif
+@Test func netbootFlagIsGone() {
+    #expect { try ServerConfiguration.parse(["--files", "/x", "--netboot"]) } throws: {
+        "\($0)" == "unknown option --netboot"
+    }
+}
+
+/// A fresh data directory, holding `pxe.json` with `contents` when given.
+private func dataDirectory(pxeJSON contents: String? = nil) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory.appending(path: "data-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    if let contents { try Data(contents.utf8).write(to: directory.appending(path: "pxe.json")) }
+    return directory
+}
+
+@Test func pxeFlagsSetTheSettings() throws {
+    let data = try dataDirectory()
+    let configuration = try ServerConfiguration.parse(
+        ["--files", "/x", "--data-dir", data.path, "--pxe-interface", "en7", "--boot-file", "shimx64.efi"])
+    #expect(configuration.pxe == PXESettings(interface: "en7", bootFile: "shimx64.efi"))
+    #expect(configuration.tftpRoot == data.appending(path: "tftp"))
+}
+
+@Test func bootFileWithoutInterfaceIsRejected() throws {
+    let data = try dataDirectory()
+    #expect(throws: ConfigurationError.self) {
+        try ServerConfiguration.parse(["--files", "/x", "--data-dir", data.path, "--boot-file", "shimx64.efi"])
+    }
+}
+
+@Test func pxeSettingsFileIsRead() throws {
+    let data = try dataDirectory(pxeJSON: #"{"interface": "en3"}"#)
+    let configuration = try ServerConfiguration.parse(["--files", "/x", "--data-dir", data.path]).readingPXESettingsFile()
+    #expect(configuration.pxe == PXESettings(interface: "en3", bootFile: "grubx64.efi"))
+}
+
+@Test func flagsWinOverTheSettingsFile() throws {
+    let data = try dataDirectory(pxeJSON: #"{"interface": "en3", "boot_file": "shimx64.efi"}"#)
+    let configuration = try ServerConfiguration.parse(["--files", "/x", "--data-dir", data.path, "--pxe-interface", "en7"])
+        .readingPXESettingsFile()
+    #expect(configuration.pxe == PXESettings(interface: "en7", bootFile: "grubx64.efi"))
+}
+
+@Test func noSettingsMeansNoPXE() throws {
+    let data = try dataDirectory()
+    #expect(try ServerConfiguration.parse(["--files", "/x", "--data-dir", data.path]).readingPXESettingsFile().pxe == nil)
+}
+
+@Test(arguments: [#"{"interface": 3}"#, #"{"interface": "en0", "extra": 1}"#, "not json", "{}"])
+func malformedSettingsFileNamesIt(contents: String) throws {
+    let data = try dataDirectory(pxeJSON: contents)
+    #expect { try ServerConfiguration.parse(["--files", "/x", "--data-dir", data.path]).readingPXESettingsFile() } throws: {
+        $0 is ConfigurationError && "\($0)".contains(data.appending(path: "pxe.json").path)
+    }
 }
 
 @Test(arguments: [[String](), ["--files"], ["--files", "/x", "--bogus"], ["--files", "/x", "--port", "http"]])

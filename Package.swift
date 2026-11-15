@@ -160,7 +160,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "_NIOFileSystem", package: "swift-nio"),
-                .target(name: "ProvisionerNetbootXPC", condition: .when(platforms: [.macOS])),
+                "ProvisionerPXE",
             ],
             plugins: [
                 .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),
@@ -176,7 +176,7 @@ let package = Package(
                 "ProvisionerServer",
                 "ProvisionerAPI",
                 "ProvisionerKit",
-                .target(name: "ProvisionerNetbootXPC", condition: .when(platforms: [.macOS])),
+                "ProvisionerPXE",
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "HummingbirdTesting", package: "hummingbird"),
                 .product(name: "Logging", package: "swift-log"),

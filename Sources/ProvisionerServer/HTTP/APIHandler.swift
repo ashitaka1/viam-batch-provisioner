@@ -10,6 +10,7 @@ struct APIHandler: APIProtocol {
     let streamOptions: StreamOptions
     let streams: StreamLimiter
     let serverName: String
+    var pxeState: (@Sendable () -> Components.Schemas.ServiceState)? = nil
     let logger: Logger
 
     func provision(_ input: Operations.Provision.Input) async throws -> Operations.Provision.Output {
@@ -79,7 +80,7 @@ struct APIHandler: APIProtocol {
         let lastEventID = await provisioner.lastEventID
         return .ok(.init(body: .json(.init(
             apiVersion: .v1, serverName: serverName, time: Date(), address: configuration.advertiseAddress,
-            queue: counts, services: .init(http: .up), lastEventId: lastEventID))))
+            queue: counts, services: .init(http: .up, netboot: pxeState?()), lastEventId: lastEventID))))
     }
 
     // MARK: - Errors

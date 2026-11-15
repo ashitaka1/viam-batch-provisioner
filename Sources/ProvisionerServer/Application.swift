@@ -2,6 +2,7 @@ import Foundation
 import Hummingbird
 import Logging
 import OpenAPIHummingbird
+import ProvisionerAPI
 
 /// SSE settings; tests shorten the keepalive and lower the limits.
 struct StreamOptions: Sendable {
@@ -11,15 +12,17 @@ struct StreamOptions: Sendable {
     var buffer = 256
 }
 
+/// `pxeState` reports PXE serving in `/api/v1/status`; nil leaves it out, for a server that serves no PXE.
 func buildApplication(_ configuration: ServerConfiguration, provisioner: Provisioner, logger: Logger,
-                      streamOptions: StreamOptions = .init()) throws -> some ApplicationProtocol {
+                      streamOptions: StreamOptions = .init(),
+                      pxeState: (@Sendable () -> Components.Schemas.ServiceState)? = nil) throws -> some ApplicationProtocol {
     let router = Router()
     router.add(middleware: ErrorMiddleware(logger: logger))
     router.add(middleware: BodyLimitMiddleware())
     router.add(middleware: StaticFiles(root: configuration.files.path, logger: logger))
     let handler = APIHandler(provisioner: provisioner, configuration: configuration, streamOptions: streamOptions,
                              streams: StreamLimiter(limit: streamOptions.limit),
-                             serverName: localHostName(), logger: logger)
+                             serverName: localHostName(), pxeState: pxeState, logger: logger)
     try handler.registerHandlers(on: router, serverURL: URL(string: "/")!)
     addImageRoute(to: router, provisioner: provisioner)
     return Application(
