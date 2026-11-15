@@ -10,10 +10,12 @@ struct ViamProvisionerApp: App {
     @State private var environments: EnvironmentsModel
     @State private var servers = ServerSelection()
     @State private var history = BatchHistory()
+    @State private var serverDaemon = ServerDaemon.app()
 
     init() {
         ImportEnvironmentCommand.runIfRequested()
         NetbootDaemonCommand.runIfRequested()
+        ServerDaemonCommand.runIfRequested()
         UserNotificationPoster.prepare()
         let keys = ViamKeys.app()
         _keys = State(initialValue: keys)
@@ -27,7 +29,7 @@ struct ViamProvisionerApp: App {
 
     var body: some Scene {
         Window("Viam Provisioner", id: "main") {
-            MainWindow(keys: keys, environments: environments, servers: servers, history: history)
+            MainWindow(keys: keys, environments: environments, servers: servers, history: history, serverDaemon: serverDaemon)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
                     environments.load()
@@ -50,6 +52,8 @@ struct ViamProvisionerApp: App {
             TabView {
                 KeysSettings(keys: keys, environments: environments)
                     .tabItem { Label("API Keys", systemImage: "key") }
+                ServerSettings(daemon: serverDaemon)
+                    .tabItem { Label("Server", systemImage: "server.rack") }
             }
             .frame(width: 560, height: 380)
         }

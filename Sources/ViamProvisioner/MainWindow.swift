@@ -8,6 +8,7 @@ struct MainWindow: View {
     let environments: EnvironmentsModel
     let servers: ServerSelection
     let history: BatchHistory
+    let serverDaemon: ServerDaemon
 
     @SceneStorage("sidebarSelection") private var selectedItem: String?
     @State private var queue: QueueModel?
@@ -42,6 +43,16 @@ struct MainWindow: View {
                 .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
             VStack(spacing: 0) {
+                if serverDaemon.cantStart, let message = serverDaemon.unreachableMessage {
+                    Banner(message: message) {
+                        SettingsLink { Text("Server Settings…") }
+                    }
+                }
+                if let conflict = serverDaemon.conflict {
+                    Banner(message: conflict.message) {
+                        SettingsLink { Text("Server Settings…") }
+                    }
+                }
                 if let error = environments.loadError {
                     Banner(message: error) {
                         Button("Try Again") { environments.load() }
@@ -55,6 +66,11 @@ struct MainWindow: View {
             }
         }
         .navigationTitle(title)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // A macOS update or another installer can add an account holding the server account's ID,
+            // and the app can be moved where the server account can't open it.
+            serverDaemon.refresh()
+        }
         .toolbar {
             if let environment = selected {
                 ToolbarItem(placement: .primaryAction) {

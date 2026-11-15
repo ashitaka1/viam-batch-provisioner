@@ -47,7 +47,7 @@ BIN=$(swift build -c "$CONFIG" --show-bin-path)
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons"
-cp "$BIN/ViamProvisioner" "$BIN/ProvisionerNetboot" "$APP/Contents/MacOS/"
+cp "$BIN/ViamProvisioner" "$BIN/ProvisionerNetboot" "$BIN/provisioner-server" "$APP/Contents/MacOS/"
 cp App/Info.plist "$APP/Contents/Info.plist"
 cp App/LaunchDaemons/*.plist "$APP/Contents/Library/LaunchDaemons/"
 cp "$BIN/provisioner-netbootctl" "$ROOT/build/provisioner-netbootctl"
@@ -56,6 +56,7 @@ cp "$BIN/provisioner-netbootctl" "$ROOT/build/provisioner-netbootctl"
 SIGN=(codesign --force --options runtime --sign "${CODESIGN_IDENTITY:--}")
 "${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.netboot "$APP/Contents/MacOS/ProvisionerNetboot"
 "${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.netbootctl "$ROOT/build/provisioner-netbootctl"
+"${SIGN[@]}" --identifier com.bringingfire.viam-provisioner.server "$APP/Contents/MacOS/provisioner-server"
 codesign --force --sign "${CODESIGN_IDENTITY:--}" "$APP"
 "$LSREGISTER" -f "$APP"
 echo "$FINGERPRINT" > "$STAMP"

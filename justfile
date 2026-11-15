@@ -139,6 +139,16 @@ netboot action="status":
     if [[ "{{action}}" != status || ! -x "$app" ]]; then ./scripts/bundle-app.sh >/dev/null; fi
     "$app" --netboot-daemon {{action}}
 
+# Register, unregister or remove the ProvisionerServer launch daemon, or show it. Register creates
+# the _viamprovisioner account first when it's missing and remove deletes it, each after an
+# administrator's password. Status reads the built app; the other actions rebuild it first.
+server-daemon action="status":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    app="build/Viam Provisioner.app/Contents/MacOS/ViamProvisioner"
+    if [[ "{{action}}" != status || ! -x "$app" ]]; then ./scripts/bundle-app.sh >/dev/null; fi
+    "$app" --server-daemon {{action}}
+
 # Import config/environments/<name>.env and its packages file into the macOS
 # app's environments (builds the app; replaces an environment of that name)
 import-env name:

@@ -59,6 +59,10 @@ build/provisioner-netbootctl stop
 
 Serving continues after `serve` exits. Its log: `log stream --predicate 'subsystem == "com.bringingfire.viam-provisioner.netboot"'`. Stop dnsmasq (`just stop`) first; both bind port 67.
 
+### Server daemon
+
+`just app` also puts `provisioner-server` and its launch daemon inside the bundle (`docs/decisions/0050-one-server-daemon.md`). `just server-daemon register` creates the `_viamprovisioner` account and `/Library/Application Support/Viam Provisioner/Server` after an administrator's password when they're missing, registers the daemon, and opens nothing: turn on Viam Provisioner under Background App Activity in System Settings → General → Login Items & Extensions. The daemon runs as `_viamprovisioner`, which can't open a build inside a closed home folder (mode 750, macOS's default), so copy the bundle to `/Applications` first (`sudo cp -R "build/Viam Provisioner.app" /Applications/`) and run `just server-daemon` there with `"/Applications/Viam Provisioner.app/Contents/MacOS/ViamProvisioner" --server-daemon <action>`; from `build/` the app refuses to register. `just server-daemon unregister` keeps the account and directory; `just server-daemon remove` unregisters the daemon and deletes both after an administrator's password; `just server-daemon status` reads the built app, and exits 1 when the last action failed, another account shares `_viamprovisioner`'s ID, or hosting is on and `_viamprovisioner` can't open that copy of the app. Settings → Server does the same from the app. Check the account with `dscl . -read /Users/_viamprovisioner` and the daemon with `ps -o user,command -ax | grep provisioner-server`. The daemon doesn't serve PXE yet (#217).
+
 ### The Mac app in a QA guest
 
 The app's GUI and the Keychain tests run in a disposable guest through `qa-vm` (ashitaka1/macos-qa-vm); the `dev-tools:macos-app-qa` skill drives the GUI. What a guest needs lives on the host:
