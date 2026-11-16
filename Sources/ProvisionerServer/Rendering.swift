@@ -75,6 +75,7 @@ func renderUserData(_ environment: Components.Schemas.Environment, server: Strin
         "ROBOT_NET_PORT": environment.robotNetPort ?? "",
         "PACKAGES": packages.isEmpty ? "    []" : packages.map { "    - \($0)" }.joined(separator: "\n"),
         "MACHINE_URL": machineURL,
+        "JOINS_TAILSCALE": (environment.tailscaleAuthKey ?? "").isEmpty ? "" : "true",
     ]
     return envsubst(userDataTemplate, values)
 }

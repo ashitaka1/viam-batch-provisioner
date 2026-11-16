@@ -595,6 +595,23 @@ class MachineURLTest(unittest.TestCase):
         identity, _ = self.commands(MACHINE_URL="", PROVISION_MODE="full")
         self.assertEqual(self.run_command(identity, missing="/viam.json").returncode, 0)
 
+    def test_a_machine_given_a_tailscale_key_that_cannot_fetch_it_fails_its_install(self):
+        _, tailscale = self.commands(MACHINE_URL="http://10.1.0.5:8234/machines/by-name/lab-7/t", JOINS_TAILSCALE="true")
+        result = self.run_command(tailscale, missing="/tailscale.key")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.failure_reason(), "No Tailscale key for this machine")
+
+    def test_a_machine_without_a_tailscale_key_goes_on_without_one(self):
+        _, tailscale = self.commands(MACHINE_URL="http://10.1.0.5:8234/machines/by-name/lab-7/t", JOINS_TAILSCALE="")
+        self.assertEqual(self.run_command(tailscale, missing="/tailscale.key").returncode, 0)
+        self.assertIsNone(self.failure_reason())
+        self.assertFalse((self.tmp / "target" / "etc" / "tailscale-authkey").exists())
+
+    def test_without_a_machine_url_a_missing_tailscale_key_is_skipped_as_before(self):
+        _, tailscale = self.commands(MACHINE_URL="")
+        self.assertEqual(self.run_command(tailscale, missing="/tailscale.key").returncode, 0)
+        self.assertIsNone(self.failure_reason())
+
     def test_with_a_machine_url_credentials_and_the_tailscale_key_come_from_it(self):
         url = "http://10.1.0.5:8234/machines/by-name/lab-7/0123456789abcdef0123456789abcdef"
         self.run_identity_and_tailscale(MACHINE_URL=url)

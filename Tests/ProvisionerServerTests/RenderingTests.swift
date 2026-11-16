@@ -44,6 +44,14 @@ private func runShell(_ script: String) throws -> String {
     #expect(!rendered.contains("tskey-auth-x"))
 }
 
+@Test(arguments: [("tskey-auth-x", true), ("", false), (nil, false)] as [(String?, Bool)])
+func userDataSaysWhetherTheMachineJoinsTailscale(key: String?, joins: Bool) {
+    var environment = validEnvironment()
+    environment.tailscaleAuthKey = key
+    let rendered = renderUserData(environment, server: "h:1", machineURL: "http://h:1/machines/by-name/m-1/t")
+    #expect(rendered.contains(#"[ "true" = true ]"#) == joins)
+}
+
 @Test func wifiPasswordSurvivesTheNetplanHeredoc() throws {
     let password = #"p"a\s$s`w${TIMEZONE}d $USERNAME"#
     var environment = validEnvironment()

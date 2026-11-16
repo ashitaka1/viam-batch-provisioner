@@ -313,6 +313,12 @@ ${PACKAGES}
       if [ -n "$TS_URL" ]; then TS_URL="$TS_URL/tailscale.key"; else TS_URL="http://${PXE_SERVER}/config/tailscale.key"; fi
       if curl -sf "$TS_URL" -o /target/etc/tailscale-authkey; then
         echo "Tailscale key installed" >> $LOG
+      elif [ -n "${MACHINE_URL}" ] && [ "${JOINS_TAILSCALE}" = true ]; then
+        # The server serves a machine's key once; a machine given one must not report done without it.
+        rm -f /target/etc/tailscale-authkey
+        echo "No Tailscale key for this machine" > /tmp/viam-install-failure
+        echo "FAILED: no tailscale.key at the machine's path" >> $LOG
+        exit 1
       else
         rm -f /target/etc/tailscale-authkey
         echo "No Tailscale key on the server; skipping Tailscale" >> $LOG
