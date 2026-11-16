@@ -5,6 +5,16 @@ import Testing
 
 private let mac = "aa:bb:cc:00:00:01"
 
+@Test func aMachineBoundThroughTheQueueReachesFoundAndBooting() async throws {
+    let (provisioner, _) = try makeImageProvisioner()
+    _ = try await provisioner.provision([request("m-1", environment: validEnvironment())])
+    _ = try await provisioner.bind("m-1", mac: "AA:BB:CC:00:00:01")
+    await provisioner.observe(.offered(mac: mac))
+    await provisioner.observe(.fileSent(filename: "hwe-vmlinuz", mac: mac))
+    await provisioner.observe(.fileSent(filename: "/hwe-initrd", mac: mac))
+    #expect(try await provisioner.entry("m-1").steps?.map(\.step) == [.found, .booting])
+}
+
 private func bound(now: @escaping @Sendable () -> Date = { t0 }) async throws -> Provisioner {
     let (provisioner, _) = try makeProvisioner(bindings: FixedBindings(), now: now)
     _ = try await provisioner.provision([request("m-1")])

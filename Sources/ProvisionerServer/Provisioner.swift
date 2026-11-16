@@ -22,7 +22,8 @@ actor Provisioner {
     let logger: Logger
     let store: MachineStore?
     private let loadError: String?
-    let bindings: any MachineBindings
+    /// Bindings a test injects; nil resolves MAC addresses through the queue.
+    let bindings: (any MachineBindings)?
     let journal: EventJournal
     let bootImage: BootImage?
     /// The port GRUB fetches from, written into boot configs; nil writes no TFTP files.
@@ -31,7 +32,7 @@ actor Provisioner {
     /// Each image stream in flight, by the id `downloadStarted` gave it.
     var downloads: [UUID: DownloadMark] = [:]
 
-    init(dataDirectory: DataDirectory, bindings: any MachineBindings = NoBindings(), bootImage: BootImage? = nil,
+    init(dataDirectory: DataDirectory, bindings: (any MachineBindings)? = nil, bootImage: BootImage? = nil,
          serverPort: Int? = nil, now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {
         self.now = now
         self.bindings = bindings

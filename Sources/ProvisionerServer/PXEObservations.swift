@@ -66,7 +66,14 @@ extension Provisioner {
     }
 
     private func boundMachine(_ mac: String) async -> (QueueRecord, MachineStore, MachineRecord)? {
-        guard let name = await bindings.name(boundTo: mac) else {
+        let name: String?
+        if let bindings {
+            name = await bindings.name(boundTo: mac)
+        } else {
+            let normalized = normalizedMAC(mac) ?? mac
+            name = store?.queue.first { $0.mac == normalized }?.name
+        }
+        guard let name else {
             logger.debug("observation from unbound MAC \(mac)")
             return nil
         }
