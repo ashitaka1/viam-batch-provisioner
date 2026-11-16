@@ -75,6 +75,38 @@ struct APIHandler: APIProtocol {
         }
     }
 
+    func bindQueueEntry(_ input: Operations.BindQueueEntry.Input) async throws -> Operations.BindQueueEntry.Output {
+        guard case .json(let request) = input.body else { return .badRequest(badRequest(.invalidRequest, "expected JSON")) }
+        do {
+            return .ok(.init(body: .json(try await provisioner.bind(input.path.name, mac: request.mac))))
+        } catch .notFound(let name) {
+            return .notFound(notFound(name))
+        } catch .macBound(let other) {
+            return .conflict(.init(body: .json(errorPayload(.macBound, "the MAC address is bound to \(other)"))))
+        } catch .notBindable(let reason) {
+            return .conflict(.init(body: .json(errorPayload(.notBindable, reason))))
+        } catch .queueUnreadable(let message) {
+            return .serviceUnavailable(.init(body: .json(errorPayload(.queueUnreadable, message))))
+        } catch {
+            return failure(error)
+        }
+    }
+
+    func unbindQueueEntry(_ input: Operations.UnbindQueueEntry.Input) async throws -> Operations.UnbindQueueEntry.Output {
+        do {
+            try await provisioner.unbind(input.path.name)
+            return .noContent(.init())
+        } catch .notFound(let name) {
+            return .notFound(notFound(name))
+        } catch .alreadyAssigned(let name) {
+            return .conflict(.init(body: .json(errorPayload(.alreadyAssigned, "\(name) is installing"))))
+        } catch .queueUnreadable(let message) {
+            return .serviceUnavailable(.init(body: .json(errorPayload(.queueUnreadable, message))))
+        } catch {
+            return failure(error)
+        }
+    }
+
     func getStatus(_ input: Operations.GetStatus.Input) async throws -> Operations.GetStatus.Output {
         let counts = await provisioner.counts()
         let lastEventID = await provisioner.lastEventID
@@ -120,6 +152,8 @@ extension Operations.Provision.Output: FailureOutput {}
 extension Operations.ReportInstall.Output: FailureOutput {}
 extension Operations.GetQueueEntry.Output: FailureOutput {}
 extension Operations.RemoveQueueEntry.Output: FailureOutput {}
+extension Operations.BindQueueEntry.Output: FailureOutput {}
+extension Operations.UnbindQueueEntry.Output: FailureOutput {}
 extension Operations.StreamEvents.Output: FailureOutput {}
 
 extension Operations.ListQueue.Output: FailureOutput {

@@ -8,6 +8,7 @@ jsonschema from the project venv (`.venv/bin/pip install pyyaml jsonschema`);
 import json
 import re
 import sys
+import textwrap
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,10 +39,12 @@ except ImportError:
 
 def spec_route_pairs(text):
     """(METHOD, path) pairs from the `paths:` block. Assumes the spec's two-space
-    indentation: paths at indent 2, operations at indent 4."""
+    indentation: paths at indent 2, operations at indent 4, their keys at 6.
+    Operations marked `x-servers: [swift]` only the Swift server serves."""
     pairs = set()
     in_paths = False
     current = None
+    operation = None
     for line in text.splitlines():
         if line.startswith("paths:"):
             in_paths = True
@@ -56,7 +59,11 @@ def spec_route_pairs(text):
             continue
         m = re.match(r"^    (get|post|put|patch|delete):\s*$", line)
         if m and current:
-            pairs.add((m.group(1).upper(), current))
+            operation = (m.group(1).upper(), current)
+            pairs.add(operation)
+            continue
+        if operation and re.match(r"^      x-servers:\s*\[swift\]\s*$", line):
+            pairs.discard(operation)
     return pairs
 
 
@@ -66,6 +73,23 @@ class RoutesMatchSpecTest(unittest.TestCase):
         api_pairs = {(method, template) for method, template, _ in provisioner_api.ROUTES}
         self.assertTrue(spec_pairs, "no routes parsed from the spec; indentation assumption broken?")
         self.assertEqual(api_pairs, spec_pairs)
+
+    def test_swift_only_operations_are_left_out(self):
+        spec = textwrap.dedent("""\
+            paths:
+              /api/v1/queue/{name}/binding:
+                put:
+                  operationId: bindQueueEntry
+                  x-servers: [swift]
+                delete:
+                  operationId: unbindQueueEntry
+              /api/v1/status:
+                get:
+                  operationId: getStatus
+            components:
+            """)
+        self.assertEqual(spec_route_pairs(spec),
+                         {("DELETE", "/api/v1/queue/{name}/binding"), ("GET", "/api/v1/status")})
 
 
 @unittest.skipUnless(HAVE_DEPS, "PyYAML and jsonschema required (.venv/bin/pip install pyyaml jsonschema)")

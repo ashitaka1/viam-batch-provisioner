@@ -18,7 +18,7 @@ public enum ServerMain {
         do {
             let bootImage = try configuration.bootImage.map { try BootImage(files: configuration.files, path: $0) }
             let provisioner = try Provisioner(dataDirectory: DataDirectory(configuration.dataDirectory),
-                                              bootImage: bootImage, logger: logger)
+                                              bootImage: bootImage, serverPort: configuration.port, logger: logger)
             let pxe = configuration.pxe.map {
                 PXEService(settings: $0, tftpRoot: configuration.tftpRoot, provisioner: provisioner, logger: logger)
             }

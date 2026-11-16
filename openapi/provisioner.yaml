@@ -177,6 +177,71 @@ paths:
         default:
           $ref: '#/components/responses/UnexpectedError'
 
+  /api/v1/queue/{name}/binding:
+    parameters:
+      - $ref: '#/components/parameters/Name'
+    put:
+      tags: [queue]
+      operationId: bindQueueEntry
+      x-servers: [swift]
+      summary: Bind a MAC address to a queued machine
+      description: |
+        Binds the MAC address to the name, replacing any MAC address it had. The
+        machine installs on its next PXE boot. Only the Swift server serves this.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BindingRequest'
+      responses:
+        '200':
+          description: The bound entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueEntry'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            `mac-bound`: the MAC address is bound to another name. `not-bindable`:
+            the machine is installing or installed, was queued without an
+            environment, or the server has no boot image.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/QueueUnreadable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+    delete:
+      tags: [queue]
+      operationId: unbindQueueEntry
+      x-servers: [swift]
+      summary: Remove a queued machine's MAC binding
+      description: Succeeds whether or not the name was bound. Fails with 409 while the machine is installing. Only the Swift server serves this.
+      responses:
+        '204':
+          description: Unbound
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The machine is installing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/QueueUnreadable'
+        default:
+          $ref: '#/components/responses/UnexpectedError'
+
   /api/v1/status:
     get:
       tags: [status]
@@ -405,6 +470,15 @@ components:
           type: string
           pattern: '^[A-Z]{2}$'
 
+    BindingRequest:
+      type: object
+      required: [mac]
+      additionalProperties: false
+      properties:
+        mac:
+          type: string
+          description: Six pairs of hex digits separated by `:` or `-`, in either case.
+
     ProvisionResult:
       type: object
       required: [name, result]
@@ -478,7 +552,7 @@ components:
       description: |
         queued: waiting for a machine.
         flashed: written to a USB stick; no PXE assignment will follow.
-        assigned: a PXE client has been bound to this name and is installing or retrying.
+        assigned: a MAC address is bound to this name; the machine may not have booted yet, or is retrying.
         installing: the installer fetched its hostname; the GRUB guard is in place.
         installed: the installer reported done, or the machine PXE-booted again after install and was sent to disk.
         failed: the installer reported a failure, or the server saw no installer activity for the install timeout. A PXE machine installs again on its next boot, and a progress report after a timeout failure returns it to installing.
@@ -663,6 +737,8 @@ components:
                 - payload-too-large
                 - queue-unreadable
                 - queue-locked
+                - mac-bound
+                - not-bindable
                 - too-many-streams
                 - stage-failed
                 - internal
