@@ -7,6 +7,10 @@ enum ProvisionerFailure: Error, Equatable {
     case invalidName(String)
     case notFound(String)
     case alreadyAssigned(String)
+    /// The MAC address is bound to the named entry.
+    case macBound(String)
+    /// The entry can't be bound; the message says why.
+    case notBindable(String)
     case queueUnreadable(String)
     case `internal`(String)
 }
@@ -98,7 +102,7 @@ actor Provisioner {
 
     func remove(_ name: String) throws(ProvisionerFailure) {
         let (record, store) = try lookup(name)
-        if derivedStatus(store.machine(record.key)) == .installing {
+        if derivedStatus(store.machine(record.key), bound: record.mac != nil) == .installing {
             throw .alreadyAssigned(record.name)
         }
         do {
@@ -113,7 +117,7 @@ actor Provisioner {
     func counts() -> Components.Schemas.QueueCounts? {
         guard let store else { return nil }
         var c = [Components.Schemas.EntryStatus: Int]()
-        for record in store.queue { c[derivedStatus(store.machine(record.key)), default: 0] += 1 }
+        for record in store.queue { c[derivedStatus(store.machine(record.key), bound: record.mac != nil), default: 0] += 1 }
         func n(_ status: Components.Schemas.EntryStatus) -> Int { c[status] ?? 0 }
         return Components.Schemas.QueueCounts(queued: n(.queued), flashed: n(.flashed), assigned: n(.assigned),
                                               installing: n(.installing), installed: n(.installed), failed: n(.failed),
@@ -207,9 +211,10 @@ actor Provisioner {
         }
     }
 
-    private func entry(_ record: QueueRecord, _ store: MachineStore) -> Components.Schemas.QueueEntry {
+    func entry(_ record: QueueRecord, _ store: MachineStore) -> Components.Schemas.QueueEntry {
         let machine = store.machine(record.key)
-        return .init(name: record.name, status: derivedStatus(machine),
+        return .init(name: record.name, status: derivedStatus(machine, bound: record.mac != nil),
+                     mac: record.mac, assignedAt: record.boundAt,
                      completedAt: machine?.completedAt, failedAt: machine?.failedAt,
                      failureReason: machine?.failureReason,
                      stage: machine?.stage.flatMap(Components.Schemas.InstallStage.init(rawValue:)),

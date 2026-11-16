@@ -124,7 +124,7 @@ func posixMode(_ url: URL) throws -> Int {
     let machine = try #require(store.machine("m-1"))
     #expect(machine.steps == [])
     #expect(machine.bootFilesSent == [])
-    #expect(derivedStatus(machine) == .installing)
+    #expect(derivedStatus(machine, bound: false) == .installing)
     #expect(store.queue.count == 1)
     #expect(store.queue[0].osName == nil)
 }

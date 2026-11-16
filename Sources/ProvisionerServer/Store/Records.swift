@@ -8,6 +8,9 @@ struct QueueRecord: Codable, Equatable, Sendable {
     var provisionMode: String?
     /// Whether the request carried a Tailscale key; the key itself is never recorded.
     var joinsTailscale: Bool?
+    /// The MAC address bound to this name, in lowercase colon form.
+    var mac: String?
+    var boundAt: Date?
 
     var key: String { name.lowercased() }
 }

@@ -34,6 +34,7 @@ extension Schemas.MachineEvent {
         case .installFailed(let e): "install-failed \(e.name) \(e.stage.rawValue) \(e.source.rawValue): \(e.reason)"
         case .installComplete(let e): "install-complete \(e.name) \(e.durationSeconds)"
         case .stepReached(let e): "step-reached \(e.name) \(e.step.rawValue)"
+        case .machineAssigned(let e): "machine-assigned \(e.name) \(e.mac)"
         case .downloadProgress(let e): "download-progress \(e.name) \(e.bytes)/\(e.total)"
         case .resync(let e): "resync \(e.latestId)"
         default: "unexpected \(self)"
@@ -91,6 +92,8 @@ extension ProvisionerFailure {
         case .invalidName: "invalidName"
         case .notFound: "notFound"
         case .alreadyAssigned: "alreadyAssigned"
+        case .macBound: "macBound"
+        case .notBindable: "notBindable"
         case .queueUnreadable: "queueUnreadable"
         case .internal: "internal"
         }
@@ -151,4 +154,15 @@ func validEnvironment() -> Schemas.Environment {
     .init(provisionMode: .full, username: "viam", passwordHash: "$6$salt$hash", sshPublicKey: "ssh-ed25519 AAAA test",
           timezone: "America/New_York", packages: ["curl"], wifi: .init(ssid: "lab", password: #"p@ss"w$rd"#),
           tailscaleAuthKey: "tskey-auth-x")
+}
+
+let testImageName = "ubuntu-24.04.4-live-server-amd64.iso"
+
+/// A provisioner whose boot image is a small file at `ubuntu/<testImageName>` under a temp files root.
+func makeImageProvisioner(serverPort: Int? = nil, root: URL? = nil) throws -> (Provisioner, DataDirectory) {
+    let files = try temporaryDirectory()
+    try FileManager.default.createDirectory(at: files.appending(path: "ubuntu"), withIntermediateDirectories: true)
+    try Data("iso".utf8).write(to: files.appending(path: "ubuntu/\(testImageName)"))
+    let image = try BootImage(files: files, path: "ubuntu/\(testImageName)")
+    return try makeProvisioner(root, bootImage: image)
 }

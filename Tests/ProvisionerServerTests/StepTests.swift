@@ -84,7 +84,7 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
 
 @Test func stepsOfAnEarlierAttemptAloneReadQueued() {
     let steps = [StepRecord(step: "found", at: t0, attempt: 1)]
-    #expect(derivedStatus(MachineRecord(attempt: 2, steps: steps)) == .queued)
+    #expect(derivedStatus(MachineRecord(attempt: 2, steps: steps), bound: false) == .queued)
 }
 
 @Test func beginAttemptKeepsStepsAndClearsTheRest() async throws {
@@ -102,7 +102,7 @@ private func queued(_ name: String = "m-1") async throws -> (Provisioner, DataDi
     #expect(record.failureReason == nil && record.failureSource == nil)
     #expect(record.bootFilesSent.isEmpty && record.downloadBytes == nil && record.downloadTotal == nil)
     #expect(record.steps.count == 1)
-    #expect(derivedStatus(record) == .queued)
+    #expect(derivedStatus(record, bound: false) == .queued)
 }
 
 @Test func reachRecordsOncePerAttempt() async throws {

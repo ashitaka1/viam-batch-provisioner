@@ -28,7 +28,7 @@ extension Provisioner {
     func downloadStarted(_ name: String, total: Int) -> UUID? {
         guard let (queued, store) = try? lookup(name) else { return nil }
         var record = store.machine(queued.key) ?? MachineRecord()
-        guard derivedStatus(record) != .installed else { return nil }
+        guard derivedStatus(record, bound: queued.mac != nil) != .installed else { return nil }
         if record.attempt == 0 {
             record.attempt = 1
             record.attemptStartedAt = now()
@@ -74,7 +74,7 @@ extension Provisioner {
     private func downloadingMachine(_ mark: DownloadMark) -> (QueueRecord, MachineStore, MachineRecord)? {
         guard let (queued, store) = try? lookup(mark.key), queued.addedAt == mark.entry else { return nil }
         let record = store.machine(queued.key) ?? MachineRecord()
-        return derivedStatus(record) == .installed ? nil : (queued, store, record)
+        return derivedStatus(record, bound: queued.mac != nil) == .installed ? nil : (queued, store, record)
     }
 
     /// Saves the record; a failure is logged and the caller emits nothing.
