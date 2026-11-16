@@ -13,6 +13,13 @@ struct DataDirectory: Sendable {
     var machines: URL { root.appending(path: "machines") }
     var credentialsRoot: URL { root.appending(path: "credentials") }
 
+    /// The directory TFTP serves.
+    var tftp: URL { root.appending(path: "tftp") }
+    var menu: URL { tftp.appending(path: "grub/grub.cfg") }
+    var bootConfigs: URL { tftp.appending(path: "grub/boot") }
+    /// The boot config GRUB sources for `mac`, in lowercase colon form.
+    func bootConfig(_ mac: String) -> URL { bootConfigs.appending(path: "\(mac).cfg") }
+
     func machine(_ key: String) -> URL { machines.appending(path: "\(key).json") }
     func credentials(_ key: String) -> URL { credentialsRoot.appending(path: key) }
 

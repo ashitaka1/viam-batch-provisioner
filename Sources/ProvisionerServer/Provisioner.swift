@@ -25,15 +25,18 @@ actor Provisioner {
     let bindings: any MachineBindings
     let journal: EventJournal
     let bootImage: BootImage?
+    /// The port GRUB fetches from, written into boot configs; nil writes no TFTP files.
+    let serverPort: Int?
     private var fanout = EventFanout()
     /// Each image stream in flight, by the id `downloadStarted` gave it.
     var downloads: [UUID: DownloadMark] = [:]
 
     init(dataDirectory: DataDirectory, bindings: any MachineBindings = NoBindings(), bootImage: BootImage? = nil,
-         now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {
+         serverPort: Int? = nil, now: @escaping @Sendable () -> Date = Date.init, logger: Logger) throws {
         self.now = now
         self.bindings = bindings
         self.bootImage = bootImage
+        self.serverPort = serverPort
         self.logger = logger
         do {
             store = try MachineStore(dataDirectory)
@@ -46,6 +49,9 @@ actor Provisioner {
         journal = try EventJournal(url: dataDirectory.journal, logger: logger)
         for problem in store?.skippedRecords ?? [] {
             logger.error("skipping machine record: \(problem)")
+        }
+        if let serverPort, let store {
+            rewriteBootConfigs(store, port: serverPort, bootImage: bootImage, logger: logger)
         }
     }
 
@@ -112,6 +118,7 @@ actor Provisioner {
             logger.error("removing \(record.name) failed: \(error)")
             throw .internal("\(record.name) could not be removed")
         }
+        removeBootConfig(record.mac, of: record.name, store)
     }
 
     func counts() -> Components.Schemas.QueueCounts? {

@@ -30,7 +30,22 @@ extension Provisioner {
         var bound = queued
         bound.mac = mac
         bound.boundAt = now()
-        try saveQueue(replacing: bound, in: store)
+        // The boot config is written before the queue is saved, so a failed write leaves the queue as it was.
+        if let serverPort {
+            do {
+                try store.writeBootConfig(bootConfig(for: bound, store: store, port: serverPort, bootImage: bootImage), mac: mac)
+            } catch {
+                logger.error("writing the boot config of \(queued.name) failed: \(error)")
+                throw .internal("the boot config of \(queued.name) could not be written")
+            }
+        }
+        do {
+            try saveQueue(replacing: bound, in: store)
+        } catch {
+            removeBootConfig(mac, of: queued.name, store)
+            throw error
+        }
+        if let old = queued.mac { removeBootConfig(old, of: queued.name, store) }
         let time = now()
         emit { .machineAssigned(.init(id: $0, _type: .machineAssigned, timestamp: time, name: bound.name, mac: mac)) }
         return entry(bound, store)
@@ -47,6 +62,7 @@ extension Provisioner {
         unbound.mac = nil
         unbound.boundAt = nil
         try saveQueue(replacing: unbound, in: store)
+        removeBootConfig(queued.mac, of: queued.name, store)
     }
 
     private func saveQueue(replacing record: QueueRecord, in store: MachineStore) throws(ProvisionerFailure) {

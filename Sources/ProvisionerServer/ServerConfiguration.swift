@@ -50,7 +50,7 @@ struct ServerConfiguration: Sendable {
     var pxe: PXESettings?
 
     /// The directory TFTP serves.
-    var tftpRoot: URL { dataDirectory.appending(path: "tftp") }
+    var tftpRoot: URL { DataDirectory(dataDirectory).tftp }
 
     static let usage = """
         usage: provisioner-server --files <dir> [--port <n>] [--bind <address>] [--data-dir <dir>] [--advertise-address <host:port>] [--boot-image <path under --files>] [--pxe-interface <name> [--boot-file <name>]]

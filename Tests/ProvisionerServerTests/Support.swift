@@ -164,5 +164,6 @@ func makeImageProvisioner(serverPort: Int? = nil, root: URL? = nil) throws -> (P
     try FileManager.default.createDirectory(at: files.appending(path: "ubuntu"), withIntermediateDirectories: true)
     try Data("iso".utf8).write(to: files.appending(path: "ubuntu/\(testImageName)"))
     let image = try BootImage(files: files, path: "ubuntu/\(testImageName)")
-    return try makeProvisioner(root, bootImage: image)
+    let dir = DataDirectory(try root ?? temporaryDirectory())
+    return (try Provisioner(dataDirectory: dir, bootImage: image, serverPort: serverPort, now: { t0 }, logger: testLogger), dir)
 }
