@@ -66,6 +66,7 @@ actor Provisioner {
                     if item.credentials != nil || item.environment != nil {
                         try store.stage(credentials: try item.credentials.map { try StoreCoding.encoder.encode($0) },
                                         environment: try item.environment.map { try StoreCoding.encoder.encode($0) },
+                                        token: item.environment == nil ? nil : mintToken(),
                                         key: key)
                     }
                     added.append(QueueRecord(name: item.name, addedAt: now(), osName: bootImage?.osName,
@@ -194,6 +195,11 @@ actor Provisioner {
             if let credentials = item.credentials, !validCredentials(credentials) {
                 details.append(.init(index: index, field: "credentials",
                                      message: "must be a viam.json object with cloud.id and cloud.secret"))
+            }
+            if let environment = item.environment {
+                for problem in environmentProblems(environment) {
+                    details.append(.init(index: index, field: "environment.\(problem.field)", message: problem.message))
+                }
             }
         }
         if !details.isEmpty {

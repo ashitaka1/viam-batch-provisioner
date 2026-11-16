@@ -237,3 +237,33 @@ func failedRemovalLogsTheUnderlyingError() async throws {
     #expect(await failure { try await provisioner.remove("m-1") } == .internal("m-1 could not be removed"))
     #expect(log.errors.contains { $0.hasPrefix("removing m-1 failed: ") && $0.count > "removing m-1 failed: ".count })
 }
+
+@Test func provisionRefusesABadEnvironment() async throws {
+    let (provisioner, _) = try makeProvisioner()
+    var bad = validEnvironment()
+    bad.timezone = "UTC; reboot"
+    let failure = await failure { try await provisioner.provision([request("m-1", environment: bad)]) }
+    guard case .invalid(_, let details) = failure else { Issue.record("\(String(describing: failure))"); return }
+    #expect(details.map(\.field) == ["environment.timezone"])
+    #expect(try await provisioner.snapshot().entries.isEmpty)
+}
+
+@Test func provisionWithAnEnvironmentMintsAToken() async throws {
+    let (provisioner, dir) = try makeProvisioner()
+    _ = try await provisioner.provision([request("M-1", environment: validEnvironment()), request("m-2")])
+    let file = dir.credentials("m-1").appending(path: "token")
+    let token = try String(contentsOf: file, encoding: .utf8)
+    #expect(token.wholeMatch(of: /[0-9a-f]{32}/) != nil)
+    #expect(try posixMode(file) == 0o600)
+    #expect(await provisioner.seedPath(for: "m-1") == "/machines/by-name/M-1/\(token)/")
+    #expect(await provisioner.seedPath(for: "m-2") == nil)
+}
+
+@Test func requeuedMachineGetsANewToken() async throws {
+    let (provisioner, _) = try makeProvisioner()
+    _ = try await provisioner.provision([request("m-1", environment: validEnvironment())])
+    let first = try #require(await provisioner.seedPath(for: "m-1"))
+    try await provisioner.remove("m-1")
+    _ = try await provisioner.provision([request("m-1", environment: validEnvironment())])
+    #expect(await provisioner.seedPath(for: "m-1") != first)
+}

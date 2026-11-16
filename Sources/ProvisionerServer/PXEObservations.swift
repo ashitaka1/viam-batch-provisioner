@@ -36,6 +36,8 @@ extension Provisioner {
         } else {
             beginAttempt(&record)
         }
+        // The only re-arm: install reports are unauthenticated (decision 51).
+        record.secretsServed = [:]
         persist(&record, reaching: .found, queued, store, mac)
     }
 

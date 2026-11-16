@@ -53,8 +53,8 @@ final class MachineStore {
         machines[key] = machine
     }
 
-    /// Writes whichever of the two files are given; a nil leaves that file as it is.
-    func stage(credentials: Data?, environment: Data?, key: String) throws {
+    /// Writes whichever of the files are given; a nil leaves that file as it is.
+    func stage(credentials: Data?, environment: Data?, token: String? = nil, key: String) throws {
         let folder = dir.credentials(key)
         let fm = FileManager.default
         try fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -64,10 +64,21 @@ final class MachineStore {
         if let environment {
             try writeAtomically(environment, to: folder.appending(path: "environment.json"), mode: 0o600)
         }
+        if let token {
+            try writeAtomically(Data(token.utf8), to: folder.appending(path: "token"), mode: 0o600)
+        }
     }
 
     func hasCredentials(_ key: String) -> Bool {
         FileManager.default.fileExists(atPath: dir.credentials(key).appending(path: "viam.json").path)
+    }
+
+    func credentials(_ key: String) -> Data? { staged("viam.json", key) }
+    func environment(_ key: String) -> Data? { staged("environment.json", key) }
+    func token(_ key: String) -> String? { staged("token", key).map { String(decoding: $0, as: UTF8.self) } }
+
+    private func staged(_ file: String, _ key: String) -> Data? {
+        FileManager.default.contents(atPath: dir.credentials(key).appending(path: file).path)
     }
 
     func remove(key: String) throws {

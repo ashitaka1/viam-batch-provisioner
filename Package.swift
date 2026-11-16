@@ -162,6 +162,7 @@ let package = Package(
                 .product(name: "_NIOFileSystem", package: "swift-nio"),
                 "ProvisionerPXE",
             ],
+            resources: [.embedInCode("user-data.tpl")],
             plugins: [
                 .plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator"),
             ]

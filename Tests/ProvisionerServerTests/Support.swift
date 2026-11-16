@@ -70,6 +70,19 @@ func failure<T>(_ body: () async throws -> T) async -> ProvisionerFailure? {
     }
 }
 
+/// The failure a seed fetch throws, or nil when it serves the file.
+func seedFailure(_ body: () async throws -> Data) async -> SeedFailure? {
+    do {
+        _ = try await body()
+        return nil
+    } catch let error as SeedFailure {
+        return error
+    } catch {
+        Issue.record("expected a SeedFailure, got \(error)")
+        return nil
+    }
+}
+
 extension ProvisionerFailure {
     /// The case name alone, for assertions that ignore the message.
     var kind: String {
@@ -131,4 +144,11 @@ struct FixedBindings: MachineBindings {
     func name(boundTo mac: String) async -> String? {
         ["aa:bb:cc:00:00:01": "m-1", "aa:bb:cc:00:00:02": "m-2"][mac]
     }
+}
+
+/// An environment that passes every provisioning check, with WiFi and a Tailscale key.
+func validEnvironment() -> Schemas.Environment {
+    .init(provisionMode: .full, username: "viam", passwordHash: "$6$salt$hash", sshPublicKey: "ssh-ed25519 AAAA test",
+          timezone: "America/New_York", packages: ["curl"], wifi: .init(ssid: "lab", password: #"p@ss"w$rd"#),
+          tailscaleAuthKey: "tskey-auth-x")
 }

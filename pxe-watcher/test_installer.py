@@ -522,5 +522,89 @@ class RobotNetworkTest(unittest.TestCase):
                 self.assertFalse((self.repo / "http-server" / "autoinstall" / "user-data").exists())
 
 
+@unittest.skipUnless(HAVE_YAML and shutil.which("envsubst"), "PyYAML and envsubst required")
+class MachineURLTest(unittest.TestCase):
+    """The identity and Tailscale late-commands, rendered with and without
+    MACHINE_URL, run under /bin/sh with /target and /proc/cmdline moved into a
+    scratch directory."""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        (self.tmp / "target" / "etc").mkdir(parents=True)
+        (self.tmp / "target" / "var" / "log").mkdir(parents=True)
+        (self.tmp / "bin").mkdir()
+        (self.tmp / "tmp").mkdir()
+        (self.tmp / "bin" / "stub-curl").write_text(STUB_INSTALLER_CURL)
+        (self.tmp / "bin" / "stub-curl").chmod(0o755)
+        # Fails (as curl -f does on a 404) any download whose URL ends in $STUB_MISSING.
+        (self.tmp / "bin" / "curl").write_text(
+            '#!/bin/sh\nfor a in "$@"; do case "$a" in *"$STUB_MISSING") [ -n "$STUB_MISSING" ] && exit 22 ;; esac; done\n'
+            'exec "$STUB_DIR/bin/stub-curl" "$@"\n')
+        (self.tmp / "bin" / "curl").chmod(0o755)
+        (self.tmp / "cmdline").write_text("ip=dhcp viam_hostname=lab-7 ---\n")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def commands(self, **values):
+        whitelist, names, _ = build_config_parts()
+        env = dict(os.environ)
+        env.update({name: f"dummy-{name.lower()}" for name in names})
+        env["PACKAGES"] = "    - curl"
+        env.update(values)
+        rendered = subprocess.run(["envsubst", whitelist], input=TEMPLATE.read_text(), env=env,
+                                  capture_output=True, text=True, check=True).stdout
+        commands = yaml.safe_load(rendered)["autoinstall"]["late-commands"]
+        identity = next(c for c in commands if "viam_hostname" in c)
+        tailscale = next(c for c in commands if "/target/etc/tailscale-authkey" in c and "tailscale.key" in c)
+        return identity, tailscale
+
+    def run_command(self, command, missing=""):
+        for old in ("/proc/cmdline", "/target", "/tmp/"):
+            new = {"/proc/cmdline": "cmdline", "/target": "target", "/tmp/": "tmp/"}[old]
+            command = command.replace(old, str(self.tmp / new) + ("/" if old.endswith("/") else ""))
+        run_env = {"PATH": f"{self.tmp / 'bin'}:{os.environ['PATH']}", "STUB_DIR": str(self.tmp),
+                   "REPORT_SCRIPT": str(SCRIPT), "STUB_MISSING": missing}
+        return subprocess.run(["/bin/sh", "-c", command], env=run_env, capture_output=True, text=True, timeout=30)
+
+    def run_identity_and_tailscale(self, **values):
+        for command in self.commands(**values):
+            result = self.run_command(command)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def downloads(self):
+        return (self.tmp / "downloads").read_text().splitlines()
+
+    def failure_reason(self):
+        path = self.tmp / "tmp" / "viam-install-failure"
+        return path.read_text().strip() if path.exists() else None
+
+    def test_a_full_mode_machine_whose_credentials_are_not_served_fails_its_install(self):
+        identity, _ = self.commands(MACHINE_URL="http://10.1.0.5:8234/machines/by-name/lab-7/t", PROVISION_MODE="full")
+        result = self.run_command(identity, missing="/viam.json")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.failure_reason(), "No Viam credentials for this machine")
+
+    def test_an_agent_mode_machine_goes_on_without_credentials(self):
+        identity, _ = self.commands(MACHINE_URL="http://10.1.0.5:8234/machines/by-name/lab-7/t", PROVISION_MODE="agent")
+        self.assertEqual(self.run_command(identity, missing="/viam.json").returncode, 0)
+        self.assertIsNone(self.failure_reason())
+
+    def test_without_a_machine_url_a_full_mode_machine_goes_on_as_before(self):
+        identity, _ = self.commands(MACHINE_URL="", PROVISION_MODE="full")
+        self.assertEqual(self.run_command(identity, missing="/viam.json").returncode, 0)
+
+    def test_with_a_machine_url_credentials_and_the_tailscale_key_come_from_it(self):
+        url = "http://10.1.0.5:8234/machines/by-name/lab-7/0123456789abcdef0123456789abcdef"
+        self.run_identity_and_tailscale(MACHINE_URL=url)
+        self.assertEqual(self.downloads(), [f"{url}/viam.json", f"{url}/tailscale.key"])
+
+    def test_without_one_they_come_from_the_shared_paths(self):
+        self.run_identity_and_tailscale(MACHINE_URL="")
+        self.assertEqual(self.downloads(), ["http://dummy-pxe_server/machines/by-name/lab-7/viam.json",
+                                            "http://dummy-pxe_server/config/tailscale.key"])
+
+
 if __name__ == "__main__":
     unittest.main()

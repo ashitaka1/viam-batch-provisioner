@@ -26,6 +26,8 @@ struct MachineRecord: Codable, Equatable, Sendable {
     var downloadBytes: Int?
     var downloadTotal: Int?
     var failureStep: String?
+    /// When each secret seed file was served in this attempt, by file name.
+    var secretsServed: [String: Date] = [:]
 }
 
 struct StepRecord: Codable, Equatable, Sendable {
@@ -50,6 +52,7 @@ extension MachineRecord {
         downloadBytes = try c.decodeIfPresent(Int.self, forKey: .downloadBytes)
         downloadTotal = try c.decodeIfPresent(Int.self, forKey: .downloadTotal)
         failureStep = try c.decodeIfPresent(String.self, forKey: .failureStep)
+        secretsServed = try c.decodeIfPresent([String: Date].self, forKey: .secretsServed) ?? [:]
     }
 }
 

@@ -256,10 +256,17 @@ ${PACKAGES}
         echo "${HOSTNAME}" > /target/etc/hostname
         sed -i "s/127.0.1.1.*/127.0.1.1\t${HOSTNAME}/" /target/etc/hosts
         echo "Hostname set to ${HOSTNAME}" >> $LOG
-        if curl -sf "http://${PXE_SERVER}/${CRED_PATH}/viam.json" -o /target/etc/viam.json; then
-          echo "viam.json installed from /${CRED_PATH}/" >> $LOG
+        CRED_URL="${MACHINE_URL}"
+        [ -n "$CRED_URL" ] || CRED_URL="http://${PXE_SERVER}/${CRED_PATH}"
+        if curl -sf "$CRED_URL/viam.json" -o /target/etc/viam.json; then
+          echo "viam.json installed" >> $LOG
+        elif [ -n "${MACHINE_URL}" ] && [ "${PROVISION_MODE}" = full ]; then
+          # The server serves a machine's credentials once; a full install without them must not report done.
+          echo "No Viam credentials for this machine" > /tmp/viam-install-failure
+          echo "FAILED: no viam.json at the machine's path" >> $LOG
+          exit 1
         else
-          echo "No viam.json at /${CRED_PATH}/ (skipping — agent/os-only mode)" >> $LOG
+          echo "No viam.json for this machine (skipping — agent/os-only mode)" >> $LOG
         fi
       else
         echo "FAILED to resolve hostname — no viam_hostname cmdline arg and no MAC matched on server" >> $LOG
@@ -302,7 +309,9 @@ ${PACKAGES}
     # below checks for the fetched key, so a site without one installs nothing.
     - |
       LOG=/target/var/log/provisioning.log
-      if curl -sf http://${PXE_SERVER}/config/tailscale.key -o /target/etc/tailscale-authkey; then
+      TS_URL="${MACHINE_URL}"
+      if [ -n "$TS_URL" ]; then TS_URL="$TS_URL/tailscale.key"; else TS_URL="http://${PXE_SERVER}/config/tailscale.key"; fi
+      if curl -sf "$TS_URL" -o /target/etc/tailscale-authkey; then
         echo "Tailscale key installed" >> $LOG
       else
         rm -f /target/etc/tailscale-authkey

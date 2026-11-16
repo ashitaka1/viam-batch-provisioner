@@ -77,3 +77,24 @@ func makeApp(files: URL? = nil) async throws -> some ApplicationProtocol {
         #expect(try JSONDecoder().decode(Schemas.QueueList.self, from: Data(buffer: response.body)).entries.isEmpty)
     }
 }
+
+@Test func sharedPathsAreRefusedAndMachinesNeverReadFromDisk() async throws {
+    let files = try filesRoot()
+    let paths = ["config/tailscale.key", "autoinstall/user-data", "machines/by-name/m-1/viam.json"]
+    for path in paths {
+        let url = files.appending(path: path)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("secret".utf8).write(to: url)
+    }
+    let variants = paths.map { "/\($0)" } + [
+        "//config/tailscale.key", "/./config/tailscale.key", "/%63onfig/tailscale.key", "/config%2Ftailscale.key",
+        "/CONFIG/tailscale.key", "/ubuntu/../config/tailscale.key", "//autoinstall/user-data", "/Autoinstall/user-data",
+        "//machines/by-name/m-1/viam.json", "/Machines/by-name/m-1/viam.json", "/%6dachines/by-name/m-1/viam.json",
+    ]
+    try await makeApp(files: files).test(.router) { client in
+        for path in variants {
+            let response = try await client.execute(uri: path, method: .get)
+            #expect(String(buffer: response.body) != "secret", "\(path) served a shared secret")
+        }
+    }
+}
