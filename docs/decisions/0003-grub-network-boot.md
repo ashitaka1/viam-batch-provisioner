@@ -16,4 +16,4 @@ dnsmasq serves GRUB extracted from the Ubuntu ISO (`just setup`). GRUB loads the
 
 ## Consequences
 
-One bootloader, from the same ISO as the installer. The binaries are extracted per host and kept out of git. Per-MAC guard files in `netboot/grub/provisioned/` can stop a provisioned machine from reinstalling, because `grub.cfg` sources them.
+One bootloader, from the same ISO as the installer. The binaries are extracted per host and kept out of git. A guard file for each MAC in `netboot/grub/provisioned/` can stop a provisioned machine from reinstalling, because `grub.cfg` sources them.

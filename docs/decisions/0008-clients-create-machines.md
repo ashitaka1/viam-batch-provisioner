@@ -12,7 +12,7 @@ In v2, operators provision from client apps against a long-running LAN server. E
 
 ## Decision
 
-The client creates machines and fetches each one's credentials with the signed-in user's session. It sends the server only a name and a per-machine credential blob. The server never holds a Viam account credential.
+The client creates machines and fetches each one's credentials with the signed-in user's session. It sends the server only a name and that machine's credential blob. The server never holds a Viam account credential.
 
 ## Consequences
 

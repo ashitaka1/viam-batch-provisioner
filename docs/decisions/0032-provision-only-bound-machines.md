@@ -16,4 +16,4 @@ In the v2 server, only a MAC bound to a queue slot is provisioned. A bound MAC b
 
 ## Consequences
 
-A machine is provisioned into the batch its operator chose, and nothing is installed without a binding or a person at the console. Every provisioned machine takes a binding step, so batch provisioning is boot once, bind, boot again, unless it was bound beforehand with the camera. The server needs a binding API and per-MAC GRUB configuration. FIFO assignment across batches, an active-batch selector, and binding only when batches overlap were the alternatives. The Python watcher keeps FIFO assignment until it is retired.
+A machine is provisioned into the batch its operator chose, and nothing is installed without a binding or a person at the console. Every provisioned machine takes a binding step, so batch provisioning is boot once, bind, boot again, unless it was bound beforehand with the camera. The server needs a binding API and boot configs. FIFO assignment across batches, an active-batch selector, and binding only when batches overlap were the alternatives. The Python watcher keeps FIFO assignment until it is retired.

@@ -16,4 +16,4 @@ ProvisionerPXE records the MAC and address of each PXE client's DHCPREQUEST (opt
 
 ## Consequences
 
-The mapping is portable and comes from the wire the proxy already reads. A client whose request is unicast, or a DHCP server that acknowledges a different address than requested, yields `fileSent` without a MAC; the event still carries the address and filename. GRUB's per-MAC config names (`grub.cfg-01-<mac>`) identify the machine independently. Reading the kernel's ARP table for the address was the alternative; it needs a platform shim for Linux (decision 34) and an entry exists only after the host has sent to the client.
+The mapping is portable and comes from the wire the proxy already reads. A client whose request is unicast, or a DHCP server that acknowledges a different address than requested, yields `fileSent` without a MAC; the event still carries the address and filename. GRUB's config file names (`grub.cfg-01-<mac>`) identify the machine independently. Reading the kernel's ARP table for the address was the alternative; it needs a platform shim for Linux (decision 34) and an entry exists only after the host has sent to the client.

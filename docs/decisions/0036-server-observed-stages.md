@@ -12,7 +12,7 @@ DHCP, TFTP and ISO-download failures happen before `install-report.sh` exists on
 
 ## Decision
 
-The v2 server records the stages it observes for each machine: offer sent, boot files sent, ISO download started, ISO download finished. A machine that stays at one of them past its stall limit fails, with a reason naming the stage. A USB stick's GRUB entries (decision 6) fetch per-machine URLs, so the server attributes a USB machine's first request to it and starts its clock there.
+The v2 server records the stages it observes for each machine: offer sent, boot files sent, ISO download started, ISO download finished. A machine that stays at one of them past its stall limit fails, with a reason naming the stage. A USB stick's GRUB entries (decision 6) fetch the machine's image URL and seed path, so the server attributes a USB machine's first request to it and starts its clock there.
 
 ## Consequences
 

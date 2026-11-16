@@ -4,7 +4,7 @@ info:
   version: 1.2.0
   description: |
     Control plane for a provisioning server. Clients queue machines (name plus
-    optional per-machine Viam credentials), read queue state, and follow
+    optional Viam credentials for each machine), read queue state, and follow
     lifecycle events over Server-Sent Events.
 
     Queue entry status is derived from the server's on-disk state, never from

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 PXE Watcher — listens for DHCP Discover packets on the provisioning network,
-assigns machine names to MACs in arrival order, stages per-machine credential
+assigns machine names to MACs in arrival order, stages each machine's credential
 files for the HTTP server, and writes GRUB guards once a machine is installed.
 
 Usage:

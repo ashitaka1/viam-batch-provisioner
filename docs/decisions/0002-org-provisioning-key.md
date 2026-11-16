@@ -1,4 +1,4 @@
-# 2. Fetch per-machine credentials with an org-scoped key
+# 2. Fetch each machine's credentials with an org-scoped key
 
 Date: 2026-03-27
 

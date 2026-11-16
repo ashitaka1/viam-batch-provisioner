@@ -112,7 +112,7 @@ read -r -p "Wipe $DEVICE and write Viam install boot stick for '$MACHINE_NAME'? 
 # --- Partition + format: GPT, single FAT32 ESP ---
 # A single FAT32 ESP boots cleanly via the UEFI fallback path
 # (\EFI\BOOT\BOOTX64.EFI), so the stick boots on any UEFI firmware
-# without needing per-machine boot entries.
+# without needing a firmware boot entry for each machine.
 
 echo ""
 echo "Partitioning $DEVICE (GPT, single FAT32 ESP)..."
@@ -199,7 +199,7 @@ rm -f "$LABEL_TMP"
 
 # --- Stage per-name credentials on the HTTP server (full mode) ---
 # In USB mode the installer fetches viam.json by hostname (no MAC
-# watcher to assign per-MAC paths), so stage it under by-name/.
+# watcher to stage files by MAC), so stage it under by-name/.
 
 if [[ -n "$VIAM_JSON_FILE" ]]; then
     echo "Staging credentials at machines/by-name/${MACHINE_NAME}/viam.json..."

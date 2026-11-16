@@ -12,7 +12,7 @@ The server serves each machine's secrets (Viam credentials, WiFi password, Tails
 
 ## Decision
 
-A PXE offer to a bound machine that isn't Installed re-arms its secrets: they are served once more, for the attempt that offer starts. No request to the token path re-arms them, and an Installed machine's secrets stay spent.
+A PXE offer to a bound machine that isn't Installed re-arms its secrets: they are served once more, for the attempt that offer starts. No request to the seed path re-arms them, and an Installed machine's secrets stay spent.
 
 ## Consequences
 
@@ -22,4 +22,4 @@ A PXE offer to a bound machine that isn't Installed re-arms its secrets: they ar
 
 ## Alternatives
 
-Secrets that stay spent until an operator re-arms the machine from its queue row expose nothing on a retry, and every retry needs someone at the app. Re-arming on any new request to the token path makes retries automatic, and lets any host that learned the URL fetch the secrets again.
+Secrets that stay spent until an operator re-arms the machine from its queue row expose nothing on a retry, and every retry needs someone at the app. Re-arming on any new request to the seed path makes retries automatic, and lets any host that learned the URL fetch the secrets again.

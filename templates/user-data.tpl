@@ -224,7 +224,7 @@ ${PACKAGES}
 
     - sh /tmp/install-report.sh ${PXE_SERVER} progress identity || true
 
-    # Resolve per-machine identity. Two paths:
+    # Resolve the machine's identity. Two paths:
     #   USB mode — hostname is baked into the kernel cmdline as
     #   viam_hostname=<name>; credentials live at /machines/by-name/<name>/.
     #   PXE mode — no name in cmdline; fall back to fetching by MAC, which

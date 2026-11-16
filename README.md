@@ -8,7 +8,7 @@ Boots a target machine over the network (x86) or from a pre-flashed SD card (Pi)
 
 **x86 machines** (Meerkats, NUCs, Minisforum, etc.) install over the network. Two modes:
 - **PXE** — the target's UEFI ROM does network boot; the host runs a proxy DHCP + TFTP server. Use when one operator has the network to themselves.
-- **USB** — flash a per-machine boot stick whose GRUB config points at a fixed server IP. Use when multiple operators share a network, or when the LAN's DHCP server won't tolerate a proxy.
+- **USB** — flash a boot stick for each machine whose GRUB config points at a fixed server IP. Use when multiple operators share a network, or when the LAN's DHCP server won't tolerate a proxy.
 
 **Raspberry Pis** boot from SD cards flashed on the workstation.
 
@@ -169,11 +169,11 @@ Components, data layout and invariants are in [ARCHITECTURE.md](ARCHITECTURE.md)
 ### Security model
 
 - **Provisioning API key** stays on the operator's workstation — never deployed to targets
-- Per-machine Viam credentials are fetched via the Python SDK and staged temporarily
+- Each machine's Viam credentials are fetched via the Python SDK and staged temporarily
 - Tailscale auth key is served over the local network during install, deleted after first use
 - SSH public key is baked into the OS config
 - All secrets live in `config/` (gitignored)
-- The provisioner API has no authentication and listens on every interface. It accepts per-machine credentials in request bodies in cleartext, so it belongs on a trusted lab network only.
+- The provisioner API has no authentication and listens on every interface. It accepts each machine's credentials in request bodies in cleartext, so it belongs on a trusted lab network only.
 - Anyone who can reach the file server can submit an install report. The worst a forged report does is mark a machine that is still installing as failed, so it reinstalls on its next PXE boot. Machines that have completed are not affected.
 
 ## Provisioner API
