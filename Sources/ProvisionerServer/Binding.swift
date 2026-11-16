@@ -6,7 +6,7 @@ import ProvisionerAPI
 func normalizedMAC(_ text: String) -> String? {
     guard let separator = text.first(where: { $0 == ":" || $0 == "-" }) else { return nil }
     let parts = text.split(separator: separator, omittingEmptySubsequences: false)
-    guard parts.count == 6, parts.allSatisfy({ $0.count == 2 && $0.allSatisfy(\.isHexDigit) }) else { return nil }
+    guard parts.count == 6, parts.allSatisfy({ $0.count == 2 && $0.allSatisfy { $0.isASCII && $0.isHexDigit } }) else { return nil }
     return parts.joined(separator: ":").lowercased()
 }
 
@@ -30,7 +30,7 @@ extension Provisioner {
         var bound = queued
         bound.mac = mac
         bound.boundAt = now()
-        // The boot config is written before the queue is saved, so a failed write leaves the queue as it was.
+        // Boot configs change before the queue is saved, so a failed write leaves both as they were.
         if let serverPort {
             do {
                 try store.writeBootConfig(bootConfig(for: bound, store: store, port: serverPort, bootImage: bootImage), mac: mac)
@@ -39,13 +39,21 @@ extension Provisioner {
                 throw .internal("the boot config of \(queued.name) could not be written")
             }
         }
+        if let old = queued.mac {
+            do {
+                try deleteBootConfig(old, of: queued.name, store)
+            } catch {
+                removeBootConfig(mac, of: queued.name, store)
+                throw error
+            }
+        }
         do {
             try saveQueue(replacing: bound, in: store)
         } catch {
             removeBootConfig(mac, of: queued.name, store)
+            refreshBootConfig(queued, store)
             throw error
         }
-        if let old = queued.mac { removeBootConfig(old, of: queued.name, store) }
         let time = now()
         emit { .machineAssigned(.init(id: $0, _type: .machineAssigned, timestamp: time, name: bound.name, mac: mac)) }
         return entry(bound, store)
@@ -61,8 +69,13 @@ extension Provisioner {
         var unbound = queued
         unbound.mac = nil
         unbound.boundAt = nil
-        try saveQueue(replacing: unbound, in: store)
-        removeBootConfig(queued.mac, of: queued.name, store)
+        try deleteBootConfig(queued.mac, of: queued.name, store)
+        do {
+            try saveQueue(replacing: unbound, in: store)
+        } catch {
+            refreshBootConfig(queued, store)
+            throw error
+        }
     }
 
     private func saveQueue(replacing record: QueueRecord, in store: MachineStore) throws(ProvisionerFailure) {

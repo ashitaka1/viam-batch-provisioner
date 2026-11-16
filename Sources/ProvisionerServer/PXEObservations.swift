@@ -26,6 +26,7 @@ extension Provisioner {
     }
 
     private func observeOffer(_ mac: String) async {
+        syncBootConfig(mac)
         guard let (queued, store, found) = await boundMachine(mac), found.completedAt == nil else { return }
         var record = found
         let current = record.steps.filter { $0.attempt == record.attempt }.map(\.step)

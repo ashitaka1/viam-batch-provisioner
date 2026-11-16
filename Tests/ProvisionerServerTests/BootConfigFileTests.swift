@@ -96,3 +96,66 @@ func failedWriteLeavesTheQueueUnchanged() async throws {
     #expect(await failure { try await provisioner.bind("m-1", mac: mac1) }?.kind == "internal")
     #expect(try await provisioner.entry("m-1").mac == nil)
 }
+
+/// `m-1` bound to `mac1`, then the boot config directory made read-only for the test's body.
+private func withReadOnlyBootConfigs(_ body: (Provisioner, DataDirectory) async throws -> Void) async throws {
+    let (provisioner, dir) = try await queued()
+    _ = try await provisioner.bind("m-1", mac: mac1)
+    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.bootConfigs.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.bootConfigs.path) }
+    try await body(provisioner, dir)
+}
+
+@Test(.enabled(if: directoryPermissionsApply, "root ignores the read-only boot config directory"))
+func failedDeleteKeepsTheBindingOnUnbind() async throws {
+    try await withReadOnlyBootConfigs { provisioner, dir in
+        #expect(await failure { try await provisioner.unbind("m-1") }?.kind == "internal")
+        let entry = try await provisioner.entry("m-1")
+        #expect(entry.mac == mac1)
+        let expected = try installConfig("m-1", dir)
+        #expect(text(dir.bootConfig(mac1)) == expected)
+    }
+}
+
+@Test(.enabled(if: directoryPermissionsApply, "root ignores the read-only boot config directory"))
+func failedDeleteKeepsTheEntryOnRemove() async throws {
+    try await withReadOnlyBootConfigs { provisioner, _ in
+        #expect(await failure { try await provisioner.remove("m-1") }?.kind == "internal")
+        let entry = try await provisioner.entry("m-1")
+        #expect(entry.mac == mac1)
+    }
+}
+
+@Test(.enabled(if: directoryPermissionsApply, "root ignores the read-only boot config directory"))
+func failedRebindKeepsTheOldBinding() async throws {
+    try await withReadOnlyBootConfigs { provisioner, dir in
+        #expect(await failure { try await provisioner.bind("m-1", mac: mac2) }?.kind == "internal")
+        let entry = try await provisioner.entry("m-1")
+        #expect(entry.mac == mac1)
+        #expect(text(dir.bootConfig(mac2)) == nil)
+    }
+}
+
+@Test func aPXEOfferBringsTheBootConfigBackInStep() async throws {
+    let (provisioner, dir) = try await queued()
+    _ = try await provisioner.bind("m-1", mac: mac1)
+    try FileManager.default.removeItem(at: dir.bootConfig(mac1))
+    try Data("stale".utf8).write(to: dir.bootConfig(mac2))
+
+    await provisioner.observe(.offered(mac: mac1))
+    await provisioner.observe(.offered(mac: mac2))
+    #expect(text(dir.bootConfig(mac1)) == (try installConfig("m-1", dir)))
+    #expect(text(dir.bootConfig(mac2)) == nil)
+}
+
+@Test func anUnreadableQueueStartsWithEveryMachineBootingFromDisk() async throws {
+    let root = try temporaryDirectory()
+    let (provisioner, dir) = try await queued(root: root)
+    _ = try await provisioner.bind("m-1", mac: mac1)
+    try FileManager.default.removeItem(at: dir.menu)
+    try Data("not json".utf8).write(to: dir.queue)
+
+    _ = try makeImageProvisioner(serverPort: 8234, root: root)
+    #expect(text(dir.menu) == menuConfig(port: 8234, bootImagePath: "ubuntu/\(testImageName)"))
+    #expect(text(dir.bootConfig(mac1)) == nil)
+}

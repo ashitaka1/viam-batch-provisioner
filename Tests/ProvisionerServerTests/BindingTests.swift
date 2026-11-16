@@ -21,7 +21,8 @@ func macsAreNormalised(input: String, expected: String) {
     #expect(normalizedMAC(input) == expected)
 }
 
-@Test(arguments: ["aa:bb:cc:00:00", "zz:bb:cc:00:00:01", "aabbcc000001", "aa:bb-cc:00:00:01", "", "aa:bb:cc:00:00:01:02"])
+@Test(arguments: ["aa:bb:cc:00:00", "zz:bb:cc:00:00:01", "aabbcc000001", "aa:bb-cc:00:00:01", "", "aa:bb:cc:00:00:01:02",
+                  "ａａ:bb:cc:00:00:01"])
 func malformedMACsAreRefused(input: String) {
     #expect(normalizedMAC(input) == nil)
 }
@@ -34,6 +35,16 @@ func malformedMACsAreRefused(input: String) {
     #expect(entry.assignedAt == t0)
     #expect(await eventSummary(provisioner).last == "machine-assigned m-1 \(mac1)")
     #expect(await provisioner.counts()?.assigned == 1)
+}
+
+@Test func unbindKeepsAssignedOnceTheMachineReachedAStep() async throws {
+    let provisioner = try await queued()
+    _ = try await provisioner.bind("m-1", mac: mac1)
+    await provisioner.observe(.offered(mac: mac1))
+    try await provisioner.unbind("m-1")
+    let entry = try await provisioner.entry("m-1")
+    #expect(entry.mac == nil)
+    #expect(entry.status == .assigned)
 }
 
 @Test func unbindReturnsTheEntryToQueued() async throws {

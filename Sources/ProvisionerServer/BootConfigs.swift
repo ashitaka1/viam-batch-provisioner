@@ -1,3 +1,4 @@
+import Foundation
 import Logging
 
 /// `grub/grub.cfg` in the TFTP root. A machine with a boot config at
@@ -52,14 +53,24 @@ func bootConfig(for record: QueueRecord, store: MachineStore, port: Int, bootIma
 }
 
 /// Writes the menu and every bound entry's boot config, after clearing the old
-/// ones. Failures are logged and the server serves on.
-func rewriteBootConfigs(_ store: MachineStore, port: Int, bootImage: BootImage?, logger: Logger) {
+/// ones. With the queue unreadable, every machine gets the menu and boots from
+/// disk. Failures are logged and the server serves on.
+func rewriteBootConfigs(_ dir: DataDirectory, _ store: MachineStore?, port: Int, bootImage: BootImage?, logger: Logger) {
+    let fm = FileManager.default
     do {
-        try store.writeMenu(menuConfig(port: port, bootImagePath: bootImage?.path))
-        try store.clearBootConfigs()
+        try fm.createDirectory(at: dir.menu.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try writeAtomically(Data(menuConfig(port: port, bootImagePath: bootImage?.path).utf8), to: dir.menu)
     } catch {
         logger.error("writing the boot menu failed: \(error)")
     }
+    for file in (try? fm.contentsOfDirectory(atPath: dir.bootConfigs.path)) ?? [] {
+        do {
+            try fm.removeItem(at: dir.bootConfigs.appending(path: file))
+        } catch {
+            logger.error("removing the stale boot config \(file) failed: \(error)")
+        }
+    }
+    guard let store else { return }
     for record in store.queue {
         guard let mac = record.mac else { continue }
         do {
@@ -78,6 +89,28 @@ extension Provisioner {
             try store.writeBootConfig(bootConfig(for: record, store: store, port: serverPort, bootImage: bootImage), mac: mac)
         } catch {
             logger.error("writing the boot config of \(record.name) failed: \(error)")
+        }
+    }
+
+    /// Removes the boot config for `mac` before a change to the queue that unbinds it.
+    func deleteBootConfig(_ mac: String?, of name: String, _ store: MachineStore) throws(ProvisionerFailure) {
+        guard serverPort != nil, let mac else { return }
+        do {
+            try store.writeBootConfig(nil, mac: mac)
+        } catch {
+            logger.error("removing the boot config of \(name) failed: \(error)")
+            throw .internal("the boot config of \(name) could not be removed")
+        }
+    }
+
+    /// Brings `mac`'s boot config in step with the queue before GRUB fetches it,
+    /// so a write that failed earlier is repaired on the machine's next PXE boot.
+    func syncBootConfig(_ mac: String) {
+        guard let store, let normalized = normalizedMAC(mac) else { return }
+        if let record = store.queue.first(where: { $0.mac == normalized }) {
+            refreshBootConfig(record, store)
+        } else {
+            removeBootConfig(normalized, of: normalized, store)
         }
     }
 

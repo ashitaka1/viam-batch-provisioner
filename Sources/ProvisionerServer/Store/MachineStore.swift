@@ -91,11 +91,6 @@ final class MachineStore {
 
     // MARK: - Boot configs: a copy of the queue's bindings that TFTP serves
 
-    func writeMenu(_ text: String) throws {
-        try FileManager.default.createDirectory(at: dir.menu.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try writeAtomically(Data(text.utf8), to: dir.menu)
-    }
-
     /// Writes `mac`'s boot config, or removes it when `text` is nil.
     func writeBootConfig(_ text: String?, mac: String) throws {
         let url = dir.bootConfig(mac)
@@ -105,12 +100,5 @@ final class MachineStore {
         }
         try FileManager.default.createDirectory(at: dir.bootConfigs, withIntermediateDirectories: true)
         try writeAtomically(Data(text.utf8), to: url)
-    }
-
-    func clearBootConfigs() throws {
-        let fm = FileManager.default
-        for file in (try? fm.contentsOfDirectory(atPath: dir.bootConfigs.path)) ?? [] {
-            try fm.removeItem(at: dir.bootConfigs.appending(path: file))
-        }
     }
 }

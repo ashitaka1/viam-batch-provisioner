@@ -36,6 +36,10 @@ private func bind(_ client: any TestClientProtocol, _ name: String, _ mac: Strin
 
         let unbound = try await client.execute(uri: "/api/v1/queue/m-1/binding", method: .delete)
         #expect(unbound.status == .noContent)
+        let after = try await client.execute(uri: "/api/v1/queue/m-1", method: .get)
+        let entryAfter = try StoreCoding.decoder.decode(Schemas.QueueEntry.self, from: Data(buffer: after.body))
+        #expect(entryAfter.mac == nil)
+        #expect(entryAfter.status == .queued)
     }
 }
 

@@ -51,8 +51,8 @@ actor Provisioner {
         for problem in store?.skippedRecords ?? [] {
             logger.error("skipping machine record: \(problem)")
         }
-        if let serverPort, let store {
-            rewriteBootConfigs(store, port: serverPort, bootImage: bootImage, logger: logger)
+        if let serverPort {
+            rewriteBootConfigs(dataDirectory, store, port: serverPort, bootImage: bootImage, logger: logger)
         }
     }
 
@@ -112,14 +112,15 @@ actor Provisioner {
         if derivedStatus(store.machine(record.key), bound: record.mac != nil) == .installing {
             throw .alreadyAssigned(record.name)
         }
+        try deleteBootConfig(record.mac, of: record.name, store)
         do {
             try store.remove(key: record.key)
             try store.save(queue: store.queue.filter { $0.key != record.key })
         } catch {
             logger.error("removing \(record.name) failed: \(error)")
+            refreshBootConfig(record, store)
             throw .internal("\(record.name) could not be removed")
         }
-        removeBootConfig(record.mac, of: record.name, store)
     }
 
     func counts() -> Components.Schemas.QueueCounts? {
