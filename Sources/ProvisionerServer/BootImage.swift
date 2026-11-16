@@ -3,10 +3,13 @@ import Foundation
 /// The OS image PXE machines download from `/pxe/{name}/{fileName}`.
 struct BootImage: Sendable {
     let url: URL
+    /// The image's path under `--files`, as `--boot-image` gave it.
+    let path: String
     let fileName: String
     let osName: String
 
     init(files: URL, path: String) throws {
+        self.path = path
         url = files.appending(path: path)
         fileName = url.lastPathComponent
         osName = ProvisionerServer.osName(forImageNamed: fileName)
