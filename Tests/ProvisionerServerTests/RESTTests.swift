@@ -54,6 +54,17 @@ private let jsonHeaders: HTTPFields = [.contentType: "application/json"]
     }
 }
 
+@Test func clientReachesServerAtAPickedAddress() async throws {
+    try await withLiveServer { _, client, _ in
+        let picked = try #require(DiscoveredServer.manual(host: "localhost", port: client.port!))
+        let provisioner = ProvisionerClient(baseURL: picked.baseURL)
+
+        _ = try await provisioner.provision([ProvisionRequest(name: "m-1")])
+
+        #expect(try await provisioner.queue().entries.map(\.name) == ["m-1"])
+    }
+}
+
 @Test func entryAndRemove() async throws {
     try await withLiveServer { provisioner, _, _ in
         _ = try await provisioner.provision([ProvisionRequest(name: "m-1")])

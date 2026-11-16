@@ -25,7 +25,15 @@ public struct ProvisionerClient: Sendable {
     }
 
     package init(baseURL: URL, transport: any ClientTransport) {
-        client = Client(serverURL: baseURL, transport: transport)
+        client = Client(serverURL: Self.serverURL(baseURL), transport: transport)
+    }
+
+    /// The transport appends each operation's path to the base URL's path, so a
+    /// base ending in `/` would request `//api/v1/...`.
+    static func serverURL(_ baseURL: URL) -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: true) else { return baseURL }
+        while components.percentEncodedPath.hasSuffix("/") { components.percentEncodedPath.removeLast() }
+        return components.url ?? baseURL
     }
 
     public func provision(_ requests: [ProvisionRequest]) async throws(ProvisionerError) -> [ProvisionResult] {
