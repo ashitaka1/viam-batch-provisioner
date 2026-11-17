@@ -69,6 +69,29 @@ public final class ServerBrowser: Sendable {
         components.path = "/"
         return components.url
     }
+
+    /// The URL to use for a server Bonjour resolved at `resolved`: the host its
+    /// `/status` advertises, on the resolved API port, when that host answers.
+    /// A multi-homed server is reachable on every interface, and Bonjour may
+    /// resolve any of them.
+    static func preferredURL(resolved: URL, status: @Sendable (URL) async throws -> String?) async -> URL {
+        guard let address = try? await status(resolved),
+              let host = URLComponents(string: "http://\(address)")?.host,
+              let port = resolved.port,
+              let candidate = baseURL(host: host, port: port),
+              candidate != resolved,
+              (try? await status(candidate)) != nil
+        else { return resolved }
+        return candidate
+    }
+
+    /// The address a server's `/status` advertises, asked with a short timeout.
+    static func advertisedAddress(at url: URL) async throws -> String? {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 5
+        let client = ProvisionerClient(baseURL: url, session: URLSession(configuration: configuration))
+        return try await client.status().address
+    }
 }
 
 /// One browse. All state is confined to `queue`.
@@ -79,6 +102,7 @@ private final class BrowseSession: @unchecked Sendable {
         for: .bonjourWithTXTRecord(type: ServerBrowser.serviceType, domain: nil), using: .tcp)
     private var resolving: [NWEndpoint: NWConnection] = [:]
     private var found: [NWEndpoint: DiscoveredServer] = [:]
+    private var preferring: [NWEndpoint: Task<Void, Never>] = [:]
 
     init(continuation: AsyncThrowingStream<[DiscoveredServer], any Error>.Continuation) {
         self.continuation = continuation
@@ -102,6 +126,8 @@ private final class BrowseSession: @unchecked Sendable {
             browser.cancel()
             resolving.values.forEach { $0.cancel() }
             resolving.removeAll()
+            preferring.values.forEach { $0.cancel() }
+            preferring.removeAll()
         }
     }
 
@@ -113,6 +139,9 @@ private final class BrowseSession: @unchecked Sendable {
 
         for endpoint in resolving.keys where !wanted.contains(endpoint) {
             resolving.removeValue(forKey: endpoint)?.cancel()
+        }
+        for endpoint in preferring.keys where !wanted.contains(endpoint) {
+            preferring.removeValue(forKey: endpoint)?.cancel()
         }
         let before = found.count
         found = found.filter { wanted.contains($0.key) }
@@ -139,6 +168,7 @@ private final class BrowseSession: @unchecked Sendable {
                     if let url = ServerBrowser.baseURL(host: "\(host)", port: Int(port.rawValue)) {
                         found[endpoint] = DiscoveredServer(name: name, baseURL: url)
                         publish()
+                        prefer(endpoint, resolved: url)
                     }
                 }
                 fallthrough
@@ -150,6 +180,23 @@ private final class BrowseSession: @unchecked Sendable {
             }
         }
         connection.start(queue: queue)
+    }
+
+    /// Moves a found server to the address it advertises, once that answers.
+    private func prefer(_ endpoint: NWEndpoint, resolved: URL) {
+        preferring[endpoint] = Task { [weak self, queue] in
+            let url = await ServerBrowser.preferredURL(resolved: resolved, status: ServerBrowser.advertisedAddress)
+            guard !Task.isCancelled, let self else { return }
+            queue.async { self.move(endpoint, from: resolved, to: url) }
+        }
+    }
+
+    private func move(_ endpoint: NWEndpoint, from resolved: URL, to url: URL) {
+        guard preferring.removeValue(forKey: endpoint) != nil, url != resolved,
+              var server = found[endpoint], server.baseURL == resolved else { return }
+        server.baseURL = url
+        found[endpoint] = server
+        publish()
     }
 
     private func publish() {

@@ -24,6 +24,10 @@ public struct ProvisionerClient: Sendable {
         self.init(baseURL: baseURL, transport: URLSessionTransport())
     }
 
+    init(baseURL: URL, session: URLSession) {
+        self.init(baseURL: baseURL, transport: URLSessionTransport(configuration: .init(session: session)))
+    }
+
     package init(baseURL: URL, transport: any ClientTransport) {
         client = Client(serverURL: Self.serverURL(baseURL), transport: transport)
     }
