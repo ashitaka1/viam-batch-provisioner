@@ -1,10 +1,10 @@
 # 5. Reset boot order to disk-first after install
 
+Status: Accepted
+
 Date: 2026-04-17
 
-## Status
-
-Accepted
+Issue: [Minisforum UM890 BIOS ignores efibootmgr boot order (#4)](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)
 
 ## Context
 
@@ -16,4 +16,10 @@ Targets are set to network-boot first so they PXE without a keypress. After inst
 
 ## Consequences
 
-Machines whose firmware honors `BootOrder` boot from disk after install. Some firmware ignores it (#4), and the guard remains the safety net. A disk-first machine never PXEs again after install, so the server can't observe its completion.
+- Machines whose firmware honors `BootOrder` boot from disk after install.
+- Some firmware ignores `BootOrder` ([Minisforum UM890 BIOS ignores efibootmgr boot order (#4)](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)), and the guard remains the safety net.
+- A disk-first machine never PXEs again after install, so the server can't observe its completion.
+
+## Alternatives
+
+None recorded.

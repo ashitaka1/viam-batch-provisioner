@@ -1,10 +1,8 @@
 # 3. Network-boot with GRUB from the Ubuntu ISO
 
+Status: Accepted
+
 Date: 2026-03-31
-
-## Status
-
-Accepted
 
 ## Context
 
@@ -16,4 +14,10 @@ dnsmasq serves GRUB extracted from the Ubuntu ISO (`just setup`). GRUB loads the
 
 ## Consequences
 
-One bootloader, from the same ISO as the installer. The binaries are extracted per host and kept out of git. A guard file for each MAC in `netboot/grub/provisioned/` can stop a provisioned machine from reinstalling, because `grub.cfg` sources them.
+- The chain has one bootloader, and it comes from the same ISO as the installer.
+- The binaries are extracted per host and kept out of git.
+- A guard file for each MAC in `netboot/grub/provisioned/` can stop a provisioned machine from reinstalling, because `grub.cfg` sources the guard files.
+
+## Alternatives
+
+- Keep the netboot.xyz and iPXE chain. That chain adds a second bootloader with its own menu and assets.

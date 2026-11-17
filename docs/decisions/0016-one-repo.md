@@ -1,10 +1,8 @@
 # 16. Keep v2 and the current tooling in one repo
 
+Status: Accepted
+
 Date: 2026-10-02
-
-## Status
-
-Accepted
 
 ## Context
 
@@ -16,4 +14,9 @@ The Swift package lives in this repo beside the existing tooling, which keeps wo
 
 ## Consequences
 
-One copy of the shared assets. The existing tooling remains available for debugging and one-off operations after the Swift server ships.
+- There is one copy of the shared assets.
+- The existing tooling remains available for debugging and one-off operations after the Swift server ships.
+
+## Alternatives
+
+- Put the Swift package in a separate repo. A separate repo would duplicate the shared assets or need a submodule.

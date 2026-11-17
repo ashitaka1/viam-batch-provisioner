@@ -1,10 +1,8 @@
 # 1. Run dnsmasq natively
 
+Status: Accepted
+
 Date: 2026-03-27
-
-## Status
-
-Accepted
 
 ## Context
 
@@ -16,4 +14,10 @@ dnsmasq runs on the host, installed from Homebrew, in proxy mode alongside the L
 
 ## Consequences
 
-The host needs `brew install dnsmasq` and root to bind ports 67 and 69. Only nginx runs in Docker. `just serve` and the dnsmasq LaunchDaemon start and stop it by pid file.
+- The host needs `brew install dnsmasq` and root to bind ports 67 and 69.
+- Only nginx runs in Docker.
+- `just serve` and the dnsmasq LaunchDaemon start and stop dnsmasq by pid file.
+
+## Alternatives
+
+- Run dnsmasq in a container. Docker Desktop can't give the container host networking.

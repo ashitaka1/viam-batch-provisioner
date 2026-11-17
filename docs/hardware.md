@@ -1,17 +1,17 @@
 # Hardware
 
-Per-model preparation for x86 targets. Each model needs this once, with a monitor and keyboard attached. Blanks (`—`) are unverified.
+This page describes the preparation that each x86 target model needs. Each model needs it once, with a monitor and keyboard attached. A blank (`—`) means the value is unverified.
 
 ## Every machine
 
-- [ ] Note the BIOS version; update only if this page lists a newer validated one.
-- [ ] Enable UEFI network boot (PXE over IPv4). Save and reboot: most firmware lists the PXE entry only after that.
-- [ ] Disable Secure Boot. The PXE chain serves GRUB without shim ([#129](https://github.com/ashitaka1/viam-batch-provisioner/issues/129)).
-- [ ] Boot order: disk, USB, then network, with Restore on AC Power Loss set to Power On. A machine with a blank disk installs from a stick or over PXE when plugged in; an installed machine boots its disk.
-- [ ] A machine that arrives with an OS installed: boot the network once from the boot menu.
-- [ ] Wake-on-LAN, where offered: Power On – Normal Boot.
-- [ ] Cable the onboard port listed below to the serving network. It becomes the uplink; without `ROBOT_NET_PORT`, the next `enp*` port becomes the robot network. With `ROBOT_NET_PORT` set to the model's robot-network port below, that port carries the robot network and any other port can be cabled.
-- [ ] Record the cabled port's MAC. The queue identifies the machine by it.
+- [ ] Note the BIOS version. Update it only if this page lists a newer validated one.
+- [ ] Enable UEFI network boot (PXE over IPv4). Save and reboot. Most firmware lists the PXE entry only after that.
+- [ ] Disable Secure Boot. The PXE chain serves GRUB without shim (issue [Boot through shim so Secure Boot can stay on (#129)](https://github.com/ashitaka1/viam-batch-provisioner/issues/129)).
+- [ ] Set the boot order to disk, USB, then network, and set Restore on AC Power Loss to Power On. A machine with a blank disk installs from a stick or over PXE when plugged in, and an installed machine boots its disk.
+- [ ] If a machine arrives with an OS installed, boot the network once from the boot menu.
+- [ ] Where Wake-on-LAN is offered, set it to Power On – Normal Boot.
+- [ ] Cable the onboard port listed below to the serving network. That port becomes the uplink. Without `ROBOT_NET_PORT`, the next `enp*` port becomes the robot network. With `ROBOT_NET_PORT` set to the model's robot-network port below, that port carries the robot network and any other port can be cabled.
+- [ ] Record the MAC of the cabled port. The queue identifies the machine by that MAC.
 - [ ] To reinstall a machine that already boots its disk, set a one-time network boot from its running OS: `sudo efibootmgr` lists the entries, and `sudo efibootmgr --bootnext <PXE entry> && sudo reboot` boots the network once and leaves the order alone.
 
 ## ASUS NUC
@@ -28,11 +28,11 @@ Per-model preparation for x86 targets. Each model needs this once, with a monito
 | Robot-network port | `enp86s0` |
 | Install time | 7.5 min from PXE to `done` |
 
-- Boot → Boot Configuration: enable UEFI PXE, save, reboot. The PXE entry then appears under Boot Option #1.
+- Under Boot → Boot Configuration, enable UEFI PXE, save, and reboot. The PXE entry then appears under Boot Option #1.
 - Each port has an IPv4 and an IPv6 PXE entry.
-- The installer's disk-first boot order holds.
-- Wake events: Wake-on-LAN from S4/S5 and Wake System from S5 offer Stay Off, Power On – Normal Boot, Power On – PXE Boot.
-- Restore on AC Power Loss: —
+- The disk-first boot order that the installer sets stays in effect.
+- The Wake-on-LAN from S4/S5 and Wake System from S5 settings offer Stay Off, Power On – Normal Boot, Power On – PXE Boot.
+- The Restore on AC Power Loss setting is unverified (`—`).
 
 ## System76 Meerkat (single NIC)
 
@@ -47,7 +47,7 @@ Per-model preparation for x86 targets. Each model needs this once, with a monito
 | Robot-network port | none: set `ROBOT_NET_ADDRESS=none`, or leave `ROBOT_NET_PORT` unset |
 
 - With one port, the machine has no robot network after install.
-- Newer Meerkats carry an Intel BE200 with no WiFi firmware in Ubuntu 24.04 ([#3](https://github.com/ashitaka1/viam-batch-provisioner/issues/3)).
+- Newer Meerkats have an Intel BE200, which has no WiFi firmware in Ubuntu 24.04 (issue [WiFi fails on newer Intel chips (BE200/7740) — missing firmware (#3)](https://github.com/ashitaka1/viam-batch-provisioner/issues/3)).
 
 ## System76 Meerkat (CRARL579, dual I226-V)
 
@@ -70,7 +70,7 @@ Per-model preparation for x86 targets. Each model needs this once, with a monito
 | Port to cable | — |
 | Robot-network port | — |
 
-- The firmware ignores the boot order the installer sets. Before or after the install, put NVMe above Network in Fixed Boot Order ([#4](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)).
+- The firmware ignores the boot order that the installer sets. Before or after the install, put NVMe above Network in Fixed Boot Order (issue [Minisforum UM890 BIOS ignores efibootmgr boot order (#4)](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)).
 
 ## Advantech MIC-770 V3
 
@@ -85,7 +85,7 @@ Per-model preparation for x86 targets. Each model needs this once, with a monito
 
 ## AAEON CEXD-INTRBL
 
-Installs over PXE on the HWE kernel. Port pinning and a second SSD are open in [#128](https://github.com/ashitaka1/viam-batch-provisioner/issues/128).
+The machine installs over PXE on the HWE kernel. Port pinning and a second SSD are open in [Provision the AAEON CEXD-INTRBL (#128)](https://github.com/ashitaka1/viam-batch-provisioner/issues/128).
 
 | | |
 |---|---|
@@ -100,9 +100,9 @@ Installs over PXE on the HWE kernel. Port pinning and a second SSD are open in [
 | Robot-network port | `enp3s0` |
 | Install time | 10.6 min from PXE to `done` |
 
-- The firmware puts PXE back ahead of the disk after the installer sets disk-first, and its PXE ROM can take over a minute to fetch GRUB. Set the boot order by hand.
-- After install without `ROBOT_NET_PORT`: `enp2s0` uplink, `enp3s0` robot network, `enp4s0` and `enp5s0` unmanaged and administratively down, so their link lights stay off. With `ROBOT_NET_PORT=enp3s0`: `enp3s0` robot network, the other three DHCP.
+- The firmware puts PXE back ahead of the disk after the installer sets disk first, and its PXE ROM can take over a minute to fetch GRUB. Set the boot order by hand.
+- After an install without `ROBOT_NET_PORT`, `enp2s0` is the uplink, `enp3s0` is the robot network, and `enp4s0` and `enp5s0` are unmanaged and administratively down, so their link lights stay off. With `ROBOT_NET_PORT=enp3s0`, `enp3s0` is the robot network and the other three ports use DHCP.
 - The robot-network address appears on `enp3s0` only while it has link; `networkctl status enp3s0` reads `no-carrier (configured)` without one.
-- Kernel: the installer boots 6.17 HWE; the installed system runs the current HWE kernel (7.0 as of 2026-11).
-- Storage: one 256 GB NVMe on its own root port; no VMD controller. The E-key slot ships empty, so there is no WiFi.
-- The NPU (`intel_vpu`, `/dev/accel0`) and IPU (`intel-ipu7`) are enabled under BIOS R1.8 and run on in-kernel drivers on the 7.0 HWE kernel, so they load under Secure Boot without a MOK.
+- The installer boots the 6.17 HWE kernel, and the installed system runs the current HWE kernel (7.0 as of 2026-11).
+- The machine has one 256 GB NVMe on its own root port and no VMD controller. The E-key slot ships empty, so there is no WiFi.
+- The NPU (`intel_vpu`, `/dev/accel0`) and IPU (`intel-ipu7`) are enabled under BIOS R1.8 and run on in-kernel drivers on the 7.0 HWE kernel, so they load under Secure Boot without a MOK (machine owner key).

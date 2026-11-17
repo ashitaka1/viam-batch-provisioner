@@ -2,9 +2,7 @@
 
 Date: 2026-11-01
 
-## Status
-
-Accepted
+Status: Accepted
 
 ## Context
 
@@ -16,4 +14,9 @@ Pairing an org again replaces its key, and the app deletes the old key in Viam. 
 
 ## Consequences
 
-Replacing a key whose predecessor is already gone shows no warning. A NOT_FOUND caused by a wrong key ID rather than a deleted key is also hidden. Reporting NOT_FOUND as a failure would warn the operator about a key that no longer needs deleting.
+- Replacing a key whose predecessor is already gone shows no warning.
+- A NOT_FOUND caused by a wrong key ID rather than a deleted key is also hidden.
+
+## Alternatives
+
+- Reporting NOT_FOUND as a failure would warn the operator about a key that no longer needs deleting.

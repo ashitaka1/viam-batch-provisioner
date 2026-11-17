@@ -4,11 +4,11 @@ Low-touch provisioning for x86 Linux machines (PXE) and Raspberry Pis (SD card).
 
 ## What it does
 
-Boots a target machine over the network (x86) or from a pre-flashed SD card (Pi) and runs an unattended install. The result is a host with an OS, hostname, user account, SSH, WiFi, and — in `full` or `agent` mode — viam-agent and a Tailscale membership.
+The provisioner boots a target machine over the network (x86) or from a pre-flashed SD card (Pi) and runs an unattended install. The result is a host with an OS, hostname, user account, SSH, WiFi, and — in `full` or `agent` mode — viam-agent and a Tailscale membership.
 
 **x86 machines** (Meerkats, NUCs, Minisforum, etc.) install over the network. Two modes:
-- **PXE** — the target's UEFI ROM does network boot; the host runs a proxy DHCP + TFTP server. Use when one operator has the network to themselves.
-- **USB** — flash a boot stick for each machine whose GRUB config points at a fixed server IP. Use when multiple operators share a network, or when the LAN's DHCP server won't tolerate a proxy.
+- **PXE**: The target's UEFI ROM does network boot, and the host runs a proxy DHCP + TFTP server. Use PXE when one operator has the network to themselves.
+- **USB**: You flash a boot stick for each machine, and the stick's GRUB config points at a fixed server IP. Use USB when multiple operators share a network, or when the LAN's DHCP server won't tolerate a proxy.
 
 **Raspberry Pis** boot from SD cards flashed on the workstation.
 
@@ -22,21 +22,20 @@ Boots a target machine over the network (x86) or from a pre-flashed SD card (Pi)
 
 ## Prerequisites
 
-- macOS or Linux workstation
-- Docker with the `compose` plugin (Docker Desktop, or a CLI engine such as Colima or OrbStack)
-- Python 3
-- `just` — command runner (`brew install just`)
-- `dnsmasq` — for PXE boot (`brew install dnsmasq`)
-- `p7zip` — for ISO extraction (`brew install p7zip`)
+- You need a workstation that runs macOS or Linux.
+- You need Docker with the `compose` plugin (Docker Desktop, or a CLI engine such as Colima or OrbStack).
+- You need Python 3.
+- You need `just`, the command runner (`brew install just`).
+- You need `dnsmasq` for PXE boot (`brew install dnsmasq`).
+- You need `p7zip` for ISO extraction (`brew install p7zip`).
 
-For Viam `full` mode:
-- Viam CLI (`brew install viam`), for the bash tooling. The macOS app doesn't use it.
+For Viam `full` mode, you also need the Viam CLI (`brew install viam`) for the bash tooling. The macOS app doesn't use it.
 
-The macOS app signs in to Viam with API keys it keeps in the login keychain. Create a key for an organization or a location at app.viam.com (or with `viam organizations api-key create` / `viam locations api-key create`), then click **Add Viam API Key…**, paste its ID and key, and choose **Organization** or **Location** to match the key. The app checks the key with Viam and works out which organization or location it reaches; when the key reaches several, it asks for the ID. A key that fails is not stored. The app acts with each key's access alone, and holds any number of keys: an environment uses the key that covers its location, preferring a location key, and an environment no key covers reads "Not reachable with this key" in the sidebar, with Provision disabled. **Settings → API Keys** lists the keys by what they reach (`Acme · organization`, `Shop floor · Acme`) with each key ID's first 8 characters; **Remove** deletes the key from this Mac only, and it stays valid at Viam. With no keys left the app is signed out. The app talks to `https://app.viam.com`; `defaults write com.bringingfire.viam-provisioner ViamBaseURL <url>` points it elsewhere.
+The macOS app signs in to Viam with API keys it keeps in the login keychain. Create a key for an organization or a location at app.viam.com (or with `viam organizations api-key create` / `viam locations api-key create`), then click **Add Viam API Key…**, paste its ID and key, and choose **Organization** or **Location** to match the key. The app checks the key with Viam and works out which organization or location it reaches; when the key reaches several, it asks for the ID. A key that fails is not stored. The app acts with each key's access alone, and stores any number of keys. An environment uses the key that covers its location, preferring a location key, and an environment no key covers reads "Not reachable with this key" in the sidebar, with Provision disabled. **Settings → API Keys** lists the keys by what they reach (`Acme · organization`, `Shop floor · Acme`) with each key ID's first 8 characters; **Remove** deletes the key from this Mac only, and it stays valid at Viam. With no keys left, the app is signed out. The app talks to `https://app.viam.com`; `defaults write com.bringingfire.viam-provisioner ViamBaseURL <url>` points it elsewhere.
 
 The app provisions into a running server. Choose the server from the toolbar: servers on the network appear by name (allow Local Network access when macOS asks), and **Connect to Address…** takes a host and the API port (8235). Select an environment and click **Provision…** to queue a batch: in full mode the app creates each machine in Viam and sends its credentials; agent and OS-only batches send names only. **Queue** shows each machine live, from waiting through installed or failed, with its MAC, times and failure reason. Against the Swift server it shows the machine's provisioning steps (Found, Booting, Downloading the OS with a percentage, Installing, Configuring, Installed, which reads "Installed · restarting" for a full-mode machine until Viam reports it online, then Viam online), and a failure names its step; against the Python server it shows the install stage. Each install that completes or fails posts a notification (allow notifications when macOS asks); a later outcome for the same machine replaces the earlier one. **History** lists the batches provisioned from this Mac. The Python server installs from `config/site.env`, not from the environment's account, network and package settings.
 
-**Settings → Server → Host a provisioning server on this Mac** runs the Swift server as a launch daemon that starts at boot, before anyone logs in, and keeps running when the app quits. The first time, macOS asks for an administrator's password to create the hidden account `_viamprovisioner` the server runs as, and its directory under `/Library/Application Support/Viam Provisioner/Server`; then turn on Viam Provisioner under Background App Activity in System Settings (**Open Login Items** goes there). The app must be in the Applications folder: the server runs as `_viamprovisioner`, which can't open a copy inside a closed home folder; the toggle says so, and if the app later lands where the account can't open it while hosting is on, Settings, the main window and `just server-daemon status` say the server can't start. Turning the toggle off stops the server and keeps its data. **Remove Server Data…** stops it and, after an administrator's password, deletes the directory and the account. The account takes the highest free ID from 499 down to 401; if another user or group later holds the same ID, as a macOS update could add, the main window shows a banner naming it, since that account can read and change the server's data. The server daemon serves HTTP on port 8234, the port the bash tooling's nginx uses, so don't host server mode on a Mac that runs `just serve` or `just up`. Endpoint security tools may flag the hidden account's creation; it is `_viamprovisioner`, made by Viam Provisioner. The server daemon answers PXE only once `pxe.json` in its data directory names the interface to serve on; the app doesn't write that file yet, so `CONTRIBUTING.md` gives the manual steps.
+**Settings → Server → Host a provisioning server on this Mac** runs the Swift server as a launch daemon that starts at boot, before anyone logs in, and keeps running when the app quits. The first time, macOS asks for an administrator's password to create the hidden account `_viamprovisioner` the server runs as, and its directory under `/Library/Application Support/Viam Provisioner/Server`; then turn on Viam Provisioner under Background App Activity in System Settings (**Open Login Items** goes there). The app must be in the Applications folder, because the server runs as `_viamprovisioner`, which can't open a copy inside a closed home folder. The toggle says so, and if the app later lands where the account can't open it while hosting is on, Settings, the main window and `just server-daemon status` say the server can't start. Turning the toggle off stops the server and keeps its data. **Remove Server Data…** stops it and, after an administrator's password, deletes the directory and the account. The account takes the highest free ID from 499 down to 401; if another user or group later has the same ID, as a macOS update could add, the main window shows a banner naming it, since that account can read and change the server's data. The server daemon serves HTTP on port 8234, the port the bash tooling's nginx uses, so don't host server mode on a Mac that runs `just serve` or `just up`. Endpoint security tools may flag the hidden account's creation. The account is `_viamprovisioner`, made by Viam Provisioner. The server daemon answers PXE only once `pxe.json` in its data directory names the interface to serve on; the app doesn't write that file yet, so `CONTRIBUTING.md` gives the manual steps.
 
 Run `just doctor` at any time to verify all of the above are installed. The
 setup wizard runs the same check before prompting, and creates the Python
@@ -98,7 +97,7 @@ without a TCC grant).
 
 ### Provisioning x86 machines (USB sticks)
 
-Each stick's GRUB config carries the host's server IP and the target's
+Each stick's GRUB config contains the host's server IP and the target's
 hostname on the kernel cmdline, so two operators on the same subnet can
 provision in parallel without colliding.
 
@@ -117,20 +116,20 @@ labels it on disk. To flash one stick: `just flash-usb /dev/disk5 my-machine-1`.
 
 ## After provisioning
 
-- **SSH**: `ssh <name>`, through the `~/.ssh/config` Host block the setup wizard offers to add
-- **Viam**: machines appear at app.viam.com (`full` mode)
-- **Tailscale**: machines join your tailnet (if an auth key is configured)
+- **SSH**: Connect with `ssh <name>`, through the `~/.ssh/config` Host block the setup wizard offers to add.
+- **Viam**: In `full` mode, machines appear at app.viam.com.
+- **Tailscale**: If an auth key is configured, machines join your tailnet.
 
 ## One-time BIOS setup (x86 only)
 
 Each x86 machine model needs a one-time BIOS configuration with a monitor attached:
 
-1. **Enable PXE/Network Boot** — look for "UEFI PXE" or "Network Stack"
-2. **Set the boot order to disk, USB, then network** — a blank disk falls through to a USB stick or PXE, and an installed machine boots its disk
-3. **Set "Restore on AC Power Loss" to Power On** — so machines boot when plugged in
+1. **Enable PXE/Network Boot.** Look for "UEFI PXE" or "Network Stack".
+2. **Set the boot order to disk, USB, then network.** A blank disk falls through to a USB stick or PXE, and an installed machine boots its disk.
+3. **Set "Restore on AC Power Loss" to Power On.** Then machines boot when plugged in.
+4. **Disable Secure Boot** if the machine rejects the GRUB bootloader.
 
 A machine that already has an OS on its disk needs one network boot: the boot-menu key at power-on, or `sudo efibootmgr --bootnext <PXE entry>` from its running OS.
-4. **Disable Secure Boot** — if the machine rejects the GRUB bootloader
 
 Keys, menu paths and quirks for each tested model are in [docs/hardware.md](docs/hardware.md).
 
@@ -168,17 +167,17 @@ Components, data layout and invariants are in [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ### Security model
 
-- **Provisioning API key** stays on the operator's workstation — never deployed to targets
-- Each machine's Viam credentials are fetched via the Python SDK and staged temporarily
-- Tailscale auth key is served over the local network during install, deleted after first use
-- SSH public key is baked into the OS config
-- All secrets live in `config/` (gitignored)
+- The provisioning API key stays on the operator's workstation and is never deployed to targets.
+- Each machine's Viam credentials are fetched via the Python SDK and staged temporarily.
+- The Tailscale auth key is served over the local network during install and is deleted after first use.
+- The SSH public key is baked into the OS config.
+- All secrets are stored in `config/`, which is gitignored.
 - The provisioner API has no authentication and listens on every interface. It accepts each machine's credentials in request bodies in cleartext, so it belongs on a trusted lab network only.
 - Anyone who can reach the file server can submit an install report. The worst a forged report does is mark a machine that is still installing as failed, so it reinstalls on its next PXE boot. Machines that have completed are not affected.
 
 ## Provisioner API
 
-The contract is `openapi/provisioner.yaml`. The server listens on `API_PORT`
+The API contract is `openapi/provisioner.yaml`. The server listens on `API_PORT`
 (default 8235) and advertises itself over Bonjour as `_viam-provisioner._tcp`
 with `api=v1` in the TXT record.
 
@@ -208,7 +207,7 @@ removes its PXE guard, so rebooting it over the network installs again. If the
 machine's boot order puts the disk first, use the one-time boot menu to PXE. A
 USB-flashed machine has no PXE boot to restart it, so a progress report after
 its failure means the stick was booted again and clears the failure. `just
-status` does not show failures; read them from the API.
+status` does not show failures. Read them from the API.
 
 A boot that never reaches the installer, for example because Secure Boot
 rejected GRUB and the machine fell through to its old disk, is caught when you
@@ -218,7 +217,7 @@ fresh install instead of treating the reboot as a finished one.
 An install that goes silent is failed by the server after
 `INSTALL_TIMEOUT_MINUTES` (default 45, `0` turns it off). Any report counts as
 a sign of life. The final `done` report marks a PXE machine `installed`,
-whichever device its firmware boots next; a USB-flashed machine stays
+whichever device its firmware boots next. A USB-flashed machine stays
 `flashed`. Reports never include installer log text, since logs can echo
 commands that contain secrets. `just unguard <name>` makes the machine's next
 PXE boot start a new install, however long from now it happens, without
@@ -241,9 +240,9 @@ PyYAML and jsonschema are importable: `.venv/bin/pip install pyyaml jsonschema`.
 
 ## Environment configuration
 
-All site-specific settings live in `config/site.env` (created by `just setup-wizard`). Multiple environments can be stored in `config/environments/` and switched between.
+All site-specific settings are stored in `config/site.env` (created by `just setup-wizard`). Multiple environments can be stored in `config/environments/` and switched between.
 
-The environment holds stable settings (credentials, WiFi, SSH key, timezone). Per-run details (hostname prefix, count) are passed as arguments to `just provision`.
+The environment contains stable settings (credentials, WiFi, SSH key, timezone). Per-run details (hostname prefix, count) are passed as arguments to `just provision`.
 
 `just provision` appends: it adds `<count>` machines after the highest existing `<prefix>-N` in the queue and skips names already queued, so running it again extends the batch. Use `just clean` to start a new batch from scratch.
 
@@ -253,8 +252,8 @@ For PXE, dnsmasq answers proxy DHCP on the subnet of the serving interface. Set 
 
 Each x86 machine gets a static address on its robot-network port: `192.168.20.1/24` on the first `enp*` port other than the one cabled at install. Two settings in `site.env`, also asked by `just setup-wizard` and kept per environment in the app, change that:
 
-- `ROBOT_NET_ADDRESS`: the address with its prefix, or `none` for no robot network. Only private addresses (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) are accepted; `build-config.sh` refuses anything else.
-- `ROBOT_NET_PORT`: the interface that carries it, such as `enp3s0`. [`docs/hardware.md`](docs/hardware.md) lists each model's. The named port gets the address and every other wired port DHCP, so the installed machine comes online on whichever of them is cabled. A machine without that port fails its install before partitioning with `No port <port>`. A machine installed through the named port finishes, offline: its `done` report carries the warning `Cabled on the robot-network port <port>: move the cable to another port.`, which the queue entry and the app show. Moving the cable brings it online without a reboot.
+- `ROBOT_NET_ADDRESS` is the address with its prefix, or `none` for no robot network. Only private addresses (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) are accepted; `build-config.sh` refuses anything else.
+- `ROBOT_NET_PORT` is the interface that carries the robot network, such as `enp3s0`. [`docs/hardware.md`](docs/hardware.md) lists each model's. The named port gets the address and every other wired port DHCP, so the installed machine comes online on whichever of them is cabled. A machine without that port fails its install before partitioning with `No port <port>`. A machine installed through the named port finishes, offline: its `done` report includes the warning `Cabled on the robot-network port <port>: move the cable to another port.`, which the queue entry and the app show. Moving the cable brings it online without a reboot.
 
 Set `API_PORT` in `site.env` to move the provisioner API off 8235. Set `INSTALL_TIMEOUT_MINUTES` to change how long an install may go without any sign of life before it is marked failed (default 45, `0` turns it off).
 
@@ -289,19 +288,20 @@ Set `API_PORT` in `site.env` to move the provisioner API off 8235. Set `INSTALL_
 
 ## Target machine config
 
-Configurable via `config/site.env`:
+These settings are configurable via `config/site.env`:
 
-- Username + password (default: `viam` / `checkmate`)
-- SSH authorized key
-- WiFi SSID + password (optional)
-- Timezone (default: `America/New_York`)
-- Robot network address and port (see [Robot network](#robot-network))
-- Console font: Terminus 16x32 for readability
+- The username and password default to `viam` / `checkmate`.
+- The SSH authorized key is set here.
+- The WiFi SSID and password are optional.
+- The timezone defaults to `America/New_York`.
+- The robot network address and port are set here (see [Robot network](#robot-network)).
+- The console font is Terminus 16x32 for readability.
 
-Installed automatically:
-- apt packages from `config/environments/<env>.packages.txt` (per-env list, seeded from `config/packages.txt.example` on first use; edit before `just provision` to customize)
-- Viam CLI + viam-agent (full/agent mode)
-- Tailscale (if auth key provided)
+These are installed automatically:
+
+- The apt packages come from `config/environments/<env>.packages.txt`, a per-env list seeded from `config/packages.txt.example` on first use. Edit it before `just provision` to customize.
+- The Viam CLI and viam-agent are installed in `full` and `agent` mode.
+- Tailscale is installed if an auth key is provided.
 
 ## Tested hardware
 
@@ -311,7 +311,7 @@ Installed automatically:
 | Minisforum UM890 Pro | AMD Ryzen, dual Realtek 2.5GbE | Fully validated |
 | Advantech MIC-770 V3 | Intel Core i-series, dual Intel NICs (I219 + I210) | Fully validated |
 | ASUS NUC (BIOS GDPTL579) | Intel, dual I226-V NICs | Fully validated |
-| AAEON CEXD-INTRBL | Intel Core Ultra (Panther Lake), four I226-V NICs | Installs over PXE; port choice and a second disk are open ([#128](https://github.com/ashitaka1/viam-batch-provisioner/issues/128)) |
+| AAEON CEXD-INTRBL | Intel Core Ultra (Panther Lake), four I226-V NICs | Installs over PXE; port choice and a second disk are open ([Provision the AAEON CEXD-INTRBL (#128)](https://github.com/ashitaka1/viam-batch-provisioner/issues/128)) |
 | Raspberry Pi 5 | ARM64 | Fully validated |
 | Raspberry Pi 4 | ARM64 | Untested (should work) |
 
@@ -319,13 +319,13 @@ BIOS preparation for each x86 model: [docs/hardware.md](docs/hardware.md).
 
 ## Known issues
 
-- Intel BE200 WiFi (device 7740) on newer Meerkats has no firmware in Ubuntu 24.04, so WiFi doesn't come up ([#3](https://github.com/ashitaka1/viam-batch-provisioner/issues/3)).
-- The Minisforum UM890 Pro's BIOS ignores the boot order the installer sets; set NVMe above Network in its Fixed Boot Order by hand ([#4](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)).
+- Intel BE200 WiFi (device 7740) on newer Meerkats has no firmware in Ubuntu 24.04, so WiFi doesn't come up ([WiFi fails on newer Intel chips (BE200/7740) — missing firmware (#3)](https://github.com/ashitaka1/viam-batch-provisioner/issues/3)).
+- The Minisforum UM890 Pro's BIOS ignores the boot order the installer sets; set NVMe above Network in its Fixed Boot Order by hand ([Minisforum UM890 BIOS ignores efibootmgr boot order (#4)](https://github.com/ashitaka1/viam-batch-provisioner/issues/4)).
 - Server mode doesn't start after a restart on a Mac with FileVault on until someone unlocks the disk, by logging in at the Mac or over SSH. `sudo fdesetup authrestart` restarts once without the unlock. A Mac that hosts server mode unattended needs FileVault off.
-- The AAEON CEXD-INTRBL's BIOS also puts PXE back ahead of the disk, and its PXE ROM can take minutes to fetch GRUB. Set NVMe first and install through Save & Exit → Boot Override; a blank disk falls through to the network on its own ([#128](https://github.com/ashitaka1/viam-batch-provisioner/issues/128)).
-- PXE can't serve on a Mac running a VM on Virtualization.framework's NAT network, such as tart or colima with `--network-address`: macOS runs `bootpd` on UDP port 67 for it and restarts it on each lease. The PXE server's error names `bootpd`; stop the VM.
+- The AAEON CEXD-INTRBL's BIOS also puts PXE back ahead of the disk, and its PXE ROM can take minutes to fetch GRUB. Set NVMe first and install through Save & Exit → Boot Override. A blank disk falls through to the network on its own ([Provision the AAEON CEXD-INTRBL (#128)](https://github.com/ashitaka1/viam-batch-provisioner/issues/128)).
+- PXE can't serve on a Mac running a VM on Virtualization.framework's NAT network, such as tart or colima with `--network-address`: macOS runs `bootpd` on UDP port 67 for it and restarts it on each lease. The PXE server's error names `bootpd`. Stop the VM.
 
-Open issues: https://github.com/ashitaka1/viam-batch-provisioner/issues
+Open issues are listed at https://github.com/ashitaka1/viam-batch-provisioner/issues
 
 ## License
 
