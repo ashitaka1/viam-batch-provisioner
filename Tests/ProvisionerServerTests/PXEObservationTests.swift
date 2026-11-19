@@ -133,3 +133,17 @@ func saveFailureEmitsNothing() async throws {
     #expect(await eventSummary(provisioner).isEmpty)
     #expect(log.errors.count == 1)
 }
+
+@Test func observationsLogWhichMachineTheyAreAttributedTo() async throws {
+    let log = CapturedLog()
+    let provisioner = try Provisioner(dataDirectory: DataDirectory(try temporaryDirectory()), bindings: FixedBindings(),
+                                      logger: log.logger)
+    _ = try await provisioner.provision([request("m-1")])
+
+    await provisioner.observe(.offered(mac: mac))
+    await provisioner.observe(.offered(mac: "aa:bb:cc:00:00:99"))
+
+    let pxe = log.messages.filter { $0.hasPrefix("PXE") }
+    #expect(pxe.contains { $0.contains(mac) && $0.contains("m-1") })
+    #expect(pxe.contains { $0.contains("aa:bb:cc:00:00:99") && !$0.contains("m-1") })
+}

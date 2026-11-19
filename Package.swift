@@ -16,6 +16,7 @@ let package = Package(
         .executable(name: "provisioner-probe", targets: ["provisioner-probe"]),
         .executable(name: "provisioner-handoff", targets: ["provisioner-handoff"]),
         .executable(name: "ViamProvisioner", targets: ["ViamProvisioner"]),
+        .library(name: "ProvisionerLog", targets: ["ProvisionerLog"]),
         .library(name: "ProvisionerServer", targets: ["ProvisionerServer"]),
         .executable(name: "provisioner-server", targets: ["provisioner-server"]),
     ],
@@ -126,7 +127,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "ViamProvisioner",
-            dependencies: ["ProvisionerKit", "ViamAPI"]
+            dependencies: ["ProvisionerKit", "ProvisionerLog", "ViamAPI"]
         ),
         .testTarget(
             name: "ViamProvisionerTests",
@@ -150,9 +151,18 @@ let package = Package(
             resources: [.copy("Fixtures")]
         ),
         .target(
+            name: "ProvisionerLog",
+            dependencies: [.product(name: "Logging", package: "swift-log")]
+        ),
+        .testTarget(
+            name: "ProvisionerLogTests",
+            dependencies: ["ProvisionerLog", .product(name: "Logging", package: "swift-log")]
+        ),
+        .target(
             name: "ProvisionerServer",
             dependencies: [
                 "ProvisionerAPI",
+                "ProvisionerLog",
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "OpenAPIHummingbird", package: "swift-openapi-hummingbird"),
                 .product(name: "OpenAPIRuntime", package: "swift-openapi-runtime"),

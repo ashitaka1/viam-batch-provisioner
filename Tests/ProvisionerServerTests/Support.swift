@@ -109,13 +109,14 @@ func postReport(port: Int, _ json: String) async throws -> UInt {
     return response.status.code
 }
 
-/// A logger whose error messages the test reads back.
+/// A logger whose messages the test reads back.
 final class CapturedLog: @unchecked Sendable {
     private let lock = NSLock()
-    private var lines: [String] = []
+    private var lines: [(level: Logger.Level, message: String)] = []
 
-    var errors: [String] { lock.withLock { lines } }
-    fileprivate func append(_ line: String) { lock.withLock { lines.append(line) } }
+    var errors: [String] { lock.withLock { lines.filter { $0.level >= .error }.map(\.message) } }
+    var messages: [String] { lock.withLock { lines.map(\.message) } }
+    fileprivate func append(_ level: Logger.Level, _ line: String) { lock.withLock { lines.append((level, line)) } }
 
     var logger: Logger { Logger(label: "captured") { _ in CapturingHandler(log: self) } }
 }
@@ -131,7 +132,7 @@ private struct CapturingHandler: LogHandler {
     }
 
     func log(event: LogEvent) {
-        if event.level >= .error { log.append(event.message.description) }
+        log.append(event.level, event.message.description)
     }
 }
 

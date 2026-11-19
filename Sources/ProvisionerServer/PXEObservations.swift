@@ -67,17 +67,18 @@ extension Provisioner {
 
     private func boundMachine(_ mac: String) async -> (QueueRecord, MachineStore, MachineRecord)? {
         guard let name = await bindings.name(boundTo: mac) else {
-            logger.debug("observation from unbound MAC \(mac)")
+            logger.info("PXE activity from \(mac) matches no queued machine")
             return nil
         }
         guard let store else {
-            logger.debug("observation for \(name) dropped: queue unreadable")
+            logger.error("PXE activity from \(mac) for \(name) dropped: queue unreadable")
             return nil
         }
         guard let queued = store.queue.first(where: { $0.key == name.lowercased() }) else {
-            logger.debug("observation for \(name) dropped: not queued")
+            logger.info("PXE activity from \(mac) for \(name) dropped: \(name) isn't queued")
             return nil
         }
+        logger.info("PXE activity from \(mac) is \(queued.name)")
         return (queued, store, store.machine(queued.key) ?? MachineRecord())
     }
 }

@@ -16,6 +16,7 @@ struct ViamProvisionerApp: App {
         ImportEnvironmentCommand.runIfRequested()
         NetbootDaemonCommand.runIfRequested()
         ServerDaemonCommand.runIfRequested()
+        ServerLogCommand.runIfRequested()
         UserNotificationPoster.prepare()
         let keys = ViamKeys.app()
         _keys = State(initialValue: keys)

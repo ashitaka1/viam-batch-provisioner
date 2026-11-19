@@ -154,6 +154,7 @@ actor Provisioner {
     /// logged by the journal and the event goes nowhere.
     func emit(_ make: (Int) -> Components.Schemas.MachineEvent) {
         if let event = journal.append(make) {
+            logger.info("event \(event.eventID.map(String.init) ?? "-"): \(event.logDescription)")
             fanout.publish(event)
         }
     }

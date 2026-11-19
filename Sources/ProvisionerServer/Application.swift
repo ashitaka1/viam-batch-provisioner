@@ -17,6 +17,7 @@ func buildApplication(_ configuration: ServerConfiguration, provisioner: Provisi
                       streamOptions: StreamOptions = .init(),
                       pxeState: (@Sendable () -> Components.Schemas.ServiceState)? = nil) throws -> some ApplicationProtocol {
     let router = Router()
+    router.add(middleware: RequestLogMiddleware(logger: logger))
     router.add(middleware: ErrorMiddleware(logger: logger))
     router.add(middleware: BodyLimitMiddleware())
     router.add(middleware: StaticFiles(root: configuration.files.path, logger: logger))
