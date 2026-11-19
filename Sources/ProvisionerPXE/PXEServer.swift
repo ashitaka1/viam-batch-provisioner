@@ -104,7 +104,7 @@ public final class PXEServer: Sendable {
             for (listener, port) in [(DHCPListener.dhcp, configuration.dhcpPort), (.pxe, configuration.pxePort)] {
                 let handler = DHCPHandler(
                     listener: listener, responder: responder, offerDestination: offerDestination,
-                    leases: leases, report: { events.yield(.offered($0)) })
+                    interface: configuration.interface, leases: leases, report: { events.yield($0) })
                 bound.append(try await claiming(port) { try await bindDHCP(port: port, interface: interface, handler: handler) })
             }
             bound.append(try await claiming(configuration.tftpPort) {

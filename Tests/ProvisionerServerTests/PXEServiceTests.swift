@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import HummingbirdTesting
+import Logging
 import NIOCore
 import NIOPosix
 import ProvisionerAPI
@@ -87,6 +88,7 @@ private final class PXETestClient: Sendable {
 /// TFTP root goes. After `body`, the service must shut down within 2 s and report itself down.
 private func withPXEService(
     interface: String = "lo0", retry: Duration = .seconds(30), tftpRootIsAFile: Bool = false,
+    logger: Logger = testLogger,
     configure: @escaping @Sendable (inout PXEConfiguration) -> Void = { _ in },
     _ body: (PXEService, Provisioner, PXETestClient) async throws -> Void
 ) async throws {
@@ -104,7 +106,7 @@ private func withPXEService(
     let client = try await PXETestClient()
     let destination = client.address
     let service = PXEService(settings: PXESettings(interface: interface), tftpRoot: tftp, provisioner: provisioner,
-                             logger: testLogger, retry: retry) { configuration in
+                             logger: logger, retry: retry) { configuration in
         (configuration.dhcpPort, configuration.pxePort, configuration.tftpPort) = (0, 0, 0)
         configuration.offerDestination = destination
         configure(&configuration)
@@ -171,6 +173,23 @@ private func waitUntilUp(_ service: PXEService) async throws -> (dhcp: Int, pxe:
 
         try await poll(within: .seconds(2)) { await eventSummary(provisioner).contains("step-reached m-1 booting") }
         #expect(await eventSummary(provisioner) == ["step-reached m-1 found", "step-reached m-1 booting"])
+    }
+}
+
+/// lo0 has no broadcast address, so sending to the production destination fails with ENETUNREACH.
+@Test func failedBroadcastOfferIsLoggedAndNotObserved() async throws {
+    let log = CapturedLog()
+    try await withPXEService(logger: log.logger, configure: { $0.offerDestination = nil }) { service, provisioner, client in
+        let ports = try await waitUntilUp(service)
+        try await client.dhcp(messageType: 1, port: ports.dhcp)
+
+        try await poll(within: .seconds(2)) { !log.errors.isEmpty }
+        let error = try #require(log.errors.first, "no error logged for the failed offer")
+        for part in ["aa:bb:cc:00:00:01", "255.255.255.255", "68", "lo0", "unreachable"] {
+            #expect(error.contains(part), "\(part) missing from: \(error)")
+        }
+        #expect(!log.messages.contains { $0.hasPrefix("PXE offer to aa:bb:cc:00:00:01 arch") })
+        #expect(await eventSummary(provisioner).isEmpty)
     }
 }
 

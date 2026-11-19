@@ -6,9 +6,11 @@ import ProvisionerPXE
 import ServiceLifecycle
 
 extension PXEObservation {
-    init(_ event: PXEEvent) {
+    /// nil for an offer that failed, which tells the provisioner nothing about the machine.
+    init?(_ event: PXEEvent) {
         switch event {
         case .offered(let client): self = .offered(mac: client.mac.description)
+        case .offerFailed: return nil
         case .fileSent(let delivery): self = .fileSent(filename: delivery.filename, mac: delivery.mac?.description)
         }
     }
@@ -86,10 +88,14 @@ final class PXEService: Service, Sendable {
             switch event {
             case .offered(let client):
                 logger.info("PXE offer to \(client.mac) arch \(client.architecture)")
+            case .offerFailed(let failure):
+                logger.error("PXE offer to \(failure.mac) failed: sending to \(failure.destination) on \(failure.interface): \(failure.error)")
             case .fileSent(let delivery):
                 logger.info("TFTP sent \(delivery.filename) to \(delivery.clientAddress) mac \(delivery.mac.map(String.init(describing:)) ?? "-"), \(delivery.bytes) bytes")
             }
-            await provisioner.observe(PXEObservation(event))
+            if let observation = PXEObservation(event) {
+                await provisioner.observe(observation)
+            }
         }
     }
 }

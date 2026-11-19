@@ -30,7 +30,10 @@ public final class NetbootService: NSObject, NSXPCListenerDelegate, Sendable {
         self.acceptPeer = acceptPeer
         let peers = peers
         host = PXEHost(root: root, configure: configure) { event in
-            guard let data = try? NetbootEvent(event).encoded() else { return }
+            if case let .offerFailed(failure) = event {
+                Self.log.error("PXE offer to \(failure.mac.description) failed: sending to \(failure.destination.description) on \(failure.interface): \(failure.error)")
+            }
+            guard let data = try? NetbootEvent(event)?.encoded() else { return }
             for peer in peers.withLockUnchecked({ Array($0.values) }) {
                 (peer.remoteObjectProxyWithErrorHandler { _ in } as? any ProvisionerNetbootEventsProtocol)?.netbootEvent(data)
             }
@@ -62,12 +65,15 @@ public final class NetbootService: NSObject, NSXPCListenerDelegate, Sendable {
 }
 
 extension NetbootEvent {
-    init(_ event: PXEEvent) {
+    /// nil for a failed offer, which the daemon logs instead of sending to peers.
+    init?(_ event: PXEEvent) {
         switch event {
         case let .offered(client):
             self = .offered(
                 mac: client.mac.description, architecture: client.architecture,
                 uuid: client.uuid.map { $0.map { String(format: "%02x", $0) }.joined() })
+        case .offerFailed:
+            return nil
         case let .fileSent(delivery):
             self = .fileSent(
                 filename: delivery.filename, clientAddress: delivery.clientAddress,

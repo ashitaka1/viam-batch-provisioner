@@ -18,6 +18,7 @@ private final class Harness: Sendable {
     let server: PXEServer
     let reported = Inbox<PXEClient>()
     let delivered = Inbox<TFTPDelivery>()
+    let failed = Inbox<PXEOfferFailure>()
     /// Receives one element when the `events` stream finishes.
     let eventsFinished = Inbox<Void>()
     let ports: (dhcp: Int, pxe: Int, tftp: Int)
@@ -25,7 +26,9 @@ private final class Harness: Sendable {
     let bootloader = randomData(4096)
 
     /// `readEvents: false` leaves the `events` stream unread, for tests that inspect its buffer.
-    init(tftpTimeout: TimeAmount, maxTransfers: Int = 64, eventBufferLimit: Int = 256, readEvents: Bool = true) async throws {
+    /// `broadcastOffers: true` keeps the production offer destination, 255.255.255.255:68.
+    init(tftpTimeout: TimeAmount, maxTransfers: Int = 64, eventBufferLimit: Int = 256, readEvents: Bool = true,
+         broadcastOffers: Bool = false) async throws {
         base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         root = base.appendingPathComponent("root")
         try FileManager.default.createDirectory(at: root.appendingPathComponent("grub"), withIntermediateDirectories: true)
@@ -38,7 +41,7 @@ private final class Harness: Sendable {
         configuration.dhcpPort = 0
         configuration.pxePort = 0
         configuration.tftpPort = 0
-        configuration.offerDestination = client.address
+        if !broadcastOffers { configuration.offerDestination = client.address }
         configuration.tftpTimeout = tftpTimeout
         configuration.maxTransfers = maxTransfers
         configuration.eventBufferLimit = eventBufferLimit
@@ -49,6 +52,7 @@ private final class Harness: Sendable {
 
         let reported = reported
         let delivered = delivered
+        let failed = failed
         let eventsFinished = eventsFinished
         let events = server.events
         Task {
@@ -56,6 +60,7 @@ private final class Harness: Sendable {
                 switch event {
                 case let .offered(pxeClient): reported.push(pxeClient)
                 case let .fileSent(delivery): delivered.push(delivery)
+                case let .offerFailed(failure): failed.push(failure)
                 }
             }
             eventsFinished.push(())
@@ -75,10 +80,12 @@ private func withHarness(
     maxTransfers: Int = 64,
     eventBufferLimit: Int = 256,
     readEvents: Bool = true,
+    broadcastOffers: Bool = false,
     _ body: (Harness) async throws -> Void
 ) async throws {
     let harness = try await Harness(
-        tftpTimeout: tftpTimeout, maxTransfers: maxTransfers, eventBufferLimit: eventBufferLimit, readEvents: readEvents)
+        tftpTimeout: tftpTimeout, maxTransfers: maxTransfers, eventBufferLimit: eventBufferLimit, readEvents: readEvents,
+        broadcastOffers: broadcastOffers)
     do {
         try await body(harness)
     } catch {
@@ -134,6 +141,21 @@ private func readRequest(_ filename: String, options: [TFTPOption] = []) -> Byte
             #expect(offer.file == "grubx64.efi")
             #expect(offer.siaddr == 0x7F00_0001)
             #expect(await harness.reported.next() == PXEClient(mac: MACAddress(bytes: fixtureMAC)!, architecture: 7, uuid: fixtureUUID))
+        }
+    }
+
+    /// lo0 has no broadcast address, so the kernel refuses the production destination with
+    /// ENETUNREACH, which stands in for a send that fails on a real interface.
+    @Test func reportsAFailedBroadcastOfferInsteadOfTheClient() async throws {
+        try await withHarness(broadcastOffers: true) { harness in
+            try await harness.client.send(pxeDiscover().encoded(), to: harness.ports.dhcp)
+
+            let failure = try #require(await harness.failed.next(), "no offerFailed event")
+            #expect(failure.mac == MACAddress(bytes: fixtureMAC))
+            #expect(failure.destination == (try SocketAddress(ipAddress: "255.255.255.255", port: 68)))
+            #expect(failure.interface == "lo0")
+            #expect(failure.error.contains("unreachable"), "error was \(failure.error)")
+            #expect(await harness.reported.next(timeout: .milliseconds(200)) == nil, "the failed offer was reported as sent")
         }
     }
 

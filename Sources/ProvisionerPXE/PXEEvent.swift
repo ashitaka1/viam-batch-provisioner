@@ -1,9 +1,30 @@
+import NIOCore
+
 /// What a `PXEServer` did for a client.
 public enum PXEEvent: Hashable, Sendable {
     /// The server answered a PXE discover with a boot offer.
     case offered(PXEClient)
+    /// The server built an offer for a PXE discover, but the socket refused to send it.
+    case offerFailed(PXEOfferFailure)
     /// A TFTP read finished: the client acknowledged every block.
     case fileSent(TFTPDelivery)
+}
+
+/// An offer whose write failed, with what the server knows about it.
+public struct PXEOfferFailure: Hashable, Sendable {
+    public let mac: MACAddress
+    public let destination: SocketAddress
+    /// BSD name of the serving interface.
+    public let interface: String
+    /// The write's error, as the socket reported it.
+    public let error: String
+
+    public init(mac: MACAddress, destination: SocketAddress, interface: String, error: String) {
+        self.mac = mac
+        self.destination = destination
+        self.interface = interface
+        self.error = error
+    }
 }
 
 /// A file a client read over TFTP.

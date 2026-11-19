@@ -70,6 +70,8 @@ for await event in server.events {
     case let .offered(client):
         let uuid = client.uuid.map { $0.map { String(format: "%02x", $0) }.joined() } ?? "-"
         print("pxe \(client.mac) arch \(client.architecture) uuid \(uuid)")
+    case let .offerFailed(failure):
+        print("pxe offer to \(failure.mac) failed: sending to \(failure.destination) on \(failure.interface): \(failure.error)")
     case let .fileSent(delivery):
         print("tftp \(delivery.filename) to \(delivery.clientAddress) mac \(delivery.mac.map(String.init(describing:)) ?? "-") \(delivery.bytes) bytes")
     }
