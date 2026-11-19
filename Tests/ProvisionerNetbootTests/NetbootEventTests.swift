@@ -1,4 +1,5 @@
 import Foundation
+import NIOCore
 import ProvisionerNetbootXPC
 import ProvisionerPXE
 import Testing
@@ -11,6 +12,12 @@ import Testing
         let event = try #require(NetbootEvent(PXEEvent.offered(PXEClient(mac: mac, architecture: 7, uuid: [0xAB, 0x01]))))
         #expect(event == .offered(mac: "58:47:ca:0a:0b:0c", architecture: 7, uuid: "ab01"))
         #expect(try NetbootEvent(encoded: event.encoded()) == event)
+    }
+
+    @Test func failedOfferIsNotSentToPeers() throws {
+        let failure = PXEOfferFailure(mac: mac, destination: try SocketAddress(ipAddress: "255.255.255.255", port: 68),
+                                      interface: "en0", error: "unreachable")
+        #expect(NetbootEvent(PXEEvent.offerFailed(failure)) == nil)
     }
 
     @Test func fileSentCarriesAddressAndOptionalMAC() throws {
