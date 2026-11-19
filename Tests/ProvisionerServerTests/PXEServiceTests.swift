@@ -189,7 +189,14 @@ private func waitUntilUp(_ service: PXEService) async throws -> (dhcp: Int, pxe:
             #expect(error.contains(part), "\(part) missing from: \(error)")
         }
         #expect(!log.messages.contains { $0.hasPrefix("PXE offer to aa:bb:cc:00:00:01 arch") })
-        #expect(await eventSummary(provisioner).isEmpty)
+        // Events reach the provisioner in order, so once the boot file is observed the failed offer has been handled.
+        try await client.dhcp(messageType: 3, port: ports.dhcp)
+        guard case .data = try await client.read("hwe-initrd", port: ports.tftp) else {
+            Issue.record("no data for hwe-initrd")
+            return
+        }
+        try await poll(within: .seconds(2)) { await eventSummary(provisioner).contains("step-reached m-1 booting") }
+        #expect(!(await eventSummary(provisioner)).contains("step-reached m-1 found"), "the failed offer was observed")
     }
 }
 
