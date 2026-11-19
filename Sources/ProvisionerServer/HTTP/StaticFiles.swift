@@ -2,8 +2,8 @@ import Foundation
 import Hummingbird
 import Logging
 
-/// The file tree targets fetch, at `/`. Paths under `/api/`, `/pxe/` and
-/// `/machines/` belong to the router and are never looked up on disk.
+/// The file tree targets fetch, at `/`. Paths under `/api/`, `/pxe/`,
+/// `/machines/` and `/scripts/` belong to the router and are never looked up on disk.
 /// `/config/` and `/autoinstall/` are where the Python tooling stages the shared
 /// Tailscale key and a shared user-data holding the WiFi password; they get 404.
 struct StaticFiles<Context: RequestContext>: RouterMiddleware {
@@ -16,7 +16,8 @@ struct StaticFiles<Context: RequestContext>: RouterMiddleware {
     func handle(_ request: Request, context: Context,
                 next: (Request, Context) async throws -> Response) async throws -> Response {
         let path = request.uri.path
-        if path.hasPrefix("/api/") || path.hasPrefix("/pxe/") || path.hasPrefix("/machines/") {
+        if path.hasPrefix("/api/") || path.hasPrefix("/pxe/") || path.hasPrefix("/machines/")
+            || path.hasPrefix("/scripts/") {
             return try await next(request, context)
         }
         if let top = topDirectory(path), Self.neverOnDisk.contains(top) {
@@ -25,7 +26,7 @@ struct StaticFiles<Context: RequestContext>: RouterMiddleware {
         return try await files.handle(request, context: context, next: next)
     }
 
-    private static var neverOnDisk: Set<String> { ["api", "pxe", "machines", "config", "autoinstall"] }
+    private static var neverOnDisk: Set<String> { ["api", "pxe", "machines", "scripts", "config", "autoinstall"] }
 }
 
 /// The first directory `path` names once it is read the way a file lookup reads

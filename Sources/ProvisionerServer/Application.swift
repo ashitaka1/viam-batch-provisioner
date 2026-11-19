@@ -26,6 +26,7 @@ func buildApplication(_ configuration: ServerConfiguration, provisioner: Provisi
     try handler.registerHandlers(on: router, serverURL: URL(string: "/")!)
     addImageRoute(to: router, provisioner: provisioner)
     addSeedRoute(to: router, provisioner: provisioner)
+    addScriptsRoute(to: router)
     return Application(
         router: router,
         configuration: .init(address: .hostname(configuration.bind, port: configuration.port),

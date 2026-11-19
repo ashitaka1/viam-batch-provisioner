@@ -7,7 +7,7 @@ import Testing
 
 private let isoBytes = Data((0..<1_048_576).map { UInt8(truncatingIfNeeded: $0 &* 31) })
 
-/// A files root holding a 1 MiB ISO, the report script, and a decoy under `api/`.
+/// A files root holding a 1 MiB ISO, a text file, and decoys under `api/` and `scripts/`.
 private func filesRoot() throws -> URL {
     let root = try temporaryDirectory().appending(path: "files")
     let fm = FileManager.default
@@ -15,7 +15,8 @@ private func filesRoot() throws -> URL {
     try fm.createDirectory(at: root.appending(path: "scripts"), withIntermediateDirectories: true)
     try fm.createDirectory(at: root.appending(path: "api/v1"), withIntermediateDirectories: true)
     try isoBytes.write(to: root.appending(path: "ubuntu/test.iso"))
-    try Data("#!/bin/sh\necho report\n".utf8).write(to: root.appending(path: "scripts/install-report.sh"))
+    try Data("hello\n".utf8).write(to: root.appending(path: "ubuntu/readme.txt"))
+    try Data("decoy".utf8).write(to: root.appending(path: "scripts/install-report.sh"))
     try Data("decoy".utf8).write(to: root.appending(path: "api/v1/queue"))
     return root
 }
@@ -30,9 +31,9 @@ func makeApp(files: URL? = nil) async throws -> some ApplicationProtocol {
 
 @Test func servesFile() async throws {
     try await makeApp().test(.router) { client in
-        let response = try await client.execute(uri: "/scripts/install-report.sh", method: .get)
+        let response = try await client.execute(uri: "/ubuntu/readme.txt", method: .get)
         #expect(response.status == .ok)
-        #expect(String(buffer: response.body) == "#!/bin/sh\necho report\n")
+        #expect(String(buffer: response.body) == "hello\n")
     }
 }
 
@@ -96,5 +97,19 @@ func makeApp(files: URL? = nil) async throws -> some ApplicationProtocol {
             let response = try await client.execute(uri: path, method: .get)
             #expect(String(buffer: response.body) != "secret", "\(path) served a shared secret")
         }
+    }
+}
+
+private let repo = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+
+@Test func servesTheInstallerScriptsWhateverFilesHolds() async throws {
+    try await makeApp().test(.router) { client in
+        for name in ["install-report.sh", "post-install.sh"] {
+            let response = try await client.execute(uri: "/scripts/\(name)", method: .get)
+            #expect(response.status == .ok, "\(name)")
+            let script = try String(contentsOf: repo.appending(path: "http-server/scripts/\(name)"), encoding: .utf8)
+            #expect(String(buffer: response.body) == script, "\(name)")
+        }
+        #expect(try await client.execute(uri: "/scripts/other.sh", method: .get).status == .notFound)
     }
 }
